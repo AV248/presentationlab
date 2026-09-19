@@ -1,9 +1,9 @@
 {
   "name": "presentation-buddy",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.2.0",
   "type": "module",
-  "description": "Presentation Buddy — write, rehearse and deliver presentations with confidence.",
+  "description": "Presentation Buddy 2.2 \u2014 read, write, coach and rehearse speeches with real Firebase auth, real Firestore data and a hand-set design.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "clsx": "^2.1.1",
+    "firebase": "^12.19.0",
     "lucide-react": "^1.47.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

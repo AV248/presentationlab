@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   CheckCircle2,
+  Feather,
+  Upload,
   CircleAlert,
   Copy,
   Download,
@@ -20,6 +22,11 @@ import { Markdown } from '../components/Markdown';
 import { LIBRARY, type Speech } from '../data/speeches';
 import { useLibrary, TEMPLATE_BODY } from '../store/library';
 import { useUi } from '../store/ui';
+import { useAuth } from '../store/auth';
+import { useCloud } from '../store/cloud';
+import { publishSpeech } from '../services/data';
+import { FIRST_LINES, pick } from '../lib/heart';
+import { useGate } from '../components/SignIn';
 import { analyse, formatDate } from '../lib/text';
 import { copyText, downloadFile, supportsDictation } from '../lib/platform';
 import { useSpeeches } from '../hooks/useCollection';
@@ -231,6 +238,10 @@ function Editor({
   const updateSpeech = useLibrary((s) => s.updateSpeech);
   const deleteSpeech = useLibrary((s) => s.deleteSpeech);
   const setStatus = useLibrary((s) => s.setStatus);
+  const user = useAuth((s) => s.user);
+  const connect = useCloud((s) => s.connect);
+  const gate = useGate();
+  const [publishing, setPublishing] = useState(false);
 
   const [draft, setDraft] = useState({
     title: initial.title,
@@ -351,10 +362,47 @@ function Editor({
           className="pb-btn pb-btn-sm"
           onClick={() => {
             setStatus(initial.id, initial.status === 'published' ? 'draft' : 'published');
-            toast(initial.status === 'published' ? 'Moved back to drafts' : 'Published to your library', 'success');
+            toast(
+              initial.status === 'published'
+                ? 'Moved back to drafts on this device'
+                : 'Marked ready on this device',
+              'success',
+            );
           }}
         >
-          <Save size={14} /> {initial.status === 'published' ? 'Unpublish' : 'Publish'}
+          <Save size={14} /> {initial.status === 'published' ? 'Back to draft' : 'Mark ready'}
+        </button>
+        <button
+          type="button"
+          className="pb-btn pb-btn-sm pb-btn-primary"
+          disabled={publishing}
+          onClick={() => {
+            gate(() => {
+              setPublishing(true);
+              publishSpeech(
+                {
+                  title: draft.title,
+                  content: draft.content,
+                  preview: draft.preview,
+                  category: draft.category,
+                  occasion: draft.occasion,
+                  tags: draft.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+                  ad: false,
+                },
+                user!.uid,
+                user!.displayName ?? user!.email ?? 'Anonymous',
+              )
+                .then(({ id: cloudId }) => {
+                  updateSpeech(initial.id, { cloudId, status: 'published' });
+                  toast('Published to the shared library', 'success');
+                  void connect(true);
+                })
+                .catch((error: unknown) => toast((error as Error)?.message ?? 'Publish failed', 'error'))
+                .finally(() => setPublishing(false));
+            }, 'Sign in to publish — we need to know whose words these are.');
+          }}
+        >
+          {publishing ? <span className="pb-spinner" /> : <Upload size={14} />} Publish
         </button>
       </div>
 
@@ -483,6 +531,18 @@ function Editor({
               </button>
               <button type="button" className="pb-btn pb-btn-sm pb-btn-ghost" onClick={() => insertMarkdown('\n- ')}>
                 Bullet
+              </button>
+              <button
+                type="button"
+                className="pb-btn pb-btn-sm pb-btn-ghost"
+                onClick={() => {
+                  const line = pick(FIRST_LINES, draft.content.split('\n')[0]);
+                  patch('content', `${line}\n\n${draft.content.replace(/^\s+/, '')}`);
+                  toast('A first line to argue with', 'success');
+                }}
+                title="Drop in an opening line to get you moving"
+              >
+                <Feather size={13} /> First line
               </button>
               <button
                 type="button"

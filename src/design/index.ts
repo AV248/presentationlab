@@ -29,32 +29,32 @@ export interface AxisMeta<T> {
 export const AXES: AxisMeta<{ id: string; name: string; note: string }>[] = [
   {
     id: 'color',
-    label: 'Colour',
-    blurb: 'The palette that sets the mood — surfaces, ink and accent triad.',
+    label: 'Paper & Ink',
+    blurb: 'The stock everything is printed on, and the ink used to print it.',
     options: COLOR_THEMES,
   },
   {
     id: 'motion',
-    label: 'Motion',
-    blurb: 'How things move: entrance style, easing, timing and ambient life.',
+    label: 'Movement',
+    blurb: 'How things arrive and settle: entrance, easing, timing and ambient life.',
     options: MOTION_THEMES,
   },
   {
     id: 'layout',
-    label: 'Layout',
-    blurb: 'How the collection is composed — grid, rail, timeline, split view…',
+    label: 'Arrangement',
+    blurb: 'How the shelf is arranged — reading room, card catalogue, broadside…',
     options: LAYOUT_THEMES,
   },
   {
     id: 'ui',
-    label: 'Interface',
-    blurb: 'How surfaces are built: glass, clay, paper, blueprint, holographic…',
+    label: 'Material',
+    blurb: 'What the pages are made of: paper, letterpress, linen, slate, tape…',
     options: UI_THEMES,
   },
   {
     id: 'ux',
-    label: 'Type & Reading',
-    blurb: 'Typography pairing, scale, measure, leading and reading rhythm.',
+    label: 'Typography',
+    blurb: 'Type pairing, scale, measure, leading and paragraph rhythm.',
     options: UX_THEMES,
   },
 ];

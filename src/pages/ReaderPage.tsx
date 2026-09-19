@@ -10,29 +10,29 @@ import {
   Focus,
   Gauge,
   Headphones,
-  Heart,
   Minus,
   Plus,
   Printer,
+  Quote,
   Ruler,
-  Share2,
   Copy,
   PenLine,
   Mic2,
+  StickyNote,
 } from 'lucide-react';
 import { Markdown } from '../components/Markdown';
+import { ReactionBar } from '../components/ReactionBar';
+import { AdGate } from '../components/AdGate';
 import { useSpeech, useSpeeches } from '../hooks/useCollection';
 import { useLibrary } from '../store/library';
 import { useSettings } from '../store/settings';
 import { useUi } from '../store/ui';
-import { bumpCloudViews } from '../services/cloud';
+import { useCloud } from '../store/cloud';
+import { registerView } from '../services/data';
+import { fetchWebSpeech as fetchWebText } from '../services/webSources';
 import { analyse, formatCount, formatDate, readingMinutes } from '../lib/text';
-import {
-  copyText,
-  downloadFile,
-  shareOrCopy,
-  supportsSpeechSynthesis,
-} from '../lib/platform';
+import { copyText, downloadFile, supportsSpeechSynthesis } from '../lib/platform';
+import { useGate } from '../components/SignIn';
 
 export function ReaderPage() {
   const { id } = useParams<{ id: string }>();
@@ -40,13 +40,18 @@ export function ReaderPage() {
   const item = useSpeech(id);
   const items = useSpeeches();
   const toast = useUi((s) => s.toast);
+  const gate = useGate();
 
-  const registerView = useLibrary((s) => s.registerView);
   const pushHistory = useLibrary((s) => s.pushHistory);
   const setProgress = useLibrary((s) => s.setProgress);
   const toggleBookmark = useLibrary((s) => s.toggleBookmark);
-  const toggleLike = useLibrary((s) => s.toggleLike);
   const duplicateSpeech = useLibrary((s) => s.duplicateSpeech);
+  const addMarginNote = useLibrary((s) => s.addMarginNote);
+  const removeMarginNote = useLibrary((s) => s.removeMarginNote);
+  const marginNotes = useLibrary((s) => s.marginNotes);
+  const saveLine = useLibrary((s) => s.saveLine);
+  const updateShelfItem = useLibrary((s) => s.updateShelfItem);
+  const connect = useCloud((s) => s.connect);
 
   const reader = useSettings((s) => s.reader);
   const patchReader = useSettings((s) => s.patchReader);
@@ -56,17 +61,38 @@ export function ReaderPage() {
   const [speaking, setSpeaking] = useState(false);
   const [rate, setRate] = useState(1);
   const [progress, setLocalProgress] = useState(0);
+  const [adDone, setAdDone] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [showNotes, setShowNotes] = useState(false);
 
   const stats = useMemo(() => analyse(item?.content ?? ''), [item?.content]);
+  const speechId = item?.id;
 
   useEffect(() => {
     if (!item) return;
-    registerView(item.id);
     pushHistory(item.id);
     setLastSpeech(item.id);
-    if (item.source === 'cloud') void bumpCloudViews(item.id);
+    setAdDone(false);
+    // A real view, counted once per open on the shared document.
+    if (item.source === 'cloud') void registerView(item.id);
+    // Web speeches arrive with an intro; pull the full text when opened.
+    if (item.source === 'web' && item.content.length < 1500) {
+      void fetchWebText({
+        id: item.id,
+        title: item.title,
+        author: item.author,
+        preview: item.preview,
+        content: item.content,
+        sourceUrl: item.sourceUrl ?? '',
+        source: 'Wikisource',
+        licence: item.licence ?? 'Public domain',
+        fetchedAt: new Date().toISOString(),
+      }).then((full: { content: string }) => {
+        if (full.content && full.content !== item.content) updateShelfItem(item.id, full);
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item?.id]);
+  }, [speechId]);
 
   useEffect(() => {
     return () => {
@@ -74,7 +100,6 @@ export function ReaderPage() {
     };
   }, []);
 
-  const speechId = item?.id;
   const onScroll = useCallback(() => {
     const node = articleRef.current;
     if (!node || !speechId) return;
@@ -101,7 +126,7 @@ export function ReaderPage() {
       <div className="pb-panel" style={{ padding: 40, textAlign: 'center' }}>
         <h2>We couldn’t find that speech</h2>
         <p className="pb-muted" style={{ margin: '10px 0 18px' }}>
-          It may have been deleted from this device.
+          It may have been removed, or the link may be from another device.
         </p>
         <Link to="/" className="pb-btn pb-btn-primary">
           Back to the library
@@ -113,9 +138,10 @@ export function ReaderPage() {
   const index = items.findIndex((i) => i.id === item.id);
   const previous = index > 0 ? items[index - 1] : null;
   const next = index >= 0 && index < items.length - 1 ? items[index + 1] : null;
-  const related = items
-    .filter((i) => i.id !== item.id && i.category === item.category)
-    .slice(0, 4);
+  const related = items.filter((i) => i.id !== item.id && i.category === item.category).slice(0, 4);
+  const notes = marginNotes.filter((note) => note.speechId === item.id);
+
+  const adVisible = item.ad && !adDone;
 
   const toggleSpeech = () => {
     if (!supportsSpeechSynthesis()) {
@@ -127,13 +153,16 @@ export function ReaderPage() {
       setSpeaking(false);
       return;
     }
-    const utterance = new SpeechSynthesisUtterance(item.content.replace(/[#>*`-]/g, ' '));
-    utterance.rate = rate;
-    utterance.onend = () => setSpeaking(false);
-    utterance.onerror = () => setSpeaking(false);
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-    setSpeaking(true);
+    const speak = () => {
+      const utterance = new SpeechSynthesisUtterance(item.content.replace(/[#>*`-]/g, ' '));
+      utterance.rate = rate;
+      utterance.onend = () => setSpeaking(false);
+      utterance.onerror = () => setSpeaking(false);
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+      setSpeaking(true);
+    };
+    speak();
   };
 
   const exportFile = (type: 'md' | 'txt') => {
@@ -145,6 +174,24 @@ export function ReaderPage() {
     toast(`Downloaded ${type.toUpperCase()}`, 'success');
   };
 
+  const keepLine = () => {
+    const selection = window.getSelection()?.toString().trim();
+    if (!selection) {
+      toast('Select a sentence with your finger or cursor first.', 'info');
+      return;
+    }
+    gate(() => {
+      saveLine({
+        text: selection.slice(0, 400),
+        speechId: item.id,
+        speechTitle: item.title,
+        author: item.author,
+      });
+      toast('Kept in your commonplace book', 'success');
+      window.getSelection()?.removeAllRanges();
+    }, 'Sign in to keep lines you want to remember.');
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div
@@ -152,14 +199,16 @@ export function ReaderPage() {
           position: 'fixed',
           top: 0,
           left: 0,
-          height: 3,
+          height: 2,
           width: `${Math.round(progress * 100)}%`,
-          background: 'var(--grad-brand)',
+          background: 'var(--c-accent)',
           zIndex: 60,
           transition: 'width 120ms linear',
         }}
         aria-hidden="true"
       />
+
+      {adVisible && <AdGate speechId={item.id} onFinish={() => setAdDone(true)} />}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <button type="button" className="pb-btn pb-btn-sm pb-btn-ghost" onClick={() => navigate(-1)}>
@@ -172,7 +221,7 @@ export function ReaderPage() {
             className="pb-btn pb-btn-sm pb-btn-ghost"
             onClick={() => navigate(`/read/${encodeURIComponent(previous.id)}`)}
           >
-            <ArrowLeft size={14} /> {previous.title.slice(0, 22)}
+            <ArrowLeft size={14} /> {previous.title.slice(0, 20)}
           </button>
         )}
         {next && (
@@ -181,30 +230,31 @@ export function ReaderPage() {
             className="pb-btn pb-btn-sm pb-btn-ghost"
             onClick={() => navigate(`/read/${encodeURIComponent(next.id)}`)}
           >
-            {next.title.slice(0, 22)} <ArrowRight size={14} />
+            {next.title.slice(0, 20)} <ArrowRight size={14} />
           </button>
         )}
       </div>
 
       <header className="pb-panel anim-enter" style={{ padding: 'clamp(18px, 3vw, 30px)' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
           <div style={{ flex: '1 1 420px', minWidth: 0 }}>
             <span className="pb-eyebrow">
               {item.category} · {item.occasion}
             </span>
             <h1 style={{ fontSize: 'clamp(1.5rem, 3.4vw, 2.2rem)', margin: '8px 0 10px' }}>{item.title}</h1>
-            <p className="pb-soft" style={{ fontSize: '0.95rem' }}>{item.preview}</p>
-            <div
-              className="pb-muted"
-              style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: '0.8rem', marginTop: 12 }}
-            >
+            <p className="pb-soft" style={{ fontSize: '0.98rem', lineHeight: 1.7 }}>{item.preview}</p>
+
+            <div className="pb-muted" style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: '0.8rem', marginTop: 12 }}>
               <span>{item.author}</span>
               <span>{formatDate(item.createdAt)}</span>
               <span>{stats.minutes} min read</span>
               <span>{formatCount(item.words)} words</span>
-              <span>{formatCount(item.views)} views</span>
-              <span>Level: {item.level}</span>
-              {item.kind === 'template' && <span className="pb-badge">Template</span>}
+              {item.views !== null && <span>Read {formatCount(item.views)} times</span>}
+              {item.source === 'web' && item.sourceUrl && (
+                <a href={item.sourceUrl} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--c-accent)' }}>
+                  Original on {item.source} ↗
+                </a>
+              )}
             </div>
           </div>
 
@@ -221,9 +271,9 @@ export function ReaderPage() {
                 type="button"
                 className="pb-btn pb-btn-sm"
                 onClick={() => {
-                  const newId = duplicateSpeech(item.id);
+                  const newId = duplicateSpeech(item.id, item);
                   if (newId) {
-                    toast('Copied into your studio', 'success');
+                    toast('Copied into your drafts', 'success');
                     navigate(`/studio/${newId}`);
                   }
                 }}
@@ -231,22 +281,14 @@ export function ReaderPage() {
                 <PenLine size={15} /> Remix
               </button>
             </div>
+
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="pb-icon-btn"
-                onClick={() => toggleLike(item.id)}
-                aria-pressed={item.likedByMe}
-                title="Like"
-              >
-                <Heart size={16} fill={item.likedByMe ? 'var(--c-bad)' : 'none'} color={item.likedByMe ? 'var(--c-bad)' : undefined} />
-              </button>
               <button
                 type="button"
                 className="pb-icon-btn"
                 onClick={() => toggleBookmark(item.id)}
                 aria-pressed={item.bookmarked}
-                title="Bookmark"
+                title="Keep on your desk"
               >
                 <BookMarked size={16} fill={item.bookmarked ? 'var(--c-accent)' : 'none'} />
               </button>
@@ -255,9 +297,26 @@ export function ReaderPage() {
                 className="pb-icon-btn"
                 onClick={toggleSpeech}
                 aria-pressed={speaking}
-                title={speaking ? 'Stop listening' : 'Listen with text-to-speech'}
+                title={speaking ? 'Stop listening' : 'Listen'}
               >
                 <Headphones size={16} color={speaking ? 'var(--c-accent)' : undefined} />
+              </button>
+              <button
+                type="button"
+                className="pb-icon-btn"
+                onClick={keepLine}
+                title="Save the sentence you have selected"
+              >
+                <Quote size={16} />
+              </button>
+              <button
+                type="button"
+                className="pb-icon-btn"
+                onClick={() => setShowNotes((v) => !v)}
+                aria-pressed={showNotes}
+                title="Notes in the margin"
+              >
+                <StickyNote size={16} color={showNotes ? 'var(--c-accent)' : undefined} />
               </button>
               <button
                 type="button"
@@ -270,32 +329,14 @@ export function ReaderPage() {
               >
                 <Copy size={16} />
               </button>
-              <button
-                type="button"
-                className="pb-icon-btn"
-                onClick={() => exportFile('md')}
-                title="Download Markdown"
-              >
+              <button type="button" className="pb-icon-btn" onClick={() => exportFile('md')} title="Download">
                 <Download size={16} />
               </button>
-              <button type="button" className="pb-icon-btn" onClick={() => window.print()} title="Print / save as PDF">
+              <button type="button" className="pb-icon-btn" onClick={() => window.print()} title="Print / PDF">
                 <Printer size={16} />
               </button>
-              <button
-                type="button"
-                className="pb-icon-btn"
-                onClick={async () => {
-                  const result = await shareOrCopy(item.title, item.preview);
-                  toast(
-                    result === 'shared' ? 'Shared' : result === 'copied' ? 'Link copied' : 'Share failed',
-                    result === 'failed' ? 'error' : 'success',
-                  );
-                }}
-                title="Share"
-              >
-                <Share2 size={16} />
-              </button>
             </div>
+
             {speaking && (
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.76rem' }}>
                 <Gauge size={14} />
@@ -308,13 +349,11 @@ export function ReaderPage() {
                   onChange={(event) => {
                     const value = Number(event.target.value);
                     setRate(value);
-                    if (speaking) {
-                      window.speechSynthesis.cancel();
-                      const utterance = new SpeechSynthesisUtterance(item.content.replace(/[#>*`-]/g, ' '));
-                      utterance.rate = value;
-                      utterance.onend = () => setSpeaking(false);
-                      window.speechSynthesis.speak(utterance);
-                    }
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(item.content.replace(/[#>*`-]/g, ' '));
+                    utterance.rate = value;
+                    utterance.onend = () => setSpeaking(false);
+                    window.speechSynthesis.speak(utterance);
                   }}
                   style={{ flex: 1, accentColor: 'var(--c-accent)' }}
                   aria-label="Voice speed"
@@ -325,18 +364,78 @@ export function ReaderPage() {
           </div>
         </div>
 
-        {item.tags.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 14 }}>
-            {item.tags.map((tag) => (
-              <span key={tag} className="pb-chip">
-                #{tag}
-              </span>
-            ))}
-          </div>
-        )}
+        <div
+          style={{
+            display: 'flex',
+            gap: 10,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            marginTop: 16,
+            paddingTop: 14,
+            borderTop: '1px solid var(--c-line-soft)',
+          }}
+        >
+          <ReactionBar item={item} onCountsChange={() => void connect(true)} />
+          {item.ad && (
+            <span className="pb-chip" title="This speech is preceded by a short sponsor slot">
+              Sponsor-supported
+            </span>
+          )}
+          {item.tags.slice(0, 6).map((tag) => (
+            <span key={tag} className="pb-chip" style={{ fontSize: '0.72rem' }}>
+              #{tag}
+            </span>
+          ))}
+        </div>
       </header>
 
-      {/* Reading controls */}
+      {showNotes && (
+        <section className="pb-panel anim-enter" style={{ padding: '14px 18px' }}>
+          <span className="pb-eyebrow">In the margin</span>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!noteDraft.trim()) return;
+              gate(() => {
+                addMarginNote({ speechId: item.id, text: noteDraft.trim() });
+                setNoteDraft('');
+                toast('Note saved to this speech', 'success');
+              }, 'Sign in to leave notes in the margin.');
+            }}
+            style={{ display: 'flex', gap: 8, marginTop: 10 }}
+          >
+            <input
+              className="pb-input"
+              placeholder="What are you thinking as you read this?"
+              value={noteDraft}
+              onChange={(event) => setNoteDraft(event.target.value)}
+              aria-label="Margin note"
+              maxLength={400}
+            />
+            <button type="submit" className="pb-btn pb-btn-sm">
+              Add
+            </button>
+          </form>
+          {notes.length > 0 && (
+            <ul style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+              {notes.map((note) => (
+                <li key={note.id} className="pb-margin-note" style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <span style={{ flex: 1 }}>{note.text}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeMarginNote(note.id)}
+                    className="pb-muted"
+                    style={{ fontSize: '0.72rem' }}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
       <section
         className="pb-panel"
         style={{ padding: '10px 14px', display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}
@@ -434,7 +533,22 @@ export function ReaderPage() {
               } as CSSProperties
             }
           />
-          <div style={{ display: 'flex', gap: 8, marginTop: 32, flexWrap: 'wrap' }}>
+
+          {item.source === 'web' && (
+            <p className="pb-muted" style={{ fontSize: '0.78rem', marginTop: 24, lineHeight: 1.7 }}>
+              {item.licence}. Text served from {item.source} and reproduced here so you can rehearse
+              with it.{' '}
+              <a href={item.sourceUrl} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--c-accent)' }}>
+                See the original page ↗
+              </a>
+            </p>
+          )}
+
+          <div className="pb-rule" style={{ marginTop: 30 }}>
+            <span>❧</span>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 22, flexWrap: 'wrap' }}>
             <button type="button" className="pb-btn pb-btn-sm" onClick={() => exportFile('txt')}>
               <Download size={14} /> .txt
             </button>
@@ -451,6 +565,13 @@ export function ReaderPage() {
             >
               <CheckCircle2 size={14} /> Mark finished
             </button>
+            <button
+              type="button"
+              className="pb-btn pb-btn-sm pb-btn-ghost"
+              onClick={() => navigate(`/practice/${encodeURIComponent(item.id)}`)}
+            >
+              <Mic2 size={14} /> Say it out loud
+            </button>
           </div>
         </article>
 
@@ -459,29 +580,26 @@ export function ReaderPage() {
             <div className="pb-panel" style={{ padding: 18 }}>
               <span className="pb-eyebrow">Coach</span>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, margin: '12px 0' }}>
-                <Metric label="Speaking time" value={`${readingMinutes(item.content, 130)} min`} />
+                <Metric label="Speaking time" value={`${readingMinutes(item.content)} min`} />
                 <Metric label="Readability" value={stats.level} />
                 <Metric label="Ease score" value={String(stats.ease)} />
                 <Metric label="Sentences" value={String(stats.sentences)} />
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {stats.structure
                   .filter((finding) => !finding.ok)
                   .slice(0, 3)
                   .map((finding) => (
-                    <p
-                      key={finding.id}
-                      style={{ fontSize: '0.78rem', display: 'flex', gap: 8, color: 'var(--c-ink-muted)' }}
-                    >
-                      <CircleAlert size={14} style={{ flex: '0 0 auto', color: 'var(--c-warn)' }} />
+                    <p key={finding.id} style={{ fontSize: '0.78rem', display: 'flex', gap: 8, color: 'var(--c-ink-muted)', lineHeight: 1.55 }}>
+                      <CircleAlert size={14} style={{ flex: '0 0 auto', color: 'var(--c-warn)', marginTop: 2 }} />
                       <span>
                         <strong style={{ color: 'var(--c-ink)' }}>{finding.label}:</strong> {finding.detail}
                       </span>
                     </p>
                   ))}
                 {stats.structure.every((finding) => finding.ok) && (
-                  <p style={{ fontSize: '0.8rem', color: 'var(--c-ok)', display: 'flex', gap: 8 }}>
-                    <CheckCircle2 size={15} style={{ flex: '0 0 auto' }} />
+                  <p style={{ fontSize: '0.8rem', color: 'var(--c-ok)', display: 'flex', gap: 8, lineHeight: 1.6 }}>
+                    <CheckCircle2 size={15} style={{ flex: '0 0 auto', marginTop: 2 }} />
                     This speech covers every structural base.
                   </p>
                 )}
@@ -491,14 +609,9 @@ export function ReaderPage() {
             {related.length > 0 && (
               <div className="pb-panel" style={{ padding: 18 }}>
                 <span className="pb-eyebrow">More in {item.category}</span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 12 }}>
                   {related.map((speech) => (
-                    <Link
-                      key={speech.id}
-                      to={`/read/${encodeURIComponent(speech.id)}`}
-                      style={{ fontSize: '0.86rem', fontWeight: 600 }}
-                      className="pb-soft"
-                    >
+                    <Link key={speech.id} to={`/read/${encodeURIComponent(speech.id)}`} style={{ fontSize: '0.88rem', fontWeight: 600 }}>
                       {speech.title}
                       <span className="pb-muted" style={{ display: 'block', fontSize: '0.72rem', fontWeight: 400 }}>
                         {speech.minutes} min · {speech.author}

@@ -16,6 +16,8 @@ import { ReaderPage } from '../../src/pages/ReaderPage';
 import { StudioPage } from '../../src/pages/StudioPage';
 import { PracticePage } from '../../src/pages/PracticePage';
 import { CommunityPage } from '../../src/pages/CommunityPage';
+import { WebPage } from '../../src/pages/WebPage';
+import { DeskPage } from '../../src/pages/DeskPage';
 import { ControlPage } from '../../src/pages/ControlPage';
 import { ThemesPage } from '../../src/pages/ThemesPage';
 import { AboutPage } from '../../src/pages/AboutPage';
@@ -24,7 +26,14 @@ import { useThemeEngine } from '../../src/hooks/useThemeEngine';
 import { useSettings } from '../../src/store/settings';
 import { useLibrary } from '../../src/store/library';
 import { useUi } from '../../src/store/ui';
-import { COLOR_THEMES, LAYOUT_THEMES, MOTION_THEMES, UI_THEMES, UX_THEMES } from '../../src/design/index';
+import {
+  COLOR_THEMES,
+  LAYOUT_THEMES,
+  MOTION_THEMES,
+  PRESETS,
+  UI_THEMES,
+  UX_THEMES,
+} from '../../src/design/index';
 
 const errors: string[] = [];
 const originalError = console.error;
@@ -46,6 +55,8 @@ function Harness({ route }: { route: string }) {
           <Route path="/practice" element={<PracticePage />} />
           <Route path="/practice/:id" element={<PracticePage />} />
           <Route path="/community" element={<CommunityPage />} />
+          <Route path="/web" element={<WebPage />} />
+          <Route path="/desk" element={<DeskPage />} />
           <Route path="/control" element={<ControlPage />} />
           <Route path="/themes" element={<ThemesPage />} />
           <Route path="/about" element={<AboutPage />} />
@@ -83,6 +94,8 @@ async function main() {
     '/practice',
     '/practice/five-minutes',
     '/community',
+    '/web',
+    '/desk',
     '/control',
     '/themes',
     '/about',
@@ -136,6 +149,24 @@ async function main() {
     }
   }
   check(combos === COLOR_THEMES.length * MOTION_THEMES.length * LAYOUT_THEMES.length * UI_THEMES.length * UX_THEMES.length, `${combos.toLocaleString()} theme combinations compiled`);
+
+  // Every preset must point at real options.
+  const ids = {
+    color: new Set(COLOR_THEMES.map((t) => t.id)),
+    motion: new Set(MOTION_THEMES.map((t) => t.id)),
+    layout: new Set(LAYOUT_THEMES.map((t) => t.id)),
+    ui: new Set(UI_THEMES.map((t) => t.id)),
+    ux: new Set(UX_THEMES.map((t) => t.id)),
+  };
+  const brokenPresets = PRESETS.filter(
+    (preset) =>
+      !ids.color.has(preset.color) ||
+      !ids.motion.has(preset.motion) ||
+      !ids.layout.has(preset.layout) ||
+      !ids.ui.has(preset.ui) ||
+      !ids.ux.has(preset.ux),
+  );
+  check(brokenPresets.length === 0, `${PRESETS.length} designer presets resolve`, brokenPresets.map((p) => p.id).join(', '));
 
   // Overlays render.
   useUi.getState().openPalette();

@@ -1,8 +1,9 @@
 import { useNavigate } from 'react-router-dom';
-import { Bookmark, Cloud, FileText, Heart, Mic2, PenLine } from 'lucide-react';
+import { Bookmark, Cloud, FileText, Mic2, PenLine, Globe, DraftingCompass } from 'lucide-react';
 import type { CollectionItem } from '../hooks/useCollection';
 import { useLibrary } from '../store/library';
 import { formatCount } from '../lib/text';
+import { ReactionBar } from './ReactionBar';
 
 interface SpeechCardProps {
   item: CollectionItem;
@@ -15,7 +16,6 @@ interface SpeechCardProps {
 export function SpeechCard({ item, index = 0, featured, onSelect, selected }: SpeechCardProps) {
   const navigate = useNavigate();
   const toggleBookmark = useLibrary((s) => s.toggleBookmark);
-  const toggleLike = useLibrary((s) => s.toggleLike);
 
   const open = () => {
     if (onSelect) onSelect(item);
@@ -39,11 +39,6 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
         borderColor: selected ? 'var(--c-accent)' : undefined,
       }}
       onClick={open}
-      onMouseMove={(event) => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        event.currentTarget.style.setProperty('--mx', `${event.clientX - rect.left}px`);
-        event.currentTarget.style.setProperty('--my', `${event.clientY - rect.top}px`);
-      }}
     >
       <button
         type="button"
@@ -54,38 +49,46 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
         style={{ all: 'unset', cursor: 'pointer', display: 'block' }}
         aria-label={`Open ${item.title}`}
       >
-        <div className="pb-cover">
-          {initials}
-        </div>
-        <div className="pb-card-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+        <div className="pb-cover">{initials}</div>
+        <div className="pb-card-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <h3 className="pb-card-title">{item.title}</h3>
-              <p className="pb-muted" style={{ fontSize: '0.78rem', marginTop: 2 }}>
+              <span className="pb-muted" style={{ fontSize: '0.68rem', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                {item.category}
+              </span>
+              <h3 className="pb-card-title" style={{ marginTop: 3 }}>{item.title}</h3>
+              <p className="pb-muted" style={{ fontSize: '0.78rem', marginTop: 3 }}>
                 {item.author} · {item.occasion}
               </p>
             </div>
-            {item.kind === 'template' && <span className="pb-badge">Template</span>}
-            {item.source === 'user' && item.status === 'draft' && (
-              <span className="pb-chip" style={{ borderColor: 'var(--c-warn)', color: 'var(--c-warn)' }}>
-                Draft
-              </span>
-            )}
-            {item.source === 'cloud' && (
-              <span className="pb-chip" title="Loaded from your cloud library">
-                <Cloud size={11} /> Cloud
-              </span>
-            )}
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {item.source === 'user' && item.status === 'draft' && (
+                <span className="pb-chip" style={{ borderColor: 'var(--c-warn)', color: 'var(--c-warn)' }}>
+                  <DraftingCompass size={11} /> Draft
+                </span>
+              )}
+              {item.source === 'web' && (
+                <span className="pb-chip" title={item.licence}>
+                  <Globe size={11} /> Web
+                </span>
+              )}
+              {item.source === 'cloud' && (
+                <span className="pb-chip" title="Published to the shared library">
+                  <Cloud size={11} /> Shared
+                </span>
+              )}
+              {item.kind === 'template' && <span className="pb-badge">Template</span>}
+            </div>
           </div>
 
           {item.preview && (
             <p
-              className="pb-soft"
+              className="pb-soft pb-card-preview"
               style={{
-                fontSize: featured ? '1rem' : '0.88rem',
-                lineHeight: 1.6,
+                fontSize: featured ? '1rem' : '0.9rem',
+                lineHeight: 1.62,
                 display: '-webkit-box',
-                WebkitLineClamp: featured ? 4 : 3,
+                WebkitLineClamp: featured ? 5 : 3,
                 WebkitBoxOrient: 'vertical',
                 overflow: 'hidden',
               }}
@@ -104,16 +107,8 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
 
           <div
             className="pb-muted"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              fontSize: '0.74rem',
-              flexWrap: 'wrap',
-              marginTop: 2,
-            }}
+            style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: '0.74rem', flexWrap: 'wrap' }}
           >
-            <span className="pb-chip">{item.category}</span>
             <span title="Estimated speaking time">
               <Mic2 size={12} style={{ display: 'inline', verticalAlign: '-2px' }} /> {item.minutes} min
             </span>
@@ -121,10 +116,9 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
               <FileText size={12} style={{ display: 'inline', verticalAlign: '-2px' }} />{' '}
               {formatCount(item.words)}
             </span>
-            <span title="Views">
-              <PenLine size={12} style={{ display: 'inline', verticalAlign: '-2px' }} />{' '}
-              {formatCount(item.views)}
-            </span>
+            {item.views !== null && (
+              <span title="Views">Read {formatCount(item.views)}×</span>
+            )}
             {item.progress > 0.02 && item.progress < 0.98 && (
               <span style={{ color: 'var(--c-accent)' }}>{Math.round(item.progress * 100)}% read</span>
             )}
@@ -132,43 +126,45 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
         </div>
       </button>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 'auto', paddingTop: 4 }}>
-        <button
-          type="button"
-          className="pb-btn pb-btn-sm pb-btn-ghost"
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleLike(item.id);
-          }}
-          aria-pressed={item.likedByMe}
-          title="Like this speech"
-        >
-          <Heart size={14} fill={item.likedByMe ? 'var(--c-bad)' : 'none'} color={item.likedByMe ? 'var(--c-bad)' : undefined} />
-          {formatCount(item.likes)}
-        </button>
-        <button
-          type="button"
-          className="pb-btn pb-btn-sm pb-btn-ghost"
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleBookmark(item.id);
-          }}
-          aria-pressed={item.bookmarked}
-          title="Bookmark"
-        >
-          <Bookmark size={14} fill={item.bookmarked ? 'var(--c-accent)' : 'none'} />
-        </button>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          marginTop: 'auto',
+          paddingTop: 6,
+          borderTop: '1px solid var(--c-line-soft)',
+          flexWrap: 'wrap',
+        }}
+        onClick={(event) => event.stopPropagation()}
+        role="presentation"
+      >
+        <ReactionBar item={item} />
         <div style={{ flex: 1 }} />
         <button
           type="button"
+          className="pb-icon-btn"
+          onClick={() => toggleBookmark(item.id)}
+          aria-pressed={item.bookmarked}
+          title="Keep this on your desk"
+        >
+          <Bookmark size={15} fill={item.bookmarked ? 'var(--c-accent)' : 'none'} />
+        </button>
+        <button
+          type="button"
           className="pb-btn pb-btn-sm"
-          onClick={(event) => {
-            event.stopPropagation();
-            navigate(`/practice/${encodeURIComponent(item.id)}`);
-          }}
+          onClick={() => navigate(`/practice/${encodeURIComponent(item.id)}`)}
           title="Rehearse with the teleprompter"
         >
-          Rehearse
+          <Mic2 size={14} /> Rehearse
+        </button>
+        <button
+          type="button"
+          className="pb-btn pb-btn-sm pb-btn-ghost"
+          onClick={() => navigate(`/studio/${encodeURIComponent(item.id)}`)}
+          title="Copy into your drafts and make it yours"
+        >
+          <PenLine size={14} /> Remix
         </button>
       </div>
     </article>

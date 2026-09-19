@@ -13,6 +13,8 @@ interface UiState {
   themePanelOpen: boolean;
   drawerOpen: boolean;
   helpOpen: boolean;
+  signInOpen: boolean;
+  signInReason: string;
   toasts: Toast[];
   openPalette: () => void;
   closePalette: () => void;
@@ -20,6 +22,8 @@ interface UiState {
   setThemePanel: (open: boolean) => void;
   setDrawer: (open: boolean) => void;
   setHelp: (open: boolean) => void;
+  openSignIn: (reason?: string) => void;
+  closeSignIn: () => void;
   toast: (message: string, tone?: ToastTone) => void;
   dismiss: (id: number) => void;
 }
@@ -31,6 +35,8 @@ export const useUi = create<UiState>((set) => ({
   themePanelOpen: false,
   drawerOpen: false,
   helpOpen: false,
+  signInOpen: false,
+  signInReason: '',
   toasts: [],
 
   openPalette: () => set({ paletteOpen: true }),
@@ -39,6 +45,8 @@ export const useUi = create<UiState>((set) => ({
   setThemePanel: (themePanelOpen) => set({ themePanelOpen }),
   setDrawer: (drawerOpen) => set({ drawerOpen }),
   setHelp: (helpOpen) => set({ helpOpen }),
+  openSignIn: (signInReason = '') => set({ signInOpen: true, signInReason }),
+  closeSignIn: () => set({ signInOpen: false }),
 
   toast: (message, tone = 'info') => {
     counter += 1;

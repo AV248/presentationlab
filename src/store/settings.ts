@@ -61,7 +61,7 @@ export const useSettings = create<SettingsState>()(
   persist(
     (set) => ({
       theme: { ...AXIS_DEFAULTS },
-      presetId: 'midnight-keynote',
+      presetId: 'opening-page',
       reducedMotion: 'auto',
       contrast: 'off',
       ambient: true,

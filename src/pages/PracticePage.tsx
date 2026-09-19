@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
+  Feather,
   Gauge,
+  HeartHandshake,
   Maximize2,
   Minimize2,
   MirrorRectangular,
@@ -9,10 +11,12 @@ import {
   Play,
   RotateCcw,
   Type,
+  Wind,
 } from 'lucide-react';
 import { useSpeeches } from '../hooks/useCollection';
 import { useSettings } from '../store/settings';
 import { useUi } from '../store/ui';
+import { useLibrary } from '../store/library';
 import { formatClock, wordCount } from '../lib/text';
 import {
   isFullscreen,
@@ -20,6 +24,7 @@ import {
   requestWakeLock,
   toggleFullscreen,
 } from '../lib/platform';
+import { AFTER_PRACTICE, LETTER_PROMPTS, breathPhase, pick } from '../lib/heart';
 
 export function PracticePage() {
   const { id } = useParams<{ id: string }>();
@@ -27,12 +32,11 @@ export function PracticePage() {
   const practice = useSettings((s) => s.practice);
   const patchPractice = useSettings((s) => s.patchPractice);
   const toast = useUi((s) => s.toast);
+  const addLetter = useLibrary((s) => s.addLetter);
+  const markMilestone = useLibrary((s) => s.markMilestone);
 
   const [selectedId, setSelectedId] = useState<string>(id ?? '');
-  const item = useMemo(
-    () => items.find((speech) => speech.id === selectedId) ?? null,
-    [items, selectedId],
-  );
+  const item = useMemo(() => items.find((speech) => speech.id === selectedId) ?? null, [items, selectedId]);
 
   useEffect(() => {
     if (id) setSelectedId(id);
@@ -49,6 +53,15 @@ export function PracticePage() {
   const [elapsed, setElapsed] = useState(0);
   const [countdown, setCountdown] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
+  const [finished, setFinished] = useState(false);
+
+  /* The human parts: who it is for, a breath, and a letter afterwards. */
+  const [intention, setIntention] = useState('');
+  const [breathing, setBreathing] = useState(false);
+  const [breathElapsed, setBreathElapsed] = useState(0);
+  const [letter, setLetter] = useState('');
+  const [letterPrompt] = useState(() => pick(LETTER_PROMPTS));
+  const [closing] = useState(() => pick(AFTER_PRACTICE));
 
   const words = item ? wordCount(item.content) : 0;
   const targetSeconds = item ? Math.round((words / practice.wpm) * 60) : 0;
@@ -64,6 +77,7 @@ export function PracticePage() {
     offsetRef.current = 0;
     setOffset(0);
     setElapsed(0);
+    setFinished(false);
     stop();
     setCountdown(practice.countdown);
   }, [practice.countdown, stop]);
@@ -72,10 +86,10 @@ export function PracticePage() {
     offsetRef.current = 0;
     setOffset(0);
     setElapsed(0);
+    setFinished(false);
     stop();
   }, [selectedId, stop]);
 
-  // Countdown before the scroll begins.
   useEffect(() => {
     if (countdown <= 0) return;
     const tick = window.setTimeout(() => {
@@ -90,7 +104,15 @@ export function PracticePage() {
     return () => window.clearTimeout(tick);
   }, [countdown]);
 
-  // Scroll + clock loop.
+  useEffect(() => {
+    if (!breathing) return undefined;
+    const started = performance.now();
+    const id = window.setInterval(() => setBreathElapsed(performance.now() - started), 100);
+    return () => window.clearInterval(id);
+  }, [breathing]);
+
+  const breath = breathPhase(breathElapsed);
+
   useEffect(() => {
     if (!running || !item) return undefined;
 
@@ -111,7 +133,10 @@ export function PracticePage() {
         setOffset(offsetRef.current);
         if (offsetRef.current >= distance - 0.5) {
           stop();
-          toast('Rehearsal complete — how did that feel?', 'success');
+          setFinished(true);
+          if (markMilestone('first-rehearsal')) {
+            toast('First rehearsal done. That is the hardest one.', 'success');
+          }
         }
       }
 
@@ -124,13 +149,12 @@ export function PracticePage() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       void releaseWakeLock();
     };
-  }, [running, item, practice.wpm, words, stop, toast]);
+  }, [running, item, practice.wpm, words, stop, toast, markMilestone]);
 
-  // Keyboard shortcuts for the rehearsal room.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) return;
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
       if (!item) return;
       if (event.code === 'Space') {
         event.preventDefault();
@@ -197,10 +221,12 @@ export function PracticePage() {
 
       {!item ? (
         <div className="pb-panel" style={{ padding: 40, textAlign: 'center' }}>
-          <div style={{ fontSize: '2.4rem', marginBottom: 10 }}>🎙️</div>
+          <div style={{ fontSize: '2.2rem', marginBottom: 10 }} aria-hidden="true">
+            🎙️
+          </div>
           <h2 style={{ marginBottom: 8 }}>Nothing loaded</h2>
-          <p className="pb-muted" style={{ maxWidth: 460, margin: '0 auto 18px' }}>
-            Choose a speech above, or head to the library and press “Rehearse” on any card.
+          <p className="pb-muted" style={{ maxWidth: 460, margin: '0 auto 18px', lineHeight: 1.7 }}>
+            Choose a speech above, or pick one in the library and press “Rehearse”.
           </p>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
             <Link to="/" className="pb-btn pb-btn-primary">
@@ -213,6 +239,70 @@ export function PracticePage() {
         </div>
       ) : (
         <>
+          {/* Who is this for? */}
+          <section className="pb-panel" style={{ padding: '14px 18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <HeartHandshake size={16} style={{ color: 'var(--c-accent)' }} />
+              <strong style={{ fontSize: '0.9rem' }}>Before you start</strong>
+            </div>
+            <label className="pb-muted" style={{ fontSize: '0.82rem', display: 'block', marginBottom: 8, lineHeight: 1.6 }}>
+              Who is this for? One name, or one kind of person. Saying it out loud changes how you say
+              everything else.
+            </label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input
+                className="pb-input"
+                style={{ flex: '1 1 220px' }}
+                placeholder="e.g. the new apprentices, or: my sister"
+                value={intention}
+                onChange={(event) => setIntention(event.target.value)}
+                aria-label="Who is this speech for"
+                maxLength={120}
+              />
+              <button
+                type="button"
+                className={`pb-btn ${breathing ? 'pb-btn-primary' : ''}`}
+                onClick={() => {
+                  setBreathing((value) => !value);
+                  setBreathElapsed(0);
+                }}
+                aria-pressed={breathing}
+              >
+                <Wind size={15} /> {breathing ? 'Stop breathing' : 'Breathe first'}
+              </button>
+            </div>
+
+            {breathing && (
+              <div
+                className="pb-well anim-enter"
+                style={{ marginTop: 12, padding: '18px', textAlign: 'center' }}
+              >
+                <div
+                  style={{
+                    width: 96,
+                    height: 96,
+                    margin: '0 auto 12px',
+                    borderRadius: 999,
+                    border: '2px solid var(--c-accent)',
+                    display: 'grid',
+                    placeItems: 'center',
+                    transform: `scale(${breath.label === 'Breathe in' ? 1.15 : breath.label === 'Breathe out' ? 0.85 : 1})`,
+                    transition: 'transform 600ms ease',
+                    background: 'var(--c-accent-soft)',
+                  }}
+                >
+                  <span style={{ fontFamily: 'var(--x-font-display)', fontSize: '1.5rem' }}>
+                    {Math.ceil(breath.remaining / 1000)}
+                  </span>
+                </div>
+                <div style={{ fontFamily: 'var(--x-font-display)', fontSize: '1.05rem' }}>{breath.label}</div>
+                <p className="pb-muted" style={{ fontSize: '0.78rem', marginTop: 6 }}>
+                  Four counts in, four held, six out. Three rounds is enough to change your voice.
+                </p>
+              </div>
+            )}
+          </section>
+
           <section
             className="pb-panel"
             style={{ padding: '12px 14px', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}
@@ -270,7 +360,7 @@ export function PracticePage() {
               className={`pb-btn pb-btn-sm ${practice.mirror ? 'pb-btn-primary' : ''}`}
               onClick={() => patchPractice({ mirror: !practice.mirror })}
               aria-pressed={practice.mirror}
-              title="Mirror the text (for beam-splitter glass)"
+              title="Mirror the text for beam-splitter glass"
             >
               <MirrorRectangular size={14} /> Mirror
             </button>
@@ -327,7 +417,6 @@ export function PracticePage() {
                   display: 'grid',
                   placeItems: 'center',
                   zIndex: 3,
-                  background: 'var(--c-scrim)',
                   fontFamily: 'var(--x-font-display)',
                   fontSize: 'clamp(4rem, 18vw, 9rem)',
                   fontWeight: 700,
@@ -336,6 +425,22 @@ export function PracticePage() {
               >
                 {countdown}
               </div>
+            )}
+            {intention.trim() && countdown > 0 && (
+              <p
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  bottom: '12%',
+                  textAlign: 'center',
+                  fontSize: '1rem',
+                  color: 'var(--c-ink-muted)',
+                  zIndex: 3,
+                }}
+              >
+                This one is for {intention.trim()}.
+              </p>
             )}
             <div
               ref={innerRef}
@@ -353,20 +458,12 @@ export function PracticePage() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div
-              style={{
-                flex: '1 1 200px',
-                height: 6,
-                borderRadius: 999,
-                background: 'var(--c-surface-3)',
-                overflow: 'hidden',
-              }}
-            >
+            <div style={{ flex: '1 1 200px', height: 6, borderRadius: 999, background: 'var(--c-surface-3)', overflow: 'hidden' }}>
               <div
                 style={{
                   height: '100%',
                   width: `${Math.round(progress * 100)}%`,
-                  background: 'var(--grad-brand)',
+                  background: 'var(--c-accent)',
                   transition: 'width 120ms linear',
                 }}
               />
@@ -378,6 +475,48 @@ export function PracticePage() {
               Open reader
             </Link>
           </div>
+
+          {finished && (
+            <section className="pb-panel anim-enter" style={{ padding: '18px 20px' }}>
+              <div className="pb-rule" style={{ marginBottom: 14 }}>
+                <span>❧ After the run</span>
+              </div>
+              <p style={{ fontSize: '1.02rem', lineHeight: 1.7, marginBottom: 14 }}>{closing}</p>
+
+              <label className="pb-label" htmlFor="letter">
+                A letter to yourself, before the real thing
+              </label>
+              <p className="pb-muted" style={{ fontSize: '0.82rem', marginBottom: 8, lineHeight: 1.6 }}>
+                {letterPrompt}
+              </p>
+              <textarea
+                id="letter"
+                className="pb-textarea"
+                style={{ minHeight: 110 }}
+                value={letter}
+                onChange={(event) => setLetter(event.target.value)}
+                placeholder="Dear me, before I walk in…"
+                maxLength={2000}
+              />
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="pb-btn pb-btn-primary"
+                  disabled={!letter.trim()}
+                  onClick={() => {
+                    addLetter({ speechId: item.id, speechTitle: item.title, text: letter.trim() });
+                    setLetter('');
+                    toast('Kept on your desk', 'success');
+                  }}
+                >
+                  <Feather size={15} /> Keep this letter
+                </button>
+                <button type="button" className="pb-btn" onClick={restart}>
+                  <RotateCcw size={15} /> Run it again
+                </button>
+              </div>
+            </section>
+          )}
         </>
       )}
     </div>

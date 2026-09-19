@@ -3,8 +3,11 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   BookOpenText,
   Clapperboard,
+  Feather,
+  Globe,
   Info,
   Library,
+  LogOut,
   Menu,
   Palette,
   PenLine,
@@ -12,12 +15,14 @@ import {
   SlidersHorizontal,
   Sparkles,
   Trophy,
+  User2,
   X,
 } from 'lucide-react';
 import { Logo } from './Logo';
 import { useUi } from '../store/ui';
 import { useSettings } from '../store/settings';
 import { useCloud } from '../store/cloud';
+import { useAuth } from '../store/auth';
 import { modifierLabel, isApple } from '../lib/platform';
 
 export interface NavItem {
@@ -28,12 +33,14 @@ export interface NavItem {
 }
 
 export const NAV: NavItem[] = [
-  { to: '/', label: 'Library', icon: Library, hint: 'Browse and read the collection' },
-  { to: '/studio', label: 'Studio', icon: PenLine, hint: 'Write and coach a new speech' },
-  { to: '/practice', label: 'Practice', icon: Clapperboard, hint: 'Teleprompter and pacing timer' },
-  { to: '/community', label: 'Community', icon: Trophy, hint: 'Leaderboard and top speeches' },
-  { to: '/themes', label: 'Themes', icon: Palette, hint: 'The theme studio' },
-  { to: '/control', label: 'Control Room', icon: SlidersHorizontal, hint: 'Manage content and data' },
+  { to: '/', label: 'Library', icon: Library, hint: 'Read the collection' },
+  { to: '/studio', label: 'Studio', icon: PenLine, hint: 'Write, and let the coach read it back' },
+  { to: '/practice', label: 'Practice', icon: Clapperboard, hint: 'Teleprompter, breathing and pacing' },
+  { to: '/community', label: 'Community', icon: Trophy, hint: 'Leaderboard and the open mic' },
+  { to: '/web', label: 'From the web', icon: Globe, hint: 'Public-domain speeches, fetched live' },
+  { to: '/desk', label: 'Your desk', icon: Feather, hint: 'Lines, notes, letters and firsts' },
+  { to: '/themes', label: 'Themes', icon: Palette, hint: 'Five axes, 114 options' },
+  { to: '/control', label: 'Control Room', icon: SlidersHorizontal, hint: 'Content, data, cloud and admin' },
   { to: '/about', label: 'About', icon: Info, hint: 'How Presentation Buddy works' },
 ];
 
@@ -176,6 +183,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           <Sparkles size={16} /> Theme studio
         </button>
+        <AccountChip />
+        <div style={{ height: 8 }} />
         <CloudBadge />
       </aside>
 
@@ -266,6 +275,73 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span>More</span>
         </button>
       </nav>
+    </div>
+  );
+}
+
+function AccountChip() {
+  const user = useAuth((s) => s.user);
+  const role = useAuth((s) => s.role);
+  const signOut = useAuth((s) => s.signOut);
+  const openSignIn = useUi((s) => s.openSignIn);
+  const toast = useUi((s) => s.toast);
+
+  if (!user) {
+    return (
+      <button
+        type="button"
+        className="pb-btn pb-btn-block"
+        onClick={() => openSignIn('Sign in to like, share and publish.')}
+      >
+        <User2 size={15} /> Sign in
+      </button>
+    );
+  }
+
+  return (
+    <div className="pb-well" style={{ padding: '10px 12px', display: 'flex', gap: 10, alignItems: 'center' }}>
+      {user.photoURL ? (
+        <img src={user.photoURL} alt="" style={{ width: 30, height: 30, borderRadius: 999, objectFit: 'cover' }} />
+      ) : (
+        <span
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 999,
+            background: 'var(--c-accent-soft)',
+            border: '1px solid var(--c-accent-line)',
+            color: 'var(--c-accent)',
+            display: 'grid',
+            placeItems: 'center',
+            fontFamily: 'var(--x-font-display)',
+            fontWeight: 700,
+            fontSize: '0.85rem',
+            flex: '0 0 auto',
+          }}
+        >
+          {(user.displayName ?? user.email ?? '?').slice(0, 1).toUpperCase()}
+        </span>
+      )}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: '0.82rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {user.displayName ?? 'Signed in'}
+        </div>
+        <div className="pb-muted" style={{ fontSize: '0.68rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {role ? `${role} · ` : ''}
+          {user.email}
+        </div>
+      </div>
+      <button
+        type="button"
+        className="pb-icon-btn"
+        title="Sign out"
+        aria-label="Sign out"
+        onClick={() => {
+          void signOut().then(() => toast('Signed out. Your drafts stay on this device.', 'info'));
+        }}
+      >
+        <LogOut size={15} />
+      </button>
     </div>
   );
 }

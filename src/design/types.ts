@@ -123,28 +123,28 @@ export interface LayoutTheme {
 }
 
 export type UiStyle =
-  | 'glass'
-  | 'solid'
-  | 'soft'
-  | 'outline'
-  | 'elevated'
-  | 'flat'
-  | 'clay'
-  | 'retro'
-  | 'swiss'
-  | 'floating'
-  | 'inset'
-  | 'gradient'
-  | 'holo'
   | 'paper'
+  | 'letterpress'
+  | 'cardstock'
+  | 'vellum'
+  | 'newsprint'
+  | 'linen'
+  | 'ink-wash'
+  | 'chalk'
+  | 'carbon'
+  | 'risograph'
+  | 'woodblock'
+  | 'etched-glass'
   | 'blueprint'
-  | 'darkroom'
-  | 'sticker'
-  | 'minimal'
-  | 'layered'
-  | 'chrome'
-  | 'etch'
-  | 'frame';
+  | 'stamp'
+  | 'index-card'
+  | 'pinned-note'
+  | 'cloth-bound'
+  | 'ruled-paper'
+  | 'stone'
+  | 'foil'
+  | 'tape'
+  | 'bare';
 
 export interface UiTheme {
   id: string;
