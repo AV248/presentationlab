@@ -1,0 +1,129 @@
+rules_version = '2';
+
+// Presentation Buddy — Firestore security rules.
+//
+// Reading the library is open to everyone. Writing anything — a speech, a
+// like, a share, a note — requires a signed-in account (Google or Microsoft
+// via Firebase Authentication). People may only delete their own work, and
+// only an owner or admin may touch anyone else's.
+//
+// Deploy with:  firebase deploy --only firestore:rules
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role in ['admin', 'owner'];
+    }
+
+    function isSiteOwner() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'owner';
+    }
+
+    // ------------------------------------------------------------------
+    // Speeches. Anyone may read; signed-in people may publish and may only
+    // change or remove their own.
+    // ------------------------------------------------------------------
+    match /presentations/{speechId} {
+      allow read: if true;
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+      allow update: if isAdmin()
+        || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow delete: if isAdmin()
+        || (isSignedIn() && resource.data.uid == request.auth.uid);
+
+      // The public view counter: one increment per read, no personal data.
+      match /views/{viewId} {
+        allow read: if true;
+        allow create: if isSignedIn();
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // Reactions. One document per (person, speech). Only you can write yours.
+    // ------------------------------------------------------------------
+    match /reactions/{reactionId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.kind in ['like', 'dislike'];
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // ------------------------------------------------------------------
+    // Shares. Same shape as reactions.
+    // ------------------------------------------------------------------
+    match /shares/{shareId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // ------------------------------------------------------------------
+    // Open mic notes (the old "bloggerblogs" collection).
+    // ------------------------------------------------------------------
+    match /bloggerblogs/{postId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if isAdmin()
+        || (isSignedIn() && resource.data.uid == request.auth.uid);
+    }
+
+    // ------------------------------------------------------------------
+    // Contributor profiles and real point counters (the old "bloggers").
+    // Counters themselves are only ever moved by trusted client code paths
+    // that run inside a transaction; people can maintain their own profile.
+    // ------------------------------------------------------------------
+    match /bloggers/{uid} {
+      allow read: if true;
+      allow create, update: if isOwner(uid) || isAdmin();
+      allow delete: if isSiteOwner();
+    }
+
+    // ------------------------------------------------------------------
+    // Profile mirror for every signed-in person.
+    // ------------------------------------------------------------------
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(uid);
+      allow delete: if isSiteOwner();
+    }
+
+    // ------------------------------------------------------------------
+    // Roles. Readable by their holder; writable only by the site owner.
+    // ------------------------------------------------------------------
+    match /admins/{uid} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSiteOwner();
+    }
+
+    // ------------------------------------------------------------------
+    // Optional sponsor slots shown before sponsor-supported speeches.
+    // ------------------------------------------------------------------
+    match /sponsors/{sponsorId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------
+    // Legacy collection from the first version of this site.
+    // Kept readable so an existing e-mail allow-list still grants admin
+    // access. It is never written to, and it contains no passwords.
+    // ------------------------------------------------------------------
+    match /admin/{docId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+  }
+}
