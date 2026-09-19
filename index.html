@@ -1,233 +1,50 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Presentation Lab</title>
-
-  <link rel="stylesheet" href="style.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
-</head>
-
-<body>
-  <!-- Orbital accents -->
-  <div class="orbital orbital-1"></div>
-  <div class="orbital orbital-2"></div>
-
-  <header class="hero">
-    <div class="hero-label">Galaxy of Speeches</div>
-    <h1 class="hero-title">Presentation Lab</h1>
-    <p class="hero-subtitle">Discover premium, ready-to-use presentation speeches from across the Milky Way.</p>
-  </header>
-
-  <main>
-    <section class="control-bar">
-      <div class="control-text">
-        <span class="pill">Explore the collection</span>
-        <span class="control-hint">Browse the latest releases or sort by most viewed.</span>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5.0"
+    />
+    <title>Presentation Buddy — Write, rehearse and deliver talks that land</title>
+    <meta
+      name="description"
+      content="Presentation Buddy is a calm, beautifully themeable workspace to write speeches, coach your structure, rehearse with a teleprompter and pacing timer, and deliver with confidence."
+    />
+    <meta name="theme-color" content="#070b18" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="application-name" content="Presentation Buddy" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Pres. Buddy" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Presentation Buddy" />
+    <meta
+      property="og:description"
+      content="A premium workspace for people who present: write it, coach it, rehearse it, deliver it."
+    />
+    <meta property="og:site_name" content="Presentation Buddy" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="./icons/icon-192.png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <div style="padding: 40px; font-family: system-ui, sans-serif; text-align: center">
+        <h1>Presentation Buddy</h1>
+        <p>This workspace needs JavaScript enabled to run.</p>
       </div>
-      <div class="button-container">
-        <button class="mode-btn is-active" data-mode="latest" onclick="filterLatest()">Latest</button>
-        <button class="mode-btn" data-mode="views" onclick="filterViews()">Most viewed</button>
-      </div>
-    </section>
-
-    <section id="presentations" aria-live="polite"></section>
-  </main>
-
-  <!-- Sub‑brand / main brand lockup -->
-  <footer class="brand-footer">
-    <div class="brand-footer-copy">
-      <span class="brand-footer-label">Sub‑brand</span>
-      <span class="brand-footer-name">Presentation Lab</span>
-    </div>
-    <div class="brand-footer-main">
-      <span class="brand-footer-powered">Powered by</span>
-      <img src="l.png" alt="Main brand logo" class="brand-logo" />
-    </div>
-  </footer>
-
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
-    import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-analytics.js";
-    import {
-      getFirestore,
-      collection,
-      getDocs
-    } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
-
-    // Firebase configuration provided
-    const firebaseConfig = {
-      apiKey: "AIzaSyDwUYRjUe7wKHp64d1vfYV-UDvnXaUuQVY",
-      authDomain: "reflectioncapturedthoughts.firebaseapp.com",
-      projectId: "reflectioncapturedthoughts",
-      storageBucket: "reflectioncapturedthoughts.firebasestorage.app",
-      messagingSenderId: "331335730832",
-      appId: "1:331335730832:web:731df65bd40f9646adfa15",
-      measurementId: "G-7NXNZDNDRE"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    getAnalytics(app);
-    const db = getFirestore(app);
-
-    const container = document.getElementById("presentations");
-
-    let allData = [];
-    let latestId = null;
-    let mostViewedId = null;
-    const isNarrowScreen = window.matchMedia("(max-width: 768px)").matches;
-    const prefersReducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)"
-    ).matches;
-
-    function escapeHtml(str = "") {
-      return String(str)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-    }
-
-    function setActiveButton(mode) {
-      document.querySelectorAll(".mode-btn").forEach((btn) => {
-        if (!mode) {
-          btn.classList.remove("is-active");
-          return;
-        }
-        btn.classList.toggle("is-active", btn.dataset.mode === mode);
-      });
-    }
-
-    async function loadData() {
-      const snap = await getDocs(collection(db, "presentations"));
-      allData = [];
-      snap.forEach((docSnap) => {
-        allData.push({ id: docSnap.id, ...docSnap.data() });
-      });
-
-      // Sort newest first, based on numeric document ID (1,2,3,...)
-      allData.sort((a, b) => {
-        const aId = Number(a.id) || 0;
-        const bId = Number(b.id) || 0;
-        return bId - aId;
-      });
-
-      const latestItem = allData[0] ?? null;
-      latestId = latestItem?.id ?? null;
-
-      const mostViewedItem = allData.reduce(
-        (best, item) =>
-          best == null || (item.views ?? 0) > (best.views ?? 0) ? item : best,
-        null
-      );
-      mostViewedId = mostViewedItem?.id ?? null;
-
-      render(allData);
-    }
-
-    function render(data) {
-      container.innerHTML = "";
-
-      if (!data.length) {
-        const empty = document.createElement("p");
-        empty.className = "empty-state";
-        empty.textContent = "No presentations found yet. New stars are forming…";
-        container.appendChild(empty);
-        return;
-      }
-
-      data.forEach((item, index) => {
-        const card = document.createElement("article");
-        card.className = "card";
-
-        const isLatest = item.id === latestId;
-        const isMostViewed = item.id === mostViewedId;
-
-        const tags = (item.Tags || "")
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean);
-        const tagHtml = tags
-          .map(
-            (t) =>
-              `<span class="tag-chip tag-chip-inline">${escapeHtml(t)}</span>`
-          )
-          .join("");
-
-        const badges = [
-          isLatest ? '<span class="badge badge-latest">Latest</span>' : "",
-          isMostViewed
-            ? '<span class="badge badge-most">Most viewed</span>'
-            : "",
-          item.ad ? '<span class="badge badge-ad">Ad</span>' : ""
-        ]
-          .filter(Boolean)
-          .join("");
-
-        card.innerHTML = `
-          <div class="card-header">
-            <h3>${escapeHtml(item.Title)}</h3>
-            <div class="badge-row">${badges}</div>
-          </div>
-          <p class="card-preview">${escapeHtml(item.Preview)}</p>
-          <div class="card-tags">${tagHtml}</div>
-          <div class="card-footer">
-            <span class="chip">${escapeHtml(item.Category || "General")}</span>
-            <span class="views">Views: ${item.views ?? 0}</span>
-          </div>
-        `;
-
-        card.addEventListener("click", () => {
-          window.location.href = `presentation.html?id=${encodeURIComponent(
-            item.id
-          )}`;
-        });
-        container.appendChild(card);
-
-        // Staggered entrance animation
-        requestAnimationFrame(() => {
-          setTimeout(() => card.classList.add("show"), 120 + index * 80);
-        });
-      });
-
-      // Center the first card so previews start "perfectly placed"
-      requestAnimationFrame(() => {
-        const first = container.querySelector(".card");
-        if (!first) return;
-        const target =
-          first.offsetLeft - (container.clientWidth - first.clientWidth) / 2;
-        container.scrollTo({
-          left: Math.max(0, target),
-          behavior: isNarrowScreen || prefersReducedMotion ? "auto" : "smooth"
-        });
-      });
-
-      if (isNarrowScreen || prefersReducedMotion) {
-        window.scrollTo(0, 0);
-      } else {
-        window.scrollTo({ top: 0, behavior: "smooth" });
-      }
-    }
-
-    // Public filter APIs (used by buttons)
-    window.filterLatest = () => {
-      if (!allData.length) return;
-      setActiveButton("latest");
-      render(allData);
-    };
-
-    window.filterViews = () => {
-      if (!allData.length) return;
-      setActiveButton("views");
-      const sorted = [...allData].sort(
-        (a, b) => (b.views ?? 0) - (a.views ?? 0)
-      );
-      render(sorted);
-    };
-
-    loadData();
-  </script>
-</body>
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
