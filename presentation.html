@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Presentation · Presentation Lab</title>
+
+  <link rel="stylesheet" href="style.css" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Space+Grotesk:wght@500;700&display=swap"
+    rel="stylesheet"
+  />
+</head>
+
+<body>
+  <!-- Orbital accents -->
+  <div class="orbital orbital-1"></div>
+  <div class="orbital orbital-2"></div>
+
+  <header class="hero">
+    <div class="hero-label">Signature speech</div>
+    <h1 id="hero-title" class="hero-title">Loading…</h1>
+    <p id="hero-subtitle" class="hero-subtitle">Shaping ideas into unforgettable words.</p>
+  </header>
+
+  <main>
+    <article class="detail-panel page-panel" id="presentation-shell">
+      <header class="detail-header">
+        <div>
+          <p class="detail-kicker">Speech detail</p>
+          <h2 id="detail-title"></h2>
+        </div>
+        <div id="detail-badges" class="detail-badges"></div>
+      </header>
+
+      <div class="detail-meta-row">
+        <span id="detail-category"></span>
+        <span id="detail-date"></span>
+        <span id="detail-views"></span>
+      </div>
+
+      <div id="detail-tags" class="detail-tags"></div>
+
+      <section id="detail-body" class="detail-body"></section>
+
+      <button id="unlock-button" class="primary-btn hidden">
+        Watch short ad to unlock
+      </button>
+    </article>
+  </main>
+
+  <!-- Sub‑brand / main brand lockup -->
+  <footer class="brand-footer">
+    <div class="brand-footer-copy">
+      <span class="brand-footer-label">Sub‑brand</span>
+      <span class="brand-footer-name">Presentation Lab</span>
+    </div>
+    <div class="brand-footer-main">
+      <span class="brand-footer-powered">Powered by</span>
+      <img src="l.png" alt="Main brand logo" class="brand-logo" />
+    </div>
+  </footer>
+
+  <!-- Ad gate -->
+  <div id="ad-overlay" class="ad-overlay hidden" aria-hidden="true">
+    <div class="ad-modal">
+      <img src="1.ad5.png" alt="Sponsored message" class="ad-image" />
+      <p class="ad-caption">A quick pause from our sponsor.</p>
+      <p class="ad-countdown">
+        Unlocking in <span id="ad-countdown">5</span>s
+      </p>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-analytics.js";
+    import {
+      getFirestore,
+      collection,
+      getDocs,
+      doc,
+      getDoc,
+      updateDoc,
+      increment
+    } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDwUYRjUe7wKHp64d1vfYV-UDvnXaUuQVY",
+      authDomain: "reflectioncapturedthoughts.firebaseapp.com",
+      projectId: "reflectioncapturedthoughts",
+      storageBucket: "reflectioncapturedthoughts.firebasestorage.app",
+      messagingSenderId: "331335730832",
+      appId: "1:331335730832:web:731df65bd40f9646adfa15",
+      measurementId: "G-7NXNZDNDRE"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    getAnalytics(app);
+    const db = getFirestore(app);
+
+    const heroTitle = document.getElementById("hero-title");
+    const detailTitle = document.getElementById("detail-title");
+    const detailBadges = document.getElementById("detail-badges");
+    const detailCategory = document.getElementById("detail-category");
+    const detailDate = document.getElementById("detail-date");
+    const detailViews = document.getElementById("detail-views");
+    const detailTags = document.getElementById("detail-tags");
+    const detailBody = document.getElementById("detail-body");
+    const unlockButton = document.getElementById("unlock-button");
+    const adOverlay = document.getElementById("ad-overlay");
+    const adCountdownEl = document.getElementById("ad-countdown");
+
+    let currentPresentation = null;
+    let latestId = null;
+    let mostViewedId = null;
+    let adTimer = null;
+
+    function getIdFromQuery() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("id");
+    }
+
+    function showNotFound() {
+      heroTitle.textContent = "Presentation not found";
+      heroSubtitle.textContent = "This star might have drifted out of our galaxy.";
+      detailTitle.textContent = "Not available";
+      detailBody.textContent = "We couldn’t find a presentation for this link.";
+      unlockButton.classList.add("hidden");
+    }
+
+    async function loadContextAndPresentation(id) {
+      // Load all to compute latest / most viewed and find current doc
+      const snap = await getDocs(collection(db, "presentations"));
+      const all = [];
+      snap.forEach((docSnap) => {
+        all.push({ id: docSnap.id, ...docSnap.data() });
+      });
+
+      if (!all.length) return null;
+
+      all.sort((a, b) => {
+        const aId = Number(a.id) || 0;
+        const bId = Number(b.id) || 0;
+        return bId - aId;
+      });
+      latestId = all[0]?.id ?? null;
+
+      const mostViewedItem = all.reduce(
+        (best, item) =>
+          best == null || (item.views ?? 0) > (best.views ?? 0) ? item : best,
+        null
+      );
+      mostViewedId = mostViewedItem?.id ?? null;
+
+      const found = all.find((item) => item.id === id);
+
+      // If not found, try a direct get in case of security rules
+      if (!found) {
+        const directSnap = await getDoc(doc(db, "presentations", id));
+        if (!directSnap.exists()) {
+          return null;
+        }
+        return { id: directSnap.id, ...directSnap.data() };
+      }
+
+      return found;
+    }
+
+    async function incrementViews(id) {
+      try {
+        const ref = doc(db, "presentations", id);
+        await updateDoc(ref, { views: increment(1) });
+      } catch (e) {
+        console.error("Failed to increment views", e);
+      }
+    }
+
+    function renderPresentation(item) {
+      currentPresentation = item;
+
+      const title = item.Title || "Untitled presentation";
+      heroTitle.textContent = title;
+
+      detailTitle.textContent = title;
+
+      const badges = [];
+      if (item.id === latestId)
+        badges.push('<span class="badge badge-latest">Latest</span>');
+      if (item.id === mostViewedId)
+        badges.push('<span class="badge badge-most">Most viewed</span>');
+      if (item.ad)
+        badges.push('<span class="badge badge-ad">Ad supported</span>');
+      detailBadges.innerHTML = badges.join("");
+
+      detailCategory.textContent = item.Category || "General";
+      detailDate.textContent = item.Date || item.id;
+      detailViews.textContent = `Views: ${item.views ?? 0}`;
+
+      // Tags
+      detailTags.innerHTML = "";
+      const tags = (item.Tags || "")
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      tags.forEach((tag) => {
+        const span = document.createElement("span");
+        span.className = "tag-chip";
+        span.textContent = tag;
+        detailTags.appendChild(span);
+      });
+
+      // Default body content; ad-gated behaviour is handled in init/startAdGate
+      detailBody.textContent =
+        item.Content && String(item.Content).trim().length
+          ? item.Content
+          : "Content unavailable.";
+      unlockButton.classList.add("hidden");
+    }
+
+    function startAdGate() {
+      if (!currentPresentation || !currentPresentation.ad) return;
+
+      let remaining = 5;
+      adCountdownEl.textContent = String(remaining);
+      adOverlay.classList.remove("hidden");
+      adOverlay.setAttribute("aria-hidden", "false");
+
+      // Hide content while ad plays
+      detailBody.textContent = "";
+
+      if (adTimer) clearInterval(adTimer);
+      adTimer = setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          clearInterval(adTimer);
+          adTimer = null;
+
+          adOverlay.classList.add("hidden");
+          adOverlay.setAttribute("aria-hidden", "true");
+
+          detailBody.textContent =
+            currentPresentation.Content &&
+            String(currentPresentation.Content).trim().length
+              ? currentPresentation.Content
+              : "Content unavailable.";
+          unlockButton.classList.add("hidden");
+        } else {
+          adCountdownEl.textContent = String(remaining);
+        }
+      }, 1000);
+    }
+
+    async function init() {
+      const id = getIdFromQuery();
+      if (!id) {
+        showNotFound();
+        return;
+      }
+
+      const item = await loadContextAndPresentation(id);
+      if (!item) {
+        showNotFound();
+        return;
+      }
+
+      renderPresentation(item);
+
+      // If this presentation is ad-supported, immediately run the ad flow,
+      // then reveal full content. If not, full content is already visible.
+      if (item.ad) {
+        startAdGate();
+      }
+
+      // Increment views in the background and optimistically update the label
+      if (typeof item.views === "number") {
+        item.views += 1;
+      } else {
+        item.views = 1;
+      }
+      detailViews.textContent = `Views: ${item.views}`;
+      incrementViews(item.id);
+    }
+
+    unlockButton.addEventListener("click", startAdGate);
+
+    init();
+  </script>
+</body>
+</html>
+
