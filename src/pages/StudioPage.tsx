@@ -30,10 +30,19 @@ import { useGate } from '../components/SignIn';
 import { analyse, formatDate } from '../lib/text';
 import { copyText, downloadFile, supportsDictation } from '../lib/platform';
 import { useSpeeches } from '../hooks/useCollection';
+import { pageMetaFor } from '../data/routes';
+import { SITE_URL, usePageMeta } from '../lib/seo';
 
 const TEMPLATES = LIBRARY.filter((item) => item.kind === 'template');
 
 export function StudioPage() {
+  const meta = pageMetaFor('/studio');
+  usePageMeta(meta?.title ?? 'Studio', {
+    description: meta?.description,
+    image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
+    jsonLd: meta?.jsonLd,
+  });
+
   const { id } = useParams<{ id: string }>();
   const items = useSpeeches();
   const mine = useLibrary((s) => s.mine);

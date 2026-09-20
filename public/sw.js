@@ -1,17 +1,18 @@
 /* Presentation Buddy — offline shell.
  * Strategy:
- *   • navigation  → network first, fall back to the cached app shell
+ *   • navigation  → network first, fall back to the cached page or shell
  *   • same-origin assets → cache first, populate on miss
  * Everything is failure tolerant: a missing cache never breaks the app.
  */
-const VERSION = 'pb-v1';
-const SHELL = './index.html';
+const VERSION = 'pb-v2';
+const SHELL = '/index.html';
+const PRECACHE = [SHELL, '/manifest.webmanifest', '/favicon.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(VERSION)
-      .then((cache) => cache.addAll([SHELL, './manifest.webmanifest', './favicon.svg']))
+      .then((cache) => cache.addAll(PRECACHE))
       .catch(() => undefined)
       .then(() => self.skipWaiting()),
   );
@@ -37,11 +38,18 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(VERSION).then((cache) => cache.put(SHELL, copy)).catch(() => undefined);
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(VERSION).then((cache) => cache.put(request, copy)).catch(() => undefined);
+          }
           return response;
         })
-        .catch(() => caches.match(SHELL).then((cached) => cached || Response.error())),
+        .catch(() =>
+          caches
+            .match(request)
+            .then((cached) => cached || caches.match(SHELL))
+            .then((cached) => cached || Response.error()),
+        ),
     );
     return;
   }

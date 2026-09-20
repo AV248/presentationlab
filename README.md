@@ -2,9 +2,13 @@
 
 **Read it. Write it. Say it out loud.**
 
-Version 2.2 — a local-first workspace for people who have to stand up and speak, with real Firebase
-Authentication (Google + Microsoft), real Firestore data, and a hand-set design that opens on warm
-sand paper and terracotta ink.
+Version 2.3 — a local-first workspace for people who have to stand up and speak, now with a
+five-axis theme engine (13,709,280 combinations across colour, motion, layout, UI material and
+typography), real sponsored slots read from Firestore, shareable deep links for every speech,
+a private `/admin` workspace, 14 speaking-guide topic hubs, and a fully prerendered, crawlable
+site (57 static pages, 32 social share cards, a sitemap) so the library can actually rank.
+
+---
 
 ---
 
@@ -19,9 +23,37 @@ sand paper and terracotta ink.
 | **Community** | Leaderboard of real accounts (+1 per like, −1 per three dislikes) and the open mic |
 | **From the web** | Public-domain speeches fetched live from Wikisource, each with its licence and a link home |
 | **Your desk** | Lines you kept, margin notes, letters, and the small firsts worth remembering |
-| **Themes** | Five axes, 114 options, 6,090,656 combinations |
+| **Themes** | Five axes, 134 options, 13,709,280 combinations, 26 layout modes, 14 designer presets |
 | **Control Room** | Content, data portability, cloud status, comfort settings, and the admin panel |
-| **About** | The honest version of where everything comes from, plus the colophon |
+| **Topics — 14 guides** | Original, practical speaking guides (public speaking, wedding toasts, pitches, eulogies, difficult conversations…) each wired to the example speeches it coaches |
+| **Admin** | A private, noindex `/admin` workspace for role-holders only: ad campaigns, people roles, content moderation, site stats |
+
+Every speech and template has a **share link** (`/read/…`) that deep-links straight into it —
+copy from the reader, the library cards or the practice page.
+
+### Sponsored slots
+
+Ads are noticeable but never interrupting: theme-native cards labelled *Sponsored*, capped at
+one per scroll region, dismissible per session, loaded after the page settles, and rendered with
+`rel="sponsored nofollow"`. Campaigns are documents in Firestore (`ads` collection:
+`title`, `description`, `url`, optional `image`, `active`) edited from `/admin`. Offline or with
+an empty collection, the slot quietly disappears and shows a small house card instead.
+
+### SEO
+
+`npm run build` now ends with a post-build pipeline in `scripts/`:
+
+1. **Cards** — 32 unique 1200×630 Open Graph images (`dist/cards/*.png`) drawn from the house
+   mark and palette via sharp, one each for home, the eight sections, the nine flagship reads
+   and the fourteen topic hubs.
+2. **Prerender** — every indexable route is rendered to real HTML with its own title,
+   description, canonical, robots, Open Graph/Twitter tags and JSON-LD
+   (`WebSite`/`Organization`/`Article`/`BreadcrumbList`), 57 pages total, plus a `noindex` 404.
+3. **Sitemap** — `dist/sitemap.xml` with 56 URLs; `public/robots.txt` points at it.
+
+Each page ships with the default theme's CSS variables already inline, so first paint is instant
+and hydration is a no-op. Rankings still take time and backlinks — prerendering removes the
+technical blocker, promotion is what actually climbs the results.
 
 ---
 
@@ -64,6 +96,7 @@ The app runs completely without Firebase. To switch on the shared library and co
 | `admins/{uid}` | Role documents: `owner` or `admin` |
 | `admin` | Legacy e-mail allow-list from v1 — read only, never written, no passwords |
 | `sponsors` | Optional sponsor slots shown before sponsor-supported speeches |
+| `ads` | Sponsored campaigns for the theme-native ad slots: `title`, `description`, `url`, optional `image`, `active`, `weight`. Written only from `/admin` by role-holders; read by everyone per the rules. |
 
 Points follow the original rule and are computed from real counters:
 `points = likesReceived − floor(dislikesReceived / 3)`.
@@ -86,15 +119,21 @@ Points follow the original rule and are computed from real counters:
 
 ## Design
 
-Five independent axes, mixed by hand and applied as CSS custom properties:
+Five independent axes, mixed by hand and applied as CSS custom properties
+(134 options, 13,709,280 combinations):
 
 | Axis | Options | House default |
 | --- | --- | --- |
-| Paper & Ink | 26 | **Sand & Terracotta** |
-| Movement | 22 | Steady |
-| Arrangement | 22 | Reading Room |
-| Material | 22 | Paper |
-| Typography | 22 | Newsreader |
+| Paper & Ink | 30 | **Sand & Terracotta** |
+| Movement | 26 | Steady |
+| Arrangement | 26 | Reading Room |
+| Material | 26 | Paper |
+| Typography | 26 | Newsreader |
+
+The mark is **Voices Rising** — a speech bubble whose tail grows into three rising voice bars
+and a spark. It is drawn from the live theme's CSS variables, so it re-colours with every one of
+the 30 colour worlds, and it is the single source for all app icons (`scripts/generate-icons.mjs`)
+and social share cards.
 
 The design language is print, not software: warm stock with a procedural paper grain, hairline
 rules, small-caps metadata, a lozenge rule ornament, index-card cards, drop caps in editorial mode,
@@ -113,13 +152,16 @@ weight and measure.
 ```bash
 npm install
 npm run dev       # http://localhost:5173
-npm run build     # type-check + production bundle in dist/
+npm run build     # type-check + bundle + share cards + 57 prerendered pages + sitemap in dist/
 npm run preview   # serve the production bundle
 npm run verify    # type-check + jsdom smoke test
 ```
 
-The smoke test renders all 15 routes, applies all 22 layout modes, compiles all 6,090,656 theme
-combinations, checks that every preset resolves, and fails on any React console error.
+The smoke test renders all 17 routes, checks every theme axis has more than twenty unique options,
+applies all 26 layout modes, compiles all 13,709,280 theme combinations, checks that every preset
+resolves, confirms sponsored slots degrade gracefully offline, and fails on any React console
+error. `npm run cards`, `npm run prerender` and `npm run sitemap` run each post-build stage
+separately when iterating.
 
 ### Stack
 

@@ -143,7 +143,7 @@ export function FirstRun() {
       <div style={{ flex: '1 1 260px' }}>
         <strong style={{ fontSize: '0.92rem' }}>New here?</strong>
         <p className="pb-muted" style={{ fontSize: '0.8rem' }}>
-          Try a preset, or open the theme studio and build your own from 114 options.
+          Try a preset, or open the theme studio and build your own from 134 options.
         </p>
       </div>
       <button

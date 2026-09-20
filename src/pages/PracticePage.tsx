@@ -25,8 +25,17 @@ import {
   toggleFullscreen,
 } from '../lib/platform';
 import { AFTER_PRACTICE, LETTER_PROMPTS, breathPhase, pick } from '../lib/heart';
+import { pageMetaFor } from '../data/routes';
+import { SITE_URL, usePageMeta } from '../lib/seo';
 
 export function PracticePage() {
+  const meta = pageMetaFor('/practice');
+  usePageMeta(meta?.title ?? 'Practice', {
+    description: meta?.description,
+    image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
+    jsonLd: meta?.jsonLd,
+  });
+
   const { id } = useParams<{ id: string }>();
   const items = useSpeeches();
   const practice = useSettings((s) => s.practice);

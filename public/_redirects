@@ -1,0 +1,5 @@
+# SPA fallback for hosts that support _redirects (Netlify-style).
+# Prerendered files (/read/<id>/index.html, /topics/... etc.) already exist on
+# disk and win over this rule; it only catches routes with no static file —
+# chiefly /admin and shared speeches published to the cloud.
+/*    /index.html   200

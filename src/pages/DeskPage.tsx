@@ -14,6 +14,8 @@ import { useSpeeches } from '../hooks/useCollection';
 import { useUi } from '../store/ui';
 import { MILESTONES, LETTER_PROMPTS, pick } from '../lib/heart';
 import { formatDate } from '../lib/text';
+import { pageMetaFor } from '../data/routes';
+import { SITE_URL, usePageMeta } from '../lib/seo';
 
 type Tab = 'lines' | 'notes' | 'letters' | 'marks' | 'shelf';
 
@@ -23,6 +25,13 @@ type Tab = 'lines' | 'notes' | 'letters' | 'marks' | 'shelf';
  * small firsts worth remembering.
  */
 export function DeskPage() {
+  const meta = pageMetaFor('/desk');
+  usePageMeta(meta?.title ?? 'Desk', {
+    description: meta?.description,
+    image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
+    jsonLd: meta?.jsonLd,
+  });
+
   const savedLines = useLibrary((s) => s.savedLines);
   const marginNotes = useLibrary((s) => s.marginNotes);
   const letters = useLibrary((s) => s.letters);

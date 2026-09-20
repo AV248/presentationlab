@@ -9,6 +9,8 @@ import {
 import { ThemeStudio } from '../components/ThemeStudio';
 import { AXES, COMBINATIONS } from '../design/index';
 import { detectPlatform } from '../lib/platform';
+import { pageMetaFor } from '../data/routes';
+import { SITE_URL, usePageMeta } from '../lib/seo';
 
 const DEVICE_NOTES = [
   {
@@ -50,6 +52,13 @@ const DEVICE_NOTES = [
 ];
 
 export function ThemesPage() {
+  const meta = pageMetaFor('/themes');
+  usePageMeta(meta?.title ?? 'Themes', {
+    description: meta?.description,
+    image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
+    jsonLd: meta?.jsonLd,
+  });
+
   const platform = detectPlatform();
 
   return (

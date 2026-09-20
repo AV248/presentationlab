@@ -97,7 +97,11 @@ export type LayoutMode =
   | 'theatre'
   | 'focus'
   | 'stack'
-  | 'ledger';
+  | 'ledger'
+  | 'atrium'
+  | 'quilt'
+  | 'bands'
+  | 'guided';
 
 export interface LayoutTheme {
   id: string;
@@ -144,7 +148,11 @@ export type UiStyle =
   | 'stone'
   | 'foil'
   | 'tape'
-  | 'bare';
+  | 'bare'
+  | 'porcelain'
+  | 'bronze-plate'
+  | 'hologram'
+  | 'kraft';
 
 export interface UiTheme {
   id: string;

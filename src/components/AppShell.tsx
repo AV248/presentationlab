@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
+  BookMarked,
   BookOpenText,
   Clapperboard,
   Feather,
@@ -12,6 +13,7 @@ import {
   Palette,
   PenLine,
   Search,
+  Shield,
   SlidersHorizontal,
   Sparkles,
   Trophy,
@@ -34,13 +36,14 @@ export interface NavItem {
 
 export const NAV: NavItem[] = [
   { to: '/', label: 'Library', icon: Library, hint: 'Read the collection' },
+  { to: '/topics', label: 'Guides', icon: BookMarked, hint: 'Speaking guides for every occasion' },
   { to: '/studio', label: 'Studio', icon: PenLine, hint: 'Write, and let the coach read it back' },
   { to: '/practice', label: 'Practice', icon: Clapperboard, hint: 'Teleprompter, breathing and pacing' },
   { to: '/community', label: 'Community', icon: Trophy, hint: 'Leaderboard and the open mic' },
   { to: '/web', label: 'From the web', icon: Globe, hint: 'Public-domain speeches, fetched live' },
   { to: '/desk', label: 'Your desk', icon: Feather, hint: 'Lines, notes, letters and firsts' },
-  { to: '/themes', label: 'Themes', icon: Palette, hint: 'Five axes, 114 options' },
-  { to: '/control', label: 'Control Room', icon: SlidersHorizontal, hint: 'Content, data, cloud and admin' },
+  { to: '/themes', label: 'Themes', icon: Palette, hint: 'Five axes, 134 options' },
+  { to: '/control', label: 'Control Room', icon: SlidersHorizontal, hint: 'Content, data, cloud and comfort' },
   { to: '/about', label: 'About', icon: Info, hint: 'How Presentation Buddy works' },
 ];
 
@@ -108,7 +111,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
       if (event.key.toLowerCase() === 'g') {
         const next = window.prompt(
-          'Jump to:\n1 Library\n2 Studio\n3 Practice\n4 Community\n5 Themes\n6 Control Room\n7 About',
+          NAV.map((item, index) => `${index + 1} ${item.label}`).join('\n'),
         );
         const index = Number(next);
         if (index >= 1 && index <= NAV.length) navigate(NAV[index - 1].to);
@@ -119,13 +122,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [navigate, openPalette, setHelp, setThemePanel]);
 
   const current = NAV.find((item) => item.to === location.pathname);
-
-  // Keep the browser tab in step with the page you are on.
-  useEffect(() => {
-    const name = current?.label ?? 'Presentation Buddy';
-    document.title =
-      name === 'Library' ? 'Presentation Buddy — speeches, studio and rehearsal' : `${name} · Presentation Buddy`;
-  }, [current?.label]);
 
   return (
     <div className="pb-shell">
@@ -330,6 +326,14 @@ function AccountChip() {
           {role ? `${role} · ` : ''}
           {user.email}
         </div>
+        {role && (
+          <NavLink
+            to="/admin"
+            style={{ fontSize: '0.68rem', color: 'var(--c-accent)', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          >
+            <Shield size={11} /> Workspace
+          </NavLink>
+        )}
       </div>
       <button
         type="button"
