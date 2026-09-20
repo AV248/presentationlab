@@ -39,4 +39,8 @@ ${body}
 `;
 
 await writeFile(resolve(root, 'dist', 'sitemap.xml'), xml);
+// Also land it in public/: the file is then committed to git (the site is
+// sometimes updated by uploading files through the GitHub web UI) and is
+// automatically included by every fresh `vite build`.
+await writeFile(resolve(root, 'public', 'sitemap.xml'), xml);
 console.log(`${urls.length} sitemap URLs written to dist/sitemap.xml`);
