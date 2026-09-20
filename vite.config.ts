@@ -2,11 +2,12 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-// Presentation Buddy is a fully static, offline-capable single page app.
-// It is built to be served from any host (or even opened from a file path),
-// so the router uses hash URLs and all assets are referenced relatively.
+// Presentation Buddy is a fully static, offline-capable single page app
+// deployed at the root of its own domain. Every indexable route is
+// prerendered to a static HTML file after bundling, so real paths (no hash)
+// resolve straight to .html files and every absolute asset URL is correct.
 export default defineConfig({
-  base: './',
+  base: '/',
   plugins: [react(), tailwindcss()],
   server: {
     host: '0.0.0.0',

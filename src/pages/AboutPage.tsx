@@ -16,6 +16,8 @@ import { detectPlatform, installInstructions, isStandalone, modifierLabel } from
 import { useSpeeches } from '../hooks/useCollection';
 import { useAuth } from '../store/auth';
 import { COLOPHON } from '../lib/heart';
+import { pageMetaFor } from '../data/routes';
+import { SITE_URL, usePageMeta } from '../lib/seo';
 
 const STEPS = [
   {
@@ -54,6 +56,13 @@ const SHORTCUTS: [string, string][] = [
 ];
 
 export function AboutPage() {
+  const meta = pageMetaFor('/about');
+  usePageMeta(meta?.title ?? 'About', {
+    description: meta?.description,
+    image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
+    jsonLd: meta?.jsonLd,
+  });
+
   const items = useSpeeches();
   const user = useAuth((s) => s.user);
   const role = useAuth((s) => s.role);

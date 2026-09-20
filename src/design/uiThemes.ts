@@ -15,7 +15,7 @@ const SH = {
 };
 
 /**
- * 22 materials. Each one is a different physical thing a page can be made
+ * 26 materials. Each one is a different physical thing a page can be made
  * of: pressed card, newsprint, cloth, slate, carbon paper, masking tape.
  * The house default is Paper.
  */
@@ -376,6 +376,73 @@ export const UI_THEMES: UiTheme[] = [
     sheen: 'none',
     lift: '0px',
     radiusScale: 0.3,
+  },
+  {
+    id: 'porcelain',
+    name: 'Porcelain',
+    note: 'Glazed white with a kiln shine. Smooth, cool, faintly translucent.',
+    style: 'porcelain',
+    radius: '16px',
+    border: '1px',
+    shadow: SH.press,
+    shadowHover: SH.lift2,
+    blur: '0px',
+    alpha: 0.94,
+    lineAlpha: 0.55,
+    sheen:
+      'linear-gradient(155deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.08) 34%, rgba(255,255,255,0) 60%)',
+    lift: '2px',
+    radiusScale: 1.2,
+  },
+  {
+    id: 'bronze-plate',
+    name: 'Bronze Plate',
+    note: 'Cast metal with a heavy rim. Museum plaques and foundry marks.',
+    style: 'bronze-plate',
+    radius: '6px',
+    border: '2px',
+    shadow: SH.cut,
+    shadowHover: SH.cutHover,
+    blur: '0px',
+    alpha: 1,
+    lineAlpha: 0.9,
+    sheen:
+      'linear-gradient(100deg, rgba(120,86,40,0.12) 0%, rgba(255,236,200,0.14) 50%, rgba(120,86,40,0.12) 100%)',
+    lift: '2px',
+    radiusScale: 0.55,
+  },
+  {
+    id: 'hologram',
+    name: 'Hologram',
+    note: 'A pane of light: translucent, blurred, edged in a fine beam.',
+    style: 'hologram',
+    radius: '18px',
+    border: '1px',
+    shadow: '0 10px 34px rgba(70,110,220,0.14), 0 2px 6px rgba(30,40,80,0.10)',
+    shadowHover: '0 18px 48px rgba(70,110,220,0.20), 0 4px 12px rgba(30,40,80,0.12)',
+    blur: '16px',
+    alpha: 0.58,
+    lineAlpha: 0.85,
+    sheen:
+      'linear-gradient(120deg, rgba(255,255,255,0.28) 0%, rgba(150,190,255,0.10) 45%, rgba(255,255,255,0) 70%)',
+    lift: '3px',
+    radiusScale: 1.3,
+  },
+  {
+    id: 'kraft',
+    name: 'Kraft Paper',
+    note: 'Recycled brown wrap with a stamped edge. Honest, matte, unbleached.',
+    style: 'kraft',
+    radius: '2px',
+    border: '1px',
+    shadow: SH.hair,
+    shadowHover: SH.lift1,
+    blur: '0px',
+    alpha: 1,
+    lineAlpha: 0.5,
+    sheen: 'none',
+    lift: '1px',
+    radiusScale: 0.2,
   },
 ];
 

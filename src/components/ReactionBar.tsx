@@ -6,6 +6,7 @@ import { useUi } from '../store/ui';
 import { useCloud } from '../store/cloud';
 import { recordShare, setReaction } from '../services/data';
 import { shareOrCopy } from '../lib/platform';
+import { absoluteUrl } from '../lib/seo';
 import { useGate } from './SignIn';
 
 interface ReactionBarProps {
@@ -53,16 +54,20 @@ export function ReactionBar({ item, onCountsChange }: ReactionBarProps) {
     }, 'Sign in to let a writer know their words landed.');
   };
 
+  // Every share is a real, permanent link straight to this speech — no
+  // account needed to send it; the counter only moves when someone signed
+  // in shares a published speech.
   const share = () => {
-    gate(async () => {
-      const result = await shareOrCopy(item.title, item.preview);
+    const url = absoluteUrl(`/read/${encodeURIComponent(item.id)}`);
+    void (async () => {
+      const result = await shareOrCopy(item.title, item.preview, url);
       if (result === 'failed') {
         toast('Sharing is not supported here — copy the link instead.', 'warn');
         return;
       }
-      if (item.source === 'cloud') {
+      if (item.source === 'cloud' && user) {
         try {
-          const total = await recordShare(item.id, user!.uid);
+          const total = await recordShare(item.id, user.uid);
           setLocal({ likes, dislikes, shares: total });
           onCountsChange?.(likes, dislikes, total);
         } catch {
@@ -71,7 +76,7 @@ export function ReactionBar({ item, onCountsChange }: ReactionBarProps) {
       }
       toast(result === 'shared' ? 'Shared — thank you' : 'Link copied to your clipboard', 'success');
       void connect(true);
-    }, 'Sign in to share a speech and have it counted.');
+    })();
   };
 
   return (

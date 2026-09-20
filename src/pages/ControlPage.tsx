@@ -4,16 +4,13 @@ import {
   Accessibility,
   Cloud,
   Contrast,
-  Crown,
   Database,
   EyeOff,
   FileDown,
   FileUp,
-  KeyRound,
   Palette,
   RefreshCw,
   RotateCcw,
-  Shield,
   Trash2,
   Upload,
   Waves,
@@ -25,21 +22,21 @@ import { useCloud } from '../store/cloud';
 import { useAuth } from '../store/auth';
 import { useUi } from '../store/ui';
 import { FIREBASE_ENABLED, FIREBASE_PROJECT } from '../services/firebase';
-import {
-  bootstrapOwner,
-  deletePost,
-  deleteSpeechDoc,
-  fetchPosts,
-  fetchUsers,
-  publishSpeech,
-  setRole,
-  updateSpeechDoc,
-} from '../services/data';
+import { deleteSpeechDoc, publishSpeech } from '../services/data';
 import { formatCount } from '../lib/text';
+import { pageMetaFor } from '../data/routes';
+import { SITE_URL, usePageMeta } from '../lib/seo';
 
-type Tab = 'library' | 'data' | 'cloud' | 'comfort' | 'admin';
+type Tab = 'library' | 'data' | 'cloud' | 'comfort';
 
 export function ControlPage() {
+  const meta = pageMetaFor('/control');
+  usePageMeta(meta?.title ?? 'Control', {
+    description: meta?.description,
+    image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
+    jsonLd: meta?.jsonLd,
+  });
+
   const items = useSpeeches();
   const mine = useLibrary((s) => s.mine);
   const hidden = useLibrary((s) => s.hidden);
@@ -66,12 +63,8 @@ export function ControlPage() {
 
   const [filter, setFilter] = useState('');
   const [tab, setTab] = useState<Tab>('library');
-  const [users, setUsers] = useState<Awaited<ReturnType<typeof fetchUsers>>>([]);
-  const [posts, setPosts] = useState<Awaited<ReturnType<typeof fetchPosts>>>([]);
-  const [adminLoading, setAdminLoading] = useState(false);
 
   const isAdmin = role === 'admin' || role === 'owner';
-  const isOwner = role === 'owner';
 
   const storage = useMemo(() => {
     try {
@@ -148,20 +141,6 @@ export function ControlPage() {
     }
   };
 
-  const loadAdmin = async () => {
-    if (!isAdmin) return;
-    setAdminLoading(true);
-    try {
-      const [people, notes] = await Promise.all([fetchUsers(), fetchPosts()]);
-      setUsers(people);
-      setPosts(notes);
-    } catch (error) {
-      toast((error as Error)?.message ?? 'Could not load admin data', 'error');
-    } finally {
-      setAdminLoading(false);
-    }
-  };
-
   const publishDraft = async (id: string) => {
     const draft = mine.find((speech) => speech.id === id);
     if (!draft || !user) return;
@@ -192,7 +171,6 @@ export function ControlPage() {
     { id: 'data', label: 'Your data', show: true },
     { id: 'cloud', label: 'Cloud', show: true },
     { id: 'comfort', label: 'Comfort', show: true },
-    { id: 'admin', label: 'Admin', show: isAdmin },
   ];
 
   return (
@@ -219,14 +197,11 @@ export function ControlPage() {
             <button
               key={entry.id}
               type="button"
-              onClick={() => {
-                setTab(entry.id);
-                if (entry.id === 'admin') void loadAdmin();
-              }}
+              onClick={() => setTab(entry.id)}
               className={`pb-btn pb-btn-sm ${tab === entry.id ? '' : 'pb-btn-ghost'}`}
               style={{ background: tab === entry.id ? 'var(--c-accent-soft)' : undefined, whiteSpace: 'nowrap' }}
             >
-              {entry.id === 'admin' && <Shield size={13} />} {entry.label}
+              {entry.label}
             </button>
           ))}
       </div>
@@ -296,22 +271,6 @@ export function ControlPage() {
                     }}
                   >
                     <Trash2 size={14} />
-                  </button>
-                )}
-                {isAdmin && item.source === 'cloud' && (
-                  <button
-                    type="button"
-                    className="pb-btn pb-btn-sm pb-btn-ghost"
-                    onClick={() => {
-                      void updateSpeechDoc(item.id, { ad: !item.ad })
-                        .then(() => {
-                          void cloud.connect(true);
-                          toast(item.ad ? 'Sponsor slot removed' : 'Marked sponsor-supported', 'success');
-                        })
-                        .catch((error: unknown) => toast((error as Error)?.message ?? 'Could not update', 'error'));
-                    }}
-                  >
-                    {item.ad ? 'Remove ad' : 'Mark ad'}
                   </button>
                 )}
                 <button
@@ -490,138 +449,6 @@ export function ControlPage() {
         </section>
       )}
 
-      {tab === 'admin' && isAdmin && (
-        <section className="pb-panel" style={{ padding: '18px 20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <Shield size={17} />
-            <h2 style={{ fontSize: '1.05rem' }}>
-              {isOwner ? 'Owner' : 'Admin'} panel
-            </h2>
-            <span className="pb-stamp" style={{ marginLeft: 8 }}>
-              {role}
-            </span>
-            <div style={{ flex: 1 }} />
-            <button type="button" className="pb-btn pb-btn-sm" onClick={() => void loadAdmin()} disabled={adminLoading}>
-              <RefreshCw size={13} /> {adminLoading ? 'Loading…' : 'Reload'}
-            </button>
-          </div>
-          <p className="pb-muted" style={{ fontSize: '0.82rem', marginBottom: 16, lineHeight: 1.65 }}>
-            {isOwner
-              ? 'You can manage people, roles, published speeches and open-mic notes.'
-              : 'You can manage published speeches and open-mic notes. Only the owner can change roles.'}
-          </p>
-
-          <h3 style={{ fontSize: '0.92rem', margin: '8px 0' }}>People ({users.length})</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 22 }}>
-            {users.map((person) => (
-              <div key={person.uid} className="pb-panel-flat" style={{ padding: '10px 12px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ flex: '1 1 200px', minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{person.displayName ?? 'No name given'}</div>
-                  <div className="pb-muted" style={{ fontSize: '0.72rem' }}>
-                    {person.email} · {person.providerId ?? 'unknown provider'}
-                  </div>
-                </div>
-                {isOwner && (
-                  <>
-                    <button
-                      type="button"
-                      className="pb-btn pb-btn-sm pb-btn-ghost"
-                      onClick={() => {
-                        void setRole(person.uid, 'admin')
-                          .then(() => toast('Made an admin', 'success'))
-                          .catch((error: unknown) => toast((error as Error)?.message ?? 'Failed', 'error'));
-                      }}
-                    >
-                      Make admin
-                    </button>
-                    <button
-                      type="button"
-                      className="pb-btn pb-btn-sm pb-btn-ghost"
-                      onClick={() => {
-                        void setRole(person.uid, 'none')
-                          .then(() => toast('Role removed', 'success'))
-                          .catch((error: unknown) => toast((error as Error)?.message ?? 'Failed', 'error'));
-                      }}
-                    >
-                      Remove role
-                    </button>
-                  </>
-                )}
-              </div>
-            ))}
-            {!users.length && <p className="pb-muted" style={{ fontSize: '0.82rem' }}>No accounts have signed in yet.</p>}
-          </div>
-
-          <h3 style={{ fontSize: '0.92rem', margin: '8px 0' }}>Open mic notes ({posts.length})</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {posts.map((post) => (
-              <div key={post.id} className="pb-panel-flat" style={{ padding: '10px 12px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ flex: '1 1 200px', minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{post.title}</div>
-                  <div className="pb-muted" style={{ fontSize: '0.72rem' }}>
-                    {post.author} · {post.body.slice(0, 80)}…
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="pb-btn pb-btn-sm pb-btn-danger"
-                  onClick={() => {
-                    void deletePost(post.id)
-                      .then(() => {
-                        void loadAdmin();
-                        toast('Note removed', 'success');
-                      })
-                      .catch((error: unknown) => toast((error as Error)?.message ?? 'Failed', 'error'));
-                  }}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-            {!posts.length && <p className="pb-muted" style={{ fontSize: '0.82rem' }}>No notes yet.</p>}
-          </div>
-        </section>
-      )}
-
-      {!isAdmin && (
-        <section className="pb-panel" style={{ padding: '18px 20px' }}>
-          <h2 style={{ fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <KeyRound size={17} /> Admin access
-          </h2>
-          {user ? (
-            <>
-              <p className="pb-soft" style={{ fontSize: '0.86rem', lineHeight: 1.7, marginBottom: 12 }}>
-                You are signed in as {user.email}. The admin panel appears here as soon as your account
-                is listed in the <span className="pb-mono">admins</span> collection with the role{' '}
-                <span className="pb-mono">admin</span> or <span className="pb-mono">owner</span>.
-              </p>
-              {isOwner === false && (
-                <button
-                  type="button"
-                  className="pb-btn"
-                  onClick={() => {
-                    if (!window.confirm('Make this account the owner? Only do this once, on your own account.')) return;
-                    void bootstrapOwner(user.uid, user.email, user.displayName)
-                      .then(() => {
-                        void refreshRole();
-                        toast('You are now the owner', 'success');
-                      })
-                      .catch((error: unknown) => toast((error as Error)?.message ?? 'Could not bootstrap', 'error'));
-                  }}
-                >
-                  <Crown size={15} /> Make this account the owner
-                </button>
-              )}
-            </>
-          ) : (
-            <p className="pb-soft" style={{ fontSize: '0.86rem', lineHeight: 1.7 }}>
-              Sign in with Google or Microsoft, then use the button above to claim owner access once.
-              This replaces the seeded e-mail and password list the old site shipped with — no password
-              is ever stored in the database.
-            </p>
-          )}
-        </section>
-      )}
     </div>
   );
 }

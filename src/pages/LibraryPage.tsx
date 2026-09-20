@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { SpeechCard } from '../components/SpeechCard';
 import { FirstRun } from '../components/Overlays';
+import { AdSlot } from '../components/AdSlot';
 import { useSpeeches, type CollectionItem } from '../hooks/useCollection';
 import { useLibrary } from '../store/library';
 import { useSettings } from '../store/settings';
@@ -24,6 +25,8 @@ import { AXIS_DEFAULTS, layoutById } from '../design/compile';
 import { readingMinutes, wordCount } from '../lib/text';
 import { fetchCuratedWebSpeeches } from '../services/webSources';
 import { greetingFor } from '../lib/heart';
+import { pageMetaFor } from '../data/routes';
+import { SITE_URL, usePageMeta } from '../lib/seo';
 
 type SortKey = 'newest' | 'viewed' | 'liked' | 'shortest' | 'longest' | 'az' | 'random';
 type Shelf = 'latest' | 'viewed';
@@ -40,6 +43,13 @@ const SORTS: { id: SortKey; label: string }[] = [
 
 export function LibraryPage() {
   const navigate = useNavigate();
+  const meta = pageMetaFor('/');
+  usePageMeta(meta?.title ?? 'Presentation Buddy — Write, rehearse and deliver talks that land', {
+    description: meta?.description,
+    image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
+    canonical: SITE_URL,
+    jsonLd: meta?.jsonLd,
+  });
   const items = useSpeeches();
   const bookmarks = useLibrary((s) => s.bookmarks);
   const history = useLibrary((s) => s.history);
@@ -323,14 +333,18 @@ export function LibraryPage() {
 
     return (
       <div className="pb-grid">
-        {filtered.map((item, index) => (
-          <SpeechCard
-            key={item.id}
-            item={item}
-            index={index}
-            featured={index === 0 && layout.mode === 'spotlight'}
-          />
-        ))}
+        {filtered.flatMap((item, index) => {
+          const card = (
+            <SpeechCard
+              key={item.id}
+              item={item}
+              index={index}
+              featured={index === 0 && layout.mode === 'spotlight'}
+            />
+          );
+          // One quiet sponsored card inside the shelf, never first, never last.
+          return index === 6 ? [<AdSlot key="ad-library" seed="library-grid" />, card] : [card];
+        })}
       </div>
     );
   };

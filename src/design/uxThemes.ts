@@ -9,11 +9,14 @@ const INTER = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, san
 const GROTESK = "'Space Grotesk', Inter, -apple-system, 'Segoe UI', Roboto, sans-serif";
 const MONO = "'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace";
 const HAND = "'Caveat', 'Bradley Hand', 'Segoe Print', cursive";
+const DM_SERIF = "'DM Serif Display', Fraunces, 'Playfair Display', Georgia, serif";
+const WORK = "'Work Sans', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+const ARCHIVO = "'Archivo', 'Space Grotesk', Inter, -apple-system, 'Segoe UI', Roboto, sans-serif";
 const SYSTEM =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Devanagari', 'Nirmala UI', 'Noto Sans', sans-serif";
 
 /**
- * 22 typography systems. Each pairing was chosen the way a book designer
+ * 26 typography systems. Each pairing was chosen the way a book designer
  * chooses one: a voice for the headline, a voice for the sentence, and a
  * measure you can actually read a whole page of.
  */
@@ -411,6 +414,78 @@ export const UX_THEMES: UxTheme[] = [
     measure: 64,
     para: '1.2em',
     radiusScale: 1,
+    caps: false,
+    focus: '0 0 0 3px',
+  },
+  {
+    id: 'gallery-set',
+    name: 'Gallery Set',
+    note: 'DM Serif titles with plenty of air; Work Sans keeps the captions crisp.',
+    fontBody: WORK,
+    fontDisplay: DM_SERIF,
+    fontMono: MONO,
+    scale: 1.03,
+    tracking: '0em',
+    leading: 1.66,
+    weightBody: 400,
+    weightDisplay: 400,
+    measure: 62,
+    para: '1.25em',
+    radiusScale: 1.1,
+    caps: false,
+    focus: '0 0 0 3px',
+  },
+  {
+    id: 'deck-set',
+    name: 'Deck Set',
+    note: 'Archivo everywhere, tight and confident. Built to read from the back row.',
+    fontBody: ARCHIVO,
+    fontDisplay: ARCHIVO,
+    fontMono: MONO,
+    scale: 1.04,
+    tracking: '-0.005em',
+    leading: 1.52,
+    weightBody: 500,
+    weightDisplay: 800,
+    measure: 58,
+    para: '1em',
+    radiusScale: 0.9,
+    caps: false,
+    focus: '0 0 0 3px',
+  },
+  {
+    id: 'recital-set',
+    name: 'Recital Set',
+    note: 'Spectral spoken-word rhythm under a single DM Serif headline.',
+    fontBody: SPECTRAL,
+    fontDisplay: DM_SERIF,
+    fontMono: MONO,
+    scale: 1.03,
+    tracking: '0em',
+    leading: 1.82,
+    weightBody: 400,
+    weightDisplay: 400,
+    measure: 68,
+    para: '1.3em',
+    radiusScale: 1.05,
+    caps: false,
+    focus: '0 0 0 3px',
+  },
+  {
+    id: 'planner-set',
+    name: 'Planner Set',
+    note: 'Inter paragraphs and Archivo headers. The week, organised.',
+    fontBody: INTER,
+    fontDisplay: ARCHIVO,
+    fontMono: MONO,
+    scale: 0.98,
+    tracking: '-0.01em',
+    leading: 1.6,
+    weightBody: 400,
+    weightDisplay: 700,
+    measure: 60,
+    para: '0.95em',
+    radiusScale: 0.8,
     caps: false,
     focus: '0 0 0 3px',
   },

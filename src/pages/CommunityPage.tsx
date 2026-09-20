@@ -8,12 +8,21 @@ import { publishPost, deletePost } from '../services/data';
 import { FIREBASE_ENABLED } from '../services/firebase';
 import { formatCount } from '../lib/text';
 import { useGate } from '../components/SignIn';
+import { AdSlot } from '../components/AdSlot';
+import { pageMetaFor } from '../data/routes';
+import { SITE_URL, usePageMeta } from '../lib/seo';
 
 /**
  * Community: the leaderboard (real accounts, real points) and the open mic,
  * which is where the old site's "creative creator" posts now live.
  */
 export function CommunityPage() {
+  const meta = pageMetaFor('/community');
+  usePageMeta('Community — speeches shared by real people', {
+    description: meta?.description,
+    image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
+    jsonLd: meta?.jsonLd,
+  });
   const { contributors, posts, loading, error, refresh } = useCommunity();
   const user = useAuth((s) => s.user);
   const role = useAuth((s) => s.role);
@@ -146,6 +155,8 @@ export function CommunityPage() {
           })}
         </section>
       )}
+
+      <AdSlot seed="community" />
 
       <section className="pb-panel" style={{ padding: '18px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>

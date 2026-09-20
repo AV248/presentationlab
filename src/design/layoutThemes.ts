@@ -1,7 +1,7 @@
 import type { LayoutTheme } from './types';
 
 /**
- * 22 ways to arrange a shelf. Named after the objects people actually keep
+ * 26 ways to arrange a shelf. Named after the objects people actually keep
  * papers in — reading rooms, card catalogues, notice boards, scrapbooks —
  * rather than after CSS properties.
  */
@@ -313,6 +313,62 @@ export const LAYOUT_THEMES: LayoutTheme[] = [
     sidebar: '248px',
     measure: '68ch',
     rhythm: '18px',
+  },
+  {
+    id: 'the-atrium',
+    name: 'The Atrium',
+    note: 'One headline piece under the dome; everything else gathers around it.',
+    mode: 'atrium',
+    container: '1240px',
+    gap: '18px',
+    radius: '14px',
+    cardMin: '240px',
+    cardPad: '22px',
+    sidebar: '256px',
+    measure: '68ch',
+    rhythm: '26px',
+  },
+  {
+    id: 'patchwork',
+    name: 'Patchwork',
+    note: 'A quilt of unequal squares — every speech gets its own cut of cloth.',
+    mode: 'quilt',
+    container: '1240px',
+    gap: '10px',
+    radius: '6px',
+    cardMin: '200px',
+    cardPad: '16px',
+    sidebar: '248px',
+    measure: '64ch',
+    rhythm: '14px',
+  },
+  {
+    id: 'setlist',
+    name: 'Setlist',
+    note: 'Full-width bands in running order, numbered like a gig sheet.',
+    mode: 'bands',
+    container: '1180px',
+    gap: '12px',
+    radius: '10px',
+    cardMin: '100%',
+    cardPad: '20px',
+    sidebar: '252px',
+    measure: '72ch',
+    rhythm: '22px',
+  },
+  {
+    id: 'guided-tour',
+    name: 'Guided Tour',
+    note: 'A single column with a ribbon rail on the left — plaques along a wall.',
+    mode: 'guided',
+    container: '1080px',
+    gap: '16px',
+    radius: '10px',
+    cardMin: '100%',
+    cardPad: '18px',
+    sidebar: '240px',
+    measure: '70ch',
+    rhythm: '20px',
   },
 ];
 

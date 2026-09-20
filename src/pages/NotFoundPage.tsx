@@ -1,7 +1,17 @@
 import { Link } from 'react-router-dom';
 import { Compass, Library } from 'lucide-react';
+import { pageMetaFor } from '../data/routes';
+import { SITE_URL, usePageMeta } from '../lib/seo';
 
 export function NotFoundPage() {
+  const meta = pageMetaFor('/404');
+  usePageMeta(meta?.title ?? 'NotFound', {
+    description: meta?.description,
+    image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
+    jsonLd: meta?.jsonLd,
+    robots: 'noindex, follow',
+  });
+
   return (
     <div className="pb-panel" style={{ padding: 'clamp(32px, 6vw, 64px)', textAlign: 'center' }}>
       <Compass size={40} style={{ color: 'var(--c-accent)', margin: '0 auto 14px' }} />

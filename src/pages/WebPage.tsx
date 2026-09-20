@@ -4,6 +4,8 @@ import { BookmarkCheck, Globe, RefreshCw, Search, Sparkles } from 'lucide-react'
 import { useLibrary } from '../store/library';
 import { useUi } from '../store/ui';
 import { fetchCuratedWebSpeeches, searchWebSpeeches, type WebSpeech } from '../services/webSources';
+import { pageMetaFor } from '../data/routes';
+import { SITE_URL, usePageMeta } from '../lib/seo';
 
 const SUGGESTIONS = [
   'freedom',
@@ -24,6 +26,13 @@ const SUGGESTIONS = [
  * every item carries a link and a licence.
  */
 export function WebPage() {
+  const meta = pageMetaFor('/web');
+  usePageMeta(meta?.title ?? 'Web', {
+    description: meta?.description,
+    image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
+    jsonLd: meta?.jsonLd,
+  });
+
   const navigate = useNavigate();
   const shelf = useLibrary((s) => s.shelf);
   const addToShelf = useLibrary((s) => s.addToShelf);

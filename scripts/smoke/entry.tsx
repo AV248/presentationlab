@@ -3,25 +3,15 @@
  * Headless render smoke test.
  *
  * Renders every route (plus the overlays) inside jsdom, applies every one of
- * the 100+ theme options through the compiler, and fails loudly if React logs
+ * the 134 theme options through the compiler, and fails loudly if React logs
  * an error or a screen renders empty.
  */
 import { createRoot } from 'react-dom/client';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 import { AppShell } from '../../src/components/AppShell';
+import { AppRoutes } from '../../src/components/AppRoutes';
 import { CommandPalette } from '../../src/components/CommandPalette';
 import { HelpDialog, ThemeSheet } from '../../src/components/Overlays';
-import { LibraryPage } from '../../src/pages/LibraryPage';
-import { ReaderPage } from '../../src/pages/ReaderPage';
-import { StudioPage } from '../../src/pages/StudioPage';
-import { PracticePage } from '../../src/pages/PracticePage';
-import { CommunityPage } from '../../src/pages/CommunityPage';
-import { WebPage } from '../../src/pages/WebPage';
-import { DeskPage } from '../../src/pages/DeskPage';
-import { ControlPage } from '../../src/pages/ControlPage';
-import { ThemesPage } from '../../src/pages/ThemesPage';
-import { AboutPage } from '../../src/pages/AboutPage';
-import { NotFoundPage } from '../../src/pages/NotFoundPage';
 import { useThemeEngine } from '../../src/hooks/useThemeEngine';
 import { useSettings } from '../../src/store/settings';
 import { useLibrary } from '../../src/store/library';
@@ -47,21 +37,7 @@ function Harness({ route }: { route: string }) {
   return (
     <MemoryRouter initialEntries={[route]}>
       <AppShell>
-        <Routes>
-          <Route path="/" element={<LibraryPage />} />
-          <Route path="/read/:id" element={<ReaderPage />} />
-          <Route path="/studio" element={<StudioPage />} />
-          <Route path="/studio/:id" element={<StudioPage />} />
-          <Route path="/practice" element={<PracticePage />} />
-          <Route path="/practice/:id" element={<PracticePage />} />
-          <Route path="/community" element={<CommunityPage />} />
-          <Route path="/web" element={<WebPage />} />
-          <Route path="/desk" element={<DeskPage />} />
-          <Route path="/control" element={<ControlPage />} />
-          <Route path="/themes" element={<ThemesPage />} />
-          <Route path="/about" element={<AboutPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
+        <AppRoutes />
       </AppShell>
       <CommandPalette />
       <ThemeSheet />
@@ -84,11 +60,29 @@ async function main() {
     content: '## Hook\n\nThis draft exists only while the smoke test runs.',
   });
 
+  // Every theme-axis id must be unique within its axis.
+  const axes: [string, { id: string }[]][] = [
+    ['color', COLOR_THEMES],
+    ['motion', MOTION_THEMES],
+    ['layout', LAYOUT_THEMES],
+    ['ui', UI_THEMES],
+    ['ux', UX_THEMES],
+  ];
+  for (const [label, options] of axes) {
+    const ids = options.map((option) => option.id);
+    check(
+      ids.length > 20 && new Set(ids).size === ids.length,
+      `${options.length} ${label} options, all ids unique`,
+    );
+  }
+
   const container = document.getElementById('root')!;
   const routes = [
     '/',
     '/read/five-minutes',
     '/read/template-story-structure',
+    '/topics',
+    '/topics/public-speaking',
     '/studio',
     `/studio/${draftId}`,
     '/practice',
@@ -99,6 +93,7 @@ async function main() {
     '/control',
     '/themes',
     '/about',
+    '/admin',
     '/does-not-exist',
   ];
 
@@ -148,7 +143,10 @@ async function main() {
       }
     }
   }
-  check(combos === COLOR_THEMES.length * MOTION_THEMES.length * LAYOUT_THEMES.length * UI_THEMES.length * UX_THEMES.length, `${combos.toLocaleString()} theme combinations compiled`);
+  check(
+    combos === COLOR_THEMES.length * MOTION_THEMES.length * LAYOUT_THEMES.length * UI_THEMES.length * UX_THEMES.length,
+    `${combos.toLocaleString()} theme combinations compiled`,
+  );
 
   // Every preset must point at real options.
   const ids = {
@@ -166,7 +164,19 @@ async function main() {
       !ids.ui.has(preset.ui) ||
       !ids.ux.has(preset.ux),
   );
-  check(brokenPresets.length === 0, `${PRESETS.length} designer presets resolve`, brokenPresets.map((p) => p.id).join(', '));
+  check(
+    brokenPresets.length === 0,
+    `${PRESETS.length} designer presets resolve`,
+    brokenPresets.map((p) => p.id).join(', '),
+  );
+
+  // The sponsored slot must render politely even with no network at all.
+  await wait(600);
+  const bodyText = document.body.textContent ?? '';
+  check(
+    bodyText.includes('Sponsored') || bodyText.includes('From Presentation Buddy'),
+    'sponsored slot falls back gracefully offline',
+  );
 
   // Overlays render.
   useUi.getState().openPalette();

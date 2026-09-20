@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { Markdown } from '../components/Markdown';
 import { ReactionBar } from '../components/ReactionBar';
-import { AdGate } from '../components/AdGate';
+import { AdSlot } from '../components/AdSlot';
 import { useSpeech, useSpeeches } from '../hooks/useCollection';
 import { useLibrary } from '../store/library';
 import { useSettings } from '../store/settings';
@@ -33,6 +33,8 @@ import { fetchWebSpeech as fetchWebText } from '../services/webSources';
 import { analyse, formatCount, formatDate, readingMinutes } from '../lib/text';
 import { copyText, downloadFile, supportsSpeechSynthesis } from '../lib/platform';
 import { useGate } from '../components/SignIn';
+import { pageMetaFor } from '../data/routes';
+import { SITE_URL, absoluteUrl, usePageMeta } from '../lib/seo';
 
 export function ReaderPage() {
   const { id } = useParams<{ id: string }>();
@@ -61,18 +63,40 @@ export function ReaderPage() {
   const [speaking, setSpeaking] = useState(false);
   const [rate, setRate] = useState(1);
   const [progress, setLocalProgress] = useState(0);
-  const [adDone, setAdDone] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
   const [showNotes, setShowNotes] = useState(false);
 
   const stats = useMemo(() => analyse(item?.content ?? ''), [item?.content]);
   const speechId = item?.id;
 
+  // Every speech is its own addressable, shareable, indexable page.
+  const registryMeta = pageMetaFor(`/read/${id ?? ''}`);
+  usePageMeta(item ? item.title : 'Speech not found', {
+    description: registryMeta?.description ?? item?.preview?.slice(0, 158),
+    canonical: absoluteUrl(`/read/${id ?? ''}`),
+    image: registryMeta?.card ? `${SITE_URL}/cards/${registryMeta.card}.png` : undefined,
+    type: 'article',
+    robots: item ? undefined : 'noindex, follow',
+    jsonLd:
+      registryMeta?.jsonLd ??
+      (item
+        ? [
+            {
+              '@context': 'https://schema.org',
+              '@type': 'Article',
+              headline: item.title,
+              description: item.preview,
+              author: { '@type': 'Organization', name: item.author },
+              mainEntityOfPage: absoluteUrl(`/read/${item.id}`),
+            },
+          ]
+        : undefined),
+  });
+
   useEffect(() => {
     if (!item) return;
     pushHistory(item.id);
     setLastSpeech(item.id);
-    setAdDone(false);
     // A real view, counted once per open on the shared document.
     if (item.source === 'cloud') void registerView(item.id);
     // Web speeches arrive with an intro; pull the full text when opened.
@@ -141,8 +165,6 @@ export function ReaderPage() {
   const related = items.filter((i) => i.id !== item.id && i.category === item.category).slice(0, 4);
   const notes = marginNotes.filter((note) => note.speechId === item.id);
 
-  const adVisible = item.ad && !adDone;
-
   const toggleSpeech = () => {
     if (!supportsSpeechSynthesis()) {
       toast('Text-to-speech is not available in this browser', 'warn');
@@ -207,8 +229,6 @@ export function ReaderPage() {
         }}
         aria-hidden="true"
       />
-
-      {adVisible && <AdGate speechId={item.id} onFinish={() => setAdDone(true)} />}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <button type="button" className="pb-btn pb-btn-sm pb-btn-ghost" onClick={() => navigate(-1)}>
@@ -376,11 +396,6 @@ export function ReaderPage() {
           }}
         >
           <ReactionBar item={item} onCountsChange={() => void connect(true)} />
-          {item.ad && (
-            <span className="pb-chip" title="This speech is preceded by a short sponsor slot">
-              Sponsor-supported
-            </span>
-          )}
           {item.tags.slice(0, 6).map((tag) => (
             <span key={tag} className="pb-chip" style={{ fontSize: '0.72rem' }}>
               #{tag}
@@ -577,6 +592,8 @@ export function ReaderPage() {
 
         {!reader.focusMode && (
           <aside style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Sponsored: quiet, labelled, dismissible — below the fold of the article. */}
+            <AdSlot seed={`read-${item.id}`} variant="rail" />
             <div className="pb-panel" style={{ padding: 18 }}>
               <span className="pb-eyebrow">Coach</span>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, margin: '12px 0' }}>

@@ -1783,3 +1783,435 @@ a:hover > .pb-underline::after,
     content: '';
   }
 }
+
+/* ================================================================== */
+/* 12. Presentation Buddy 2.3 — pages, sponsored slots, new modes      */
+/* ================================================================== */
+
+/* --- page scaffold (guides, workspace, topics) --------------------- */
+.pb-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--l-rhythm);
+  width: 100%;
+  animation: pb-fade var(--m-base) var(--m-ease) both;
+}
+
+.pb-narrow {
+  max-width: 880px;
+  margin-inline: auto;
+}
+
+.pb-page-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pb-page-title {
+  font-family: var(--x-font-display);
+  font-size: clamp(1.55rem, 3.4vw, 2.3rem);
+  font-weight: var(--x-weight-display);
+  letter-spacing: var(--x-tracking);
+  line-height: 1.15;
+  margin: 0;
+}
+
+.pb-page-sub {
+  color: var(--c-ink-soft);
+  font-size: 0.98rem;
+  line-height: 1.7;
+  max-inline-size: 62ch;
+  margin: 0;
+}
+
+.pb-card-kicker {
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--c-ink-muted);
+  font-weight: 600;
+}
+
+.pb-link-quiet {
+  color: var(--c-ink-muted);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pb-link-quiet:hover {
+  color: var(--c-accent);
+}
+
+.pb-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* --- topic hubs ----------------------------------------------------- */
+.pb-topics-grid {
+  align-items: stretch;
+}
+
+.pb-topic-card {
+  text-decoration: none;
+  color: inherit;
+  gap: 0.35rem;
+}
+.pb-topic-card:visited {
+  color: inherit;
+}
+.pb-topic-card .pb-card-title {
+  font-size: 1.05rem;
+}
+.pb-topic-card .pb-card-preview {
+  color: var(--c-ink-soft);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+.pb-topic-more {
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--c-accent);
+}
+
+.pb-topic-guide {
+  line-height: var(--x-leading);
+}
+
+.pb-topic-speech {
+  text-decoration: none;
+  color: inherit;
+}
+.pb-topic-speech .pb-card-title {
+  font-size: 0.98rem;
+}
+.pb-topic-speech .pb-card-preview {
+  color: var(--c-ink-soft);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+/* --- sponsored slot --------------------------------------------------
+   Quiet, labelled, dismissible. Reserves its space before content
+   arrives so the page never jumps. */
+.pb-grid > .pb-ad {
+  grid-column: 1 / -1;
+}
+
+.pb-ad {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px dashed var(--c-line-strong);
+  border-radius: var(--u-radius);
+  background: var(--c-surface-2);
+  min-height: 92px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.pb-ad[data-empty='true'] {
+  min-height: 68px;
+  background: transparent;
+}
+
+.pb-ad-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 0 14px;
+}
+
+.pb-ad-tag {
+  font-size: 0.62rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--c-ink-muted);
+  font-weight: 600;
+}
+
+.pb-ad-close {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+}
+
+.pb-ad-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 14px 12px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 0 0 var(--u-radius) var(--u-radius);
+}
+.pb-ad-body:focus-visible {
+  outline: 2px solid var(--c-ring);
+  outline-offset: -2px;
+}
+
+.pb-ad-title {
+  font-weight: 650;
+  font-size: 0.95rem;
+  color: var(--c-ink);
+  font-family: var(--x-font-display);
+}
+.pb-ad-body:hover .pb-ad-title {
+  color: var(--c-accent);
+}
+
+.pb-ad-copy {
+  font-size: 0.8rem;
+  color: var(--c-ink-soft);
+  line-height: 1.55;
+}
+
+.pb-ad-cta {
+  font-size: 0.76rem;
+  font-weight: 650;
+  color: var(--c-accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.pb-ad-rail {
+  min-height: 104px;
+}
+
+/* --- admin form grid ------------------------------------------------ */
+.pb-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px 14px;
+}
+.pb-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: var(--c-ink-muted);
+  line-height: 1.4;
+}
+.pb-form-grid label > input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+}
+
+/* --- layout mode: atrium ---------------------------------------------
+   One dome piece, then a wide pair, then the crowd in thirds. */
+[data-layout-mode='atrium'] .pb-grid {
+  grid-template-columns: repeat(12, 1fr);
+}
+[data-layout-mode='atrium'] .pb-grid > * {
+  grid-column: span 4;
+}
+[data-layout-mode='atrium'] .pb-grid > .pb-card:first-child {
+  grid-column: 1 / -1;
+  align-items: center;
+  text-align: center;
+  padding-block: calc(var(--l-card-pad) * 1.6);
+}
+[data-layout-mode='atrium'] .pb-grid > .pb-card:first-child .pb-card-title {
+  font-size: clamp(1.5rem, 3.2vw, 2.3rem);
+  max-inline-size: 26ch;
+}
+[data-layout-mode='atrium'] .pb-grid > .pb-card:nth-child(2),
+[data-layout-mode='atrium'] .pb-grid > .pb-card:nth-child(3) {
+  grid-column: span 6;
+}
+[data-layout-mode='atrium'] .pb-grid > .pb-ad {
+  grid-column: 1 / -1;
+}
+
+/* --- layout mode: quilt ----------------------------------------------
+   A dense patchwork of unequal pieces. */
+[data-layout-mode='quilt'] .pb-grid {
+  grid-template-columns: repeat(6, 1fr);
+  grid-auto-flow: dense;
+}
+[data-layout-mode='quilt'] .pb-grid > * {
+  grid-column: span 2;
+}
+[data-layout-mode='quilt'] .pb-grid > .pb-card:nth-child(7n + 1),
+[data-layout-mode='quilt'] .pb-grid > .pb-card:nth-child(7n + 5) {
+  grid-column: span 3;
+}
+[data-layout-mode='quilt'] .pb-grid > .pb-card:nth-child(7n + 3) {
+  grid-column: span 4;
+}
+[data-layout-mode='quilt'] .pb-grid > .pb-card:nth-child(7n + 1) .pb-card-title {
+  font-size: 1.15rem;
+}
+[data-layout-mode='quilt'] .pb-grid > .pb-ad {
+  grid-column: 1 / -1;
+}
+
+/* --- layout mode: bands ----------------------------------------------
+   Full-width setlist rows with a ghost running number. */
+[data-layout-mode='bands'] .pb-grid {
+  grid-template-columns: 1fr;
+  counter-reset: pb-band;
+}
+[data-layout-mode='bands'] .pb-grid > .pb-card {
+  flex-direction: row;
+  align-items: center;
+  gap: calc(var(--l-card-pad));
+  counter-increment: pb-band;
+  overflow: hidden;
+}
+[data-layout-mode='bands'] .pb-grid > .pb-card::after {
+  content: counter(pb-band, decimal-leading-zero);
+  margin-left: auto;
+  font-family: var(--x-font-display);
+  font-weight: 700;
+  font-size: 2rem;
+  color: var(--c-line-strong);
+  opacity: 0.55;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+[data-layout-mode='bands'] .pb-grid > .pb-card::before {
+  left: 0;
+  right: auto;
+  top: 0;
+  bottom: 0;
+  height: auto;
+  width: 3px;
+}
+
+/* --- layout mode: guided ----------------------------------------------
+   A single column of plaques along a museum rail. */
+[data-layout-mode='guided'] .pb-grid {
+  grid-template-columns: 1fr;
+  position: relative;
+  padding-left: 26px;
+}
+[data-layout-mode='guided'] .pb-grid::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(var(--c-line-strong), var(--c-line-soft));
+}
+[data-layout-mode='guided'] .pb-grid > .pb-card::after {
+  content: '';
+  position: absolute;
+  left: calc(-1 * (26px - 2px));
+  top: calc(var(--l-card-pad) + 2px);
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: var(--c-canvas);
+  border: 2.5px solid var(--c-accent);
+  box-shadow: 0 0 0 3px var(--c-canvas);
+}
+[data-layout-mode='guided'] .pb-grid > .pb-card:hover::after {
+  background: var(--c-accent);
+}
+
+/* responsive fallbacks for the new modes */
+@media (max-width: 900px) {
+  [data-layout-mode='atrium'] .pb-grid > *,
+  [data-layout-mode='atrium'] .pb-grid > .pb-card:nth-child(2),
+  [data-layout-mode='atrium'] .pb-grid > .pb-card:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+  [data-layout-mode='quilt'] .pb-grid > *,
+  [data-layout-mode='quilt'] .pb-grid > .pb-card:nth-child(7n + 1),
+  [data-layout-mode='quilt'] .pb-grid > .pb-card:nth-child(7n + 3),
+  [data-layout-mode='quilt'] .pb-grid > .pb-card:nth-child(7n + 5) {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 640px) {
+  [data-layout-mode='bands'] .pb-grid > .pb-card::after {
+    font-size: 1.4rem;
+  }
+  [data-layout-mode='guided'] .pb-grid {
+    padding-left: 20px;
+  }
+  [data-layout-mode='guided'] .pb-grid > .pb-card::after {
+    left: calc(-1 * (20px - 2px));
+  }
+}
+
+/* --- material accents: the four new materials ----------------------- */
+[data-ui-style='hologram'] .pb-card,
+[data-ui-style='hologram'] .pb-panel {
+  border-color: color-mix(in srgb, var(--c-accent) 34%, var(--c-line));
+}
+[data-ui-style='bronze-plate'] .pb-card,
+[data-ui-style='bronze-plate'] .pb-panel {
+  border-color: color-mix(in srgb, var(--c-accent-2) 42%, var(--c-line));
+  border-radius: max(var(--u-radius), 4px);
+}
+[data-ui-style='porcelain'] .pb-card,
+[data-ui-style='porcelain'] .pb-panel {
+  border-color: color-mix(in srgb, var(--c-line) 60%, #ffffff 40%);
+}
+[data-ui-style='kraft'] .pb-card,
+[data-ui-style='kraft'] .pb-panel {
+  border-style: solid;
+  border-left-width: 3px;
+  border-left-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-line));
+}
+
+/* --- touch & small-screen polish (2.3 pass) ------------------------- */
+@media (pointer: coarse) {
+  .pb-ad-body {
+    padding-block: 8px 14px;
+  }
+}
+
+@media (max-width: 700px) {
+  .pb-page-title {
+    font-size: clamp(1.35rem, 6.4vw, 1.7rem);
+  }
+  .pb-page-sub {
+    font-size: 0.92rem;
+  }
+  .pb-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .pb-tabs {
+    gap: 4px;
+  }
+  .pb-tabs .pb-chip {
+    padding: 6px 10px;
+    font-size: 0.78rem;
+  }
+}
+
+/* safe-area breathing room for notched devices */
+@supports (padding: max(0px)) {
+  .pb-topbar {
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(12px, env(safe-area-inset-left));
+  }
+  .pb-bottomnav {
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+  }
+}
+
+/* keep sponsored cards honest in print */
+@media print {
+  .pb-ad {
+    display: none;
+  }
+}
