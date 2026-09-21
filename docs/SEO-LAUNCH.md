@@ -1,6 +1,6 @@
 # SEO launch playbook — presentationbuddy.aavrit.dedyn.io
 
-Everything the site needs technically is already built into version 2.3.
+Everything the site needs technically is already built into version 2.4.
 This file is the short, ordered list of what **you** need to do outside the code.
 
 ---
@@ -10,7 +10,7 @@ This file is the short, ordered list of what **you** need to do outside the code
 The version that is live today is the old client-rendered app: one page, one title,
 one description, and content that only exists after JavaScript runs. Google indexed that
 one thin page and found nothing to rank.
-**Version 2.3 fixes this on the code side: 57 real HTML pages, each with its own title,
+**Version 2.4 fixes this on the code side: 57 real HTML pages, each with its own title,
 description, canonical URL, social cards and structured data.** Ranking will follow the
 deploy, not precede it.
 
@@ -48,14 +48,14 @@ each must show its own `<title>` and real text, not an empty app shell:
    *Request Indexing*), in this order: `/`, `/topics`, all 14 topic hubs
    (`/topics/public-speaking`, `/topics/wedding-speeches`, …), the flagship reads
    (`/read/five-minutes`, `/read/toast-i-practised`, `/read/remembering-amma`, …),
-   `/studio`, `/practice`. The full ranked list is in `dist/sitemap.xml`.
+   `/write`, `/rehearse`, `/arrivals`. The full ranked list is in `dist/sitemap.xml`.
 4. Watch **Pages → Why pages aren't indexed over the next 2–6 weeks.** Expect
    "Crawled – currently not indexed" for a while on a new site; that's normal, not an error.
 
 ## 3. Win some keywords, not all keywords
 
 No site can rank for "every single search" — Google ranks pages, not websites, and each
-page needs to be the best answer for a specific query. The 2.3 build is deliberately
+page needs to be the best answer for a specific query. The 2.4 build is deliberately
 aimed at queries you can realistically win first:
 
 | Hub | Target queries |
@@ -66,8 +66,9 @@ aimed at queries you can realistically win first:
 | `/topics/speech-templates` | speech template, speech outline |
 | `/topics/speaking-confidence` | overcome fear of public speaking, speech anxiety |
 | `/topics/presentation-skills` | presentation skills, how to start a presentation |
-| `/practice` | teleprompter online free, practice speech online |
-| `/studio` | free speech writer, write a speech online |
+| `/rehearse` | teleprompter online free, practice speech online, fullscreen speech practice |
+| `/write` | free speech writer, write a speech online, speech word alternatives |
+| `/arrivals` | famous speeches public domain, historic speech texts |
 | reads like `/read/toast-i-practised`, `/read/remembering-amma`, `/read/saying-goodbye-well` | specific example-speech searches (toast, eulogy, farewell) |
 
 **Weeks 1–4:** expect impressions for the example speeches and brand name.
@@ -75,7 +76,7 @@ aimed at queries you can realistically win first:
 
 ## 4. The work only you can do
 
-- **Content cadence:** publish one new speech or guide a week (`/studio` → publish).
+- **Content cadence:** publish one new speech or guide a week (`/write` → publish).
   Fresh original pages are the only compounding ranking asset.
 - **Backlinks:** share the guides where speakers look — r/publicspeaking, wedding and
   forum communities, your university/club pages, a blog post a month answering one

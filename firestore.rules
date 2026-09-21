@@ -7,6 +7,13 @@ rules_version = '2';
 // via Firebase Authentication). People may only delete their own work, and
 // only an owner or admin may touch anyone else's.
 //
+// The one deliberate exception is *counters*. A like on someone else's
+// speech has to move a number on a document you do not own, so the rules
+// below allow a signed-in person to change `views`, `likes`, `dislikes` and
+// `shares` — and nothing else — on any speech. `diff().affectedKeys()` is
+// what makes that safe: the moment a write touches the title, the body or
+// the author it stops being a counter update and the owner check applies.
+//
 // Deploy with:  firebase deploy --only firestore:rules
 
 service cloud.firestore {
@@ -20,26 +27,69 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    function adminDoc() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data;
+    }
+
+    function hasAdminDoc() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
     function isAdmin() {
-      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role in ['admin', 'owner'];
+      return hasAdminDoc() && adminDoc().role in ['admin', 'owner'];
     }
 
     function isSiteOwner() {
-      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'owner';
+      return hasAdminDoc() && adminDoc().role == 'owner';
+    }
+
+    // The set of keys a write actually changed.
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // True when a write only moves the four public counters.
+    function onlyCounters() {
+      return changed().hasOnly(['views', 'likes', 'dislikes', 'shares']);
+    }
+
+    // Counters may only ever move by one step at a time, and never below
+    // zero. This keeps a hostile client from writing likes = 10000000.
+    function sane(field) {
+      return !(field in changed())
+        || (request.resource.data[field] is int
+            && request.resource.data[field] >= 0
+            && request.resource.data[field] <= resource.data.get(field, 0) + 1);
+    }
+
+    function saneCounters() {
+      return sane('views') && sane('likes') && sane('dislikes') && sane('shares');
     }
 
     // ------------------------------------------------------------------
     // Speeches. Anyone may read; signed-in people may publish and may only
-    // change or remove their own.
+    // change or remove their own — except for the public counters, which
+    // any signed-in person may nudge by one.
     // ------------------------------------------------------------------
     match /presentations/{speechId} {
       allow read: if true;
+
+      // Note the capitalised field names: they are the original schema
+      // from the first version of this site and the client still writes
+      // them, so the rules have to validate the same keys the code sends.
       allow create: if isSignedIn()
-        && request.resource.data.uid == request.auth.uid;
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.Title is string
+        && request.resource.data.Title.size() > 0
+        && request.resource.data.Title.size() <= 200
+        && request.resource.data.Content is string
+        && request.resource.data.Content.size() <= 200000;
+
       allow update: if isAdmin()
-        || (isSignedIn() && resource.data.uid == request.auth.uid);
+        || (isSignedIn() && resource.data.uid == request.auth.uid)
+        || (isSignedIn() && onlyCounters() && saneCounters());
+
       allow delete: if isAdmin()
         || (isSignedIn() && resource.data.uid == request.auth.uid);
 
@@ -51,12 +101,15 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------------------
-    // Reactions. One document per (person, speech). Only you can write yours.
+    // Reactions. One document per (person, speech). Only you can write
+    // yours, and the id must be your own uid joined to the speech so a
+    // person can never hold two reactions on one speech.
     // ------------------------------------------------------------------
     match /reactions/{reactionId} {
       allow read: if isSignedIn();
       allow create, update: if isSignedIn()
         && request.resource.data.uid == request.auth.uid
+        && reactionId == request.auth.uid + '_' + request.resource.data.speechId
         && request.resource.data.kind in ['like', 'dislike'];
       allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
@@ -75,19 +128,27 @@ service cloud.firestore {
     // ------------------------------------------------------------------
     match /bloggerblogs/{postId} {
       allow read: if true;
-      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.get('Content', '').size() <= 20000;
       allow update, delete: if isAdmin()
         || (isSignedIn() && resource.data.uid == request.auth.uid);
     }
 
     // ------------------------------------------------------------------
     // Contributor profiles and real point counters (the old "bloggers").
-    // Counters themselves are only ever moved by trusted client code paths
-    // that run inside a transaction; people can maintain their own profile.
+    //
+    // You maintain your own profile. Everyone else may only move the
+    // received-reaction tallies, because a like on your speech is recorded
+    // by the person giving it, not by you.
     // ------------------------------------------------------------------
     match /bloggers/{uid} {
       allow read: if true;
-      allow create, update: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid) || isAdmin();
+      allow update: if isOwner(uid)
+        || isAdmin()
+        || (isSignedIn()
+            && changed().hasOnly(['likesReceived', 'dislikesReceived', 'points', 'updatedAt']));
       allow delete: if isSiteOwner();
     }
 
@@ -102,6 +163,7 @@ service cloud.firestore {
 
     // ------------------------------------------------------------------
     // Roles. Readable by their holder; writable only by the site owner.
+    // Nobody can grant themselves a role from the client.
     // ------------------------------------------------------------------
     match /admins/{uid} {
       allow read: if isSignedIn();
@@ -109,9 +171,16 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------------------
-    // Optional sponsor slots shown before sponsor-supported speeches.
+    // Sponsor slots shown alongside speeches. Public to read (the site
+    // renders them for signed-out visitors), admin-only to change.
     // ------------------------------------------------------------------
     match /sponsors/{sponsorId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Ad campaigns edited from /admin and read by every visitor.
+    match /ads/{adId} {
       allow read: if true;
       allow write: if isAdmin();
     }
@@ -124,6 +193,11 @@ service cloud.firestore {
     match /admin/{docId} {
       allow read: if isSignedIn();
       allow write: if false;
+    }
+
+    // Anything not named above is denied outright.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

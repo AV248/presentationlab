@@ -153,7 +153,7 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
         <button
           type="button"
           className="pb-btn pb-btn-sm"
-          onClick={() => navigate(`/practice/${encodeURIComponent(item.id)}`)}
+          onClick={() => navigate(`/rehearse/${encodeURIComponent(item.id)}`)}
           title="Rehearse with the teleprompter"
         >
           <Mic2 size={14} /> Rehearse
@@ -161,7 +161,7 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
         <button
           type="button"
           className="pb-btn pb-btn-sm pb-btn-ghost"
-          onClick={() => navigate(`/studio/${encodeURIComponent(item.id)}`)}
+          onClick={() => navigate(`/write/${encodeURIComponent(item.id)}`)}
           title="Copy into your drafts and make it yours"
         >
           <PenLine size={14} /> Remix

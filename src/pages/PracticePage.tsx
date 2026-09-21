@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
+  ChevronDown,
+  Clapperboard,
   Feather,
+  FlipHorizontal,
   Gauge,
   HeartHandshake,
   Maximize2,
   Minimize2,
-  MirrorRectangular,
   Pause,
   Play,
   RotateCcw,
   Type,
   Wind,
+  X,
 } from 'lucide-react';
 import { useSpeeches } from '../hooks/useCollection';
 import { useSettings } from '../store/settings';
@@ -28,9 +31,20 @@ import { AFTER_PRACTICE, LETTER_PROMPTS, breathPhase, pick } from '../lib/heart'
 import { pageMetaFor } from '../data/routes';
 import { SITE_URL, usePageMeta } from '../lib/seo';
 
+/**
+ * The Rehearsal Room — the centre of this app.
+ *
+ * Everything else exists so that you can end up here: a full-screen stage,
+ * your words moving at your pace, a clock that tells you the truth, and a
+ * letter to yourself when the run is done.
+ *
+ * 2.4 makes the stage the page rather than a panel inside it. Entering
+ * the stage hides every control until you move; the teleprompter fills the
+ * screen on a phone exactly as it does on a laptop.
+ */
 export function PracticePage() {
-  const meta = pageMetaFor('/practice');
-  usePageMeta(meta?.title ?? 'Practice', {
+  const meta = pageMetaFor('/rehearse');
+  usePageMeta(meta?.title ?? 'Rehearsal Room', {
     description: meta?.description,
     image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
     jsonLd: meta?.jsonLd,
@@ -45,23 +59,30 @@ export function PracticePage() {
   const markMilestone = useLibrary((s) => s.markMilestone);
 
   const [selectedId, setSelectedId] = useState<string>(id ?? '');
-  const item = useMemo(() => items.find((speech) => speech.id === selectedId) ?? null, [items, selectedId]);
+  const item = useMemo(
+    () => items.find((speech) => speech.id === selectedId) ?? null,
+    [items, selectedId],
+  );
 
   useEffect(() => {
     if (id) setSelectedId(id);
   }, [id]);
 
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const innerRef = useRef<HTMLDivElement | null>(null);
   const offsetRef = useRef(0);
   const rafRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
+  const idleRef = useRef<number | null>(null);
 
   const [running, setRunning] = useState(false);
   const [offset, setOffset] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const [countdown, setCountdown] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
+  const [onStage, setOnStage] = useState(false);
+  const [chromeVisible, setChromeVisible] = useState(true);
   const [finished, setFinished] = useState(false);
 
   /* The human parts: who it is for, a breath, and a letter afterwards. */
@@ -100,7 +121,7 @@ export function PracticePage() {
   }, [selectedId, stop]);
 
   useEffect(() => {
-    if (countdown <= 0) return;
+    if (countdown <= 0) return undefined;
     const tick = window.setTimeout(() => {
       setCountdown((value) => {
         if (value - 1 === 0) {
@@ -116,12 +137,13 @@ export function PracticePage() {
   useEffect(() => {
     if (!breathing) return undefined;
     const started = performance.now();
-    const id = window.setInterval(() => setBreathElapsed(performance.now() - started), 100);
-    return () => window.clearInterval(id);
+    const timer = window.setInterval(() => setBreathElapsed(performance.now() - started), 100);
+    return () => window.clearInterval(timer);
   }, [breathing]);
 
   const breath = breathPhase(breathElapsed);
 
+  /* ---- the scroll engine ---- */
   useEffect(() => {
     if (!running || !item) return undefined;
 
@@ -132,10 +154,10 @@ export function PracticePage() {
       const delta = (time - lastTimeRef.current) / 1000;
       lastTimeRef.current = time;
 
-      const container = containerRef.current;
+      const viewport = viewportRef.current;
       const inner = innerRef.current;
-      if (container && inner) {
-        const distance = Math.max(0, inner.scrollHeight - container.clientHeight);
+      if (viewport && inner) {
+        const distance = Math.max(0, inner.scrollHeight - viewport.clientHeight);
         const duration = Math.max(1, (words / practice.wpm) * 60);
         const pxPerSecond = distance / duration;
         offsetRef.current = Math.min(distance, offsetRef.current + pxPerSecond * delta);
@@ -143,6 +165,7 @@ export function PracticePage() {
         if (offsetRef.current >= distance - 0.5) {
           stop();
           setFinished(true);
+          setChromeVisible(true);
           if (markMilestone('first-rehearsal')) {
             toast('First rehearsal done. That is the hardest one.', 'success');
           }
@@ -160,11 +183,49 @@ export function PracticePage() {
     };
   }, [running, item, practice.wpm, words, stop, toast, markMilestone]);
 
+  /* ---- on stage, the controls fade until you move ---- */
+  const wakeChrome = useCallback(() => {
+    setChromeVisible(true);
+    if (idleRef.current) window.clearTimeout(idleRef.current);
+    idleRef.current = window.setTimeout(() => setChromeVisible(false), 2600);
+  }, []);
+
+  useEffect(() => {
+    if (!onStage || !running) {
+      if (idleRef.current) window.clearTimeout(idleRef.current);
+      setChromeVisible(true);
+      return undefined;
+    }
+    wakeChrome();
+    return () => {
+      if (idleRef.current) window.clearTimeout(idleRef.current);
+    };
+  }, [onStage, running, wakeChrome]);
+
+  const enterStage = useCallback(async () => {
+    setOnStage(true);
+    const next = await toggleFullscreen(stageRef.current ?? undefined);
+    setFullscreen(next);
+    if (!running && countdown === 0 && offset === 0) restart();
+  }, [countdown, offset, restart, running]);
+
+  const leaveStage = useCallback(async () => {
+    stop();
+    if (isFullscreen()) {
+      await toggleFullscreen(stageRef.current ?? undefined);
+    }
+    setFullscreen(false);
+    setOnStage(false);
+    setChromeVisible(true);
+  }, [stop]);
+
+  /* ---- keys ---- */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
       if (!item) return;
+
       if (event.code === 'Space') {
         event.preventDefault();
         if (running) stop();
@@ -174,373 +235,435 @@ export function PracticePage() {
       if (event.key === 'ArrowUp') {
         event.preventDefault();
         patchPractice({ wpm: Math.min(260, practice.wpm + 5) });
+        wakeChrome();
+        return;
       }
       if (event.key === 'ArrowDown') {
         event.preventDefault();
         patchPractice({ wpm: Math.max(60, practice.wpm - 5) });
+        wakeChrome();
+        return;
       }
       if (event.key.toLowerCase() === 'r') restart();
-      if (event.key.toLowerCase() === 'f') {
-        void (async () => {
-          const next = await toggleFullscreen(containerRef.current ?? undefined);
-          setFullscreen(next);
-        })();
-      }
+      if (event.key.toLowerCase() === 'f') void (onStage ? leaveStage() : enterStage());
+      if (event.key === 'Escape' && onStage) void leaveStage();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [item, running, countdown, stop, restart, patchPractice, practice.wpm]);
+  }, [
+    item,
+    running,
+    countdown,
+    stop,
+    restart,
+    patchPractice,
+    practice.wpm,
+    onStage,
+    enterStage,
+    leaveStage,
+    wakeChrome,
+  ]);
 
+  // The browser can leave fullscreen without us (Esc, gesture, OS).
   useEffect(() => {
-    const sync = () => setFullscreen(isFullscreen());
+    const sync = () => {
+      const active = isFullscreen();
+      setFullscreen(active);
+      if (!active && onStage) {
+        setOnStage(false);
+        setChromeVisible(true);
+      }
+    };
     document.addEventListener('fullscreenchange', sync);
-    return () => document.removeEventListener('fullscreenchange', sync);
-  }, []);
+    document.addEventListener('webkitfullscreenchange', sync);
+    return () => {
+      document.removeEventListener('fullscreenchange', sync);
+      document.removeEventListener('webkitfullscreenchange', sync);
+    };
+  }, [onStage]);
 
   useEffect(() => () => void releaseWakeLock(), []);
 
   const paceDelta = targetSeconds ? elapsed - targetSeconds : 0;
-  const progress = item ? Math.min(1, offset / Math.max(1, innerRef.current?.scrollHeight ?? 1)) : 0;
+  const distance = Math.max(1, (innerRef.current?.scrollHeight ?? 1) - (viewportRef.current?.clientHeight ?? 0));
+  const progress = item ? Math.min(1, offset / distance) : 0;
+  const stageText = item ? item.content.replace(/^#{1,6}\s+/gm, '').replace(/^>\s?/gm, '') : '';
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <div>
-          <span className="pb-eyebrow">Rehearsal room</span>
-          <h1 style={{ fontSize: 'clamp(1.3rem, 3vw, 1.8rem)' }}>
-            {item ? item.title : 'Pick something to rehearse'}
-          </h1>
-        </div>
-        <div style={{ flex: 1 }} />
-        <select
-          className="pb-select"
-          style={{ width: 'auto', minWidth: 220, maxWidth: '100%' }}
-          value={selectedId}
-          onChange={(event) => setSelectedId(event.target.value)}
-          aria-label="Choose a speech"
+  /* ------------------------------------------------------------------ */
+  /* the stage                                                           */
+  /* ------------------------------------------------------------------ */
+
+  const stage = (
+    <div
+      ref={stageRef}
+      className="pb-stage"
+      data-on-stage={onStage}
+      data-chrome={chromeVisible}
+      onMouseMove={onStage ? wakeChrome : undefined}
+      onTouchStart={onStage ? wakeChrome : undefined}
+    >
+      <div ref={viewportRef} className="pb-stage-viewport">
+        {practice.cueLine && <div className="pb-cue-line" aria-hidden="true" />}
+
+        {countdown > 0 && (
+          <div className="pb-stage-countdown" aria-live="polite">
+            <span>{countdown}</span>
+            {intention.trim() && <p>This one is for {intention.trim()}.</p>}
+          </div>
+        )}
+
+        <div
+          ref={innerRef}
+          className="pb-prompt"
+          style={{
+            ['--prompt-scale' as string]: String(practice.fontScale),
+            transform: `translateY(${-offset}px)${practice.mirror ? ' scaleX(-1)' : ''}`,
+            transition: running ? 'none' : 'transform 260ms ease',
+          }}
         >
-          <option value="">Choose a speech…</option>
-          {items.map((speech) => (
-            <option key={speech.id} value={speech.id}>
-              {speech.title} · {speech.minutes} min
-            </option>
-          ))}
-        </select>
+          {stageText}
+        </div>
       </div>
 
-      {!item ? (
-        <div className="pb-panel" style={{ padding: 40, textAlign: 'center' }}>
-          <div style={{ fontSize: '2.2rem', marginBottom: 10 }} aria-hidden="true">
-            🎙️
-          </div>
-          <h2 style={{ marginBottom: 8 }}>Nothing loaded</h2>
-          <p className="pb-muted" style={{ maxWidth: 460, margin: '0 auto 18px', lineHeight: 1.7 }}>
-            Choose a speech above, or pick one in the library and press “Rehearse”.
+      {/* progress hairline, always visible, never in the way */}
+      <div className="pb-stage-progress" aria-hidden="true">
+        <span style={{ width: `${Math.round(progress * 100)}%` }} />
+      </div>
+
+      {/* stage controls: a single bar, fading when you stop moving */}
+      <div className="pb-stage-bar">
+        <button
+          type="button"
+          className="pb-btn pb-btn-primary"
+          onClick={() => {
+            if (running) stop();
+            else if (countdown > 0) setCountdown(0);
+            else if (offset > 0) setRunning(true);
+            else restart();
+            wakeChrome();
+          }}
+        >
+          {running ? <Pause size={16} /> : <Play size={16} />}
+          <span className="pb-hide-xs">{running ? 'Pause' : offset > 0 ? 'Resume' : 'Start'}</span>
+        </button>
+
+        <button type="button" className="pb-icon-btn" onClick={restart} title="Restart (R)" aria-label="Restart">
+          <RotateCcw size={16} />
+        </button>
+
+        <label className="pb-stage-slider" title="Pace">
+          <Gauge size={15} aria-hidden="true" />
+          <input
+            type="range"
+            min={70}
+            max={220}
+            step={5}
+            value={practice.wpm}
+            onChange={(event) => {
+              patchPractice({ wpm: Number(event.target.value) });
+              wakeChrome();
+            }}
+            aria-label="Words per minute"
+          />
+          <span className="pb-mono">{practice.wpm}</span>
+        </label>
+
+        <label className="pb-stage-slider pb-hide-sm" title="Text size">
+          <Type size={15} aria-hidden="true" />
+          <input
+            type="range"
+            min={0.7}
+            max={2.6}
+            step={0.1}
+            value={practice.fontScale}
+            onChange={(event) => {
+              patchPractice({ fontScale: Number(event.target.value) });
+              wakeChrome();
+            }}
+            aria-label="Text size"
+          />
+        </label>
+
+        <button
+          type="button"
+          className="pb-icon-btn pb-hide-sm"
+          onClick={() => patchPractice({ mirror: !practice.mirror })}
+          aria-pressed={practice.mirror}
+          title="Mirror for beam-splitter glass"
+          aria-label="Mirror text"
+        >
+          <FlipHorizontal size={16} />
+        </button>
+
+        <div className="pb-stage-clocks">
+          <TimerChip label="Elapsed" value={formatClock(Math.round(elapsed))} />
+          <TimerChip
+            label={paceDelta >= 0 ? 'Over' : 'Under'}
+            value={formatClock(Math.round(Math.abs(paceDelta)))}
+            tone={Math.abs(paceDelta) > 30 ? 'var(--c-warn)' : 'var(--c-ok)'}
+          />
+          <TimerChip label="Target" value={formatClock(targetSeconds)} className="pb-hide-sm" />
+        </div>
+
+        <button
+          type="button"
+          className="pb-icon-btn"
+          onClick={() => void (onStage ? leaveStage() : enterStage())}
+          title={onStage ? 'Leave the stage (Esc)' : 'Go full screen (F)'}
+          aria-label={onStage ? 'Leave full screen' : 'Enter full screen'}
+        >
+          {onStage || fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+        </button>
+
+        {onStage && (
+          <button
+            type="button"
+            className="pb-icon-btn pb-stage-exit"
+            onClick={() => void leaveStage()}
+            aria-label="Close the stage"
+            title="Close the stage (Esc)"
+          >
+            <X size={16} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  /* ------------------------------------------------------------------ */
+
+  if (!item) {
+    return (
+      <div className="pb-page">
+        <RehearseHero items={items} selectedId={selectedId} onSelect={setSelectedId} />
+        <div className="pb-panel pb-empty">
+          <Clapper />
+          <h2>Pick something to say out loud</h2>
+          <p>
+            Choose a speech above, open one from the library and press <strong>Rehearse</strong>, or
+            write your own first. The stage works the same either way.
           </p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <div className="pb-empty-actions">
             <Link to="/" className="pb-btn pb-btn-primary">
               Browse the library
             </Link>
-            <Link to="/studio" className="pb-btn">
+            <Link to="/write" className="pb-btn">
               Write something first
             </Link>
           </div>
         </div>
-      ) : (
-        <>
-          {/* Who is this for? */}
-          <section className="pb-panel" style={{ padding: '14px 18px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <HeartHandshake size={16} style={{ color: 'var(--c-accent)' }} />
-              <strong style={{ fontSize: '0.9rem' }}>Before you start</strong>
-            </div>
-            <label className="pb-muted" style={{ fontSize: '0.82rem', display: 'block', marginBottom: 8, lineHeight: 1.6 }}>
-              Who is this for? One name, or one kind of person. Saying it out loud changes how you say
-              everything else.
-            </label>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <input
-                className="pb-input"
-                style={{ flex: '1 1 220px' }}
-                placeholder="e.g. the new apprentices, or: my sister"
-                value={intention}
-                onChange={(event) => setIntention(event.target.value)}
-                aria-label="Who is this speech for"
-                maxLength={120}
-              />
-              <button
-                type="button"
-                className={`pb-btn ${breathing ? 'pb-btn-primary' : ''}`}
-                onClick={() => {
-                  setBreathing((value) => !value);
-                  setBreathElapsed(0);
-                }}
-                aria-pressed={breathing}
-              >
-                <Wind size={15} /> {breathing ? 'Stop breathing' : 'Breathe first'}
-              </button>
-            </div>
+      </div>
+    );
+  }
 
-            {breathing && (
+  return (
+    <div className="pb-page" data-rehearsing={onStage}>
+      {!onStage && (
+        <RehearseHero
+          items={items}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          title={item.title}
+          minutes={Math.max(1, Math.round(targetSeconds / 60))}
+          words={words}
+          onStart={() => void enterStage()}
+        />
+      )}
+
+      {!onStage && (
+        <section className="pb-panel pb-before">
+          <div className="pb-before-head">
+            <HeartHandshake size={16} aria-hidden="true" />
+            <strong>Before you start</strong>
+          </div>
+          <label className="pb-before-label" htmlFor="intention">
+            Who is this for? One name, or one kind of person. Saying it out loud changes how you say
+            everything else.
+          </label>
+          <div className="pb-before-row">
+            <input
+              id="intention"
+              className="pb-input"
+              placeholder="e.g. the new apprentices, or: my sister"
+              value={intention}
+              onChange={(event) => setIntention(event.target.value)}
+              maxLength={120}
+            />
+            <button
+              type="button"
+              className={`pb-btn ${breathing ? 'pb-btn-primary' : ''}`}
+              onClick={() => {
+                setBreathing((value) => !value);
+                setBreathElapsed(0);
+              }}
+              aria-pressed={breathing}
+            >
+              <Wind size={15} /> {breathing ? 'Stop' : 'Breathe first'}
+            </button>
+          </div>
+
+          {breathing && (
+            <div className="pb-breath anim-enter">
               <div
-                className="pb-well anim-enter"
-                style={{ marginTop: 12, padding: '18px', textAlign: 'center' }}
+                className="pb-breath-ring"
+                style={{
+                  transform: `scale(${
+                    breath.label === 'Breathe in' ? 1.15 : breath.label === 'Breathe out' ? 0.85 : 1
+                  })`,
+                }}
               >
-                <div
-                  style={{
-                    width: 96,
-                    height: 96,
-                    margin: '0 auto 12px',
-                    borderRadius: 999,
-                    border: '2px solid var(--c-accent)',
-                    display: 'grid',
-                    placeItems: 'center',
-                    transform: `scale(${breath.label === 'Breathe in' ? 1.15 : breath.label === 'Breathe out' ? 0.85 : 1})`,
-                    transition: 'transform 600ms ease',
-                    background: 'var(--c-accent-soft)',
-                  }}
-                >
-                  <span style={{ fontFamily: 'var(--x-font-display)', fontSize: '1.5rem' }}>
-                    {Math.ceil(breath.remaining / 1000)}
-                  </span>
-                </div>
-                <div style={{ fontFamily: 'var(--x-font-display)', fontSize: '1.05rem' }}>{breath.label}</div>
-                <p className="pb-muted" style={{ fontSize: '0.78rem', marginTop: 6 }}>
-                  Four counts in, four held, six out. Three rounds is enough to change your voice.
-                </p>
+                <span>{Math.ceil(breath.remaining / 1000)}</span>
               </div>
-            )}
-          </section>
+              <div className="pb-breath-label">{breath.label}</div>
+              <p>Four counts in, four held, six out. Three rounds is enough to change your voice.</p>
+            </div>
+          )}
+        </section>
+      )}
 
-          <section
-            className="pb-panel"
-            style={{ padding: '12px 14px', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}
-          >
+      {stage}
+
+      {!onStage && (
+        <div className="pb-stage-footnote">
+          <span>
+            {words} words · {Math.round(progress * 100)}% through
+          </span>
+          <span className="pb-keys">
+            <kbd className="pb-kbd">Space</kbd> play · <kbd className="pb-kbd">↑↓</kbd> pace ·{' '}
+            <kbd className="pb-kbd">R</kbd> restart · <kbd className="pb-kbd">F</kbd> full screen
+          </span>
+          <Link to={`/read/${encodeURIComponent(item.id)}`} className="pb-btn pb-btn-sm">
+            Open reader
+          </Link>
+        </div>
+      )}
+
+      {finished && !onStage && (
+        <section className="pb-panel anim-enter pb-after">
+          <div className="pb-rule">
+            <span>❧ After the run</span>
+          </div>
+          <p className="pb-after-closing">{closing}</p>
+
+          <label className="pb-label" htmlFor="letter">
+            A letter to yourself, before the real thing
+          </label>
+          <p className="pb-after-prompt">{letterPrompt}</p>
+          <textarea
+            id="letter"
+            className="pb-textarea"
+            style={{ minHeight: 110 }}
+            value={letter}
+            onChange={(event) => setLetter(event.target.value)}
+            placeholder="Dear me, before I walk in…"
+            maxLength={2000}
+          />
+          <div className="pb-after-actions">
             <button
               type="button"
               className="pb-btn pb-btn-primary"
+              disabled={!letter.trim()}
               onClick={() => {
-                if (running) stop();
-                else if (countdown > 0) setCountdown(0);
-                else if (offset > 0) setRunning(true);
-                else restart();
+                addLetter({ speechId: item.id, speechTitle: item.title, text: letter.trim() });
+                setLetter('');
+                toast('Kept on your desk', 'success');
               }}
             >
-              {running ? <Pause size={16} /> : <Play size={16} />}
-              {running ? 'Pause' : offset > 0 ? 'Resume' : `Start (${practice.countdown}s)`}
+              <Feather size={15} /> Keep this letter
             </button>
-            <button type="button" className="pb-btn" onClick={restart}>
-              <RotateCcw size={15} /> Restart
+            <button type="button" className="pb-btn" onClick={() => void enterStage()}>
+              <RotateCcw size={15} /> Run it again
             </button>
-
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem' }}>
-              <Gauge size={15} />
-              <input
-                type="range"
-                min={70}
-                max={220}
-                step={5}
-                value={practice.wpm}
-                onChange={(event) => patchPractice({ wpm: Number(event.target.value) })}
-                style={{ width: 110, accentColor: 'var(--c-accent)' }}
-                aria-label="Words per minute"
-              />
-              <span className="pb-mono" style={{ minWidth: 62 }}>
-                {practice.wpm} wpm
-              </span>
-            </label>
-
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem' }}>
-              <Type size={15} />
-              <input
-                type="range"
-                min={0.7}
-                max={2.2}
-                step={0.1}
-                value={practice.fontScale}
-                onChange={(event) => patchPractice({ fontScale: Number(event.target.value) })}
-                style={{ width: 90, accentColor: 'var(--c-accent)' }}
-                aria-label="Text size"
-              />
-            </label>
-
-            <button
-              type="button"
-              className={`pb-btn pb-btn-sm ${practice.mirror ? 'pb-btn-primary' : ''}`}
-              onClick={() => patchPractice({ mirror: !practice.mirror })}
-              aria-pressed={practice.mirror}
-              title="Mirror the text for beam-splitter glass"
-            >
-              <MirrorRectangular size={14} /> Mirror
-            </button>
-            <button
-              type="button"
-              className={`pb-btn pb-btn-sm ${practice.cueLine ? 'pb-btn-primary' : ''}`}
-              onClick={() => patchPractice({ cueLine: !practice.cueLine })}
-              aria-pressed={practice.cueLine}
-            >
-              Cue line
-            </button>
-            <button
-              type="button"
-              className="pb-btn pb-btn-sm pb-btn-ghost"
-              onClick={async () => {
-                const next = await toggleFullscreen(containerRef.current ?? undefined);
-                setFullscreen(next);
-              }}
-              title="Fullscreen (F)"
-            >
-              {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            </button>
-
-            <div style={{ flex: 1 }} />
-
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <TimerChip label="Elapsed" value={formatClock(Math.round(elapsed))} />
-              <TimerChip
-                label={paceDelta >= 0 ? 'Over' : 'Under'}
-                value={formatClock(Math.round(Math.abs(paceDelta)))}
-                tone={Math.abs(paceDelta) > 30 ? 'var(--c-warn)' : 'var(--c-ok)'}
-              />
-              <TimerChip label="Target" value={formatClock(targetSeconds)} />
-            </div>
-          </section>
-
-          <div
-            ref={containerRef}
-            className="pb-panel pb-prompt-frame"
-            style={{
-              position: 'relative',
-              height: 'min(62vh, 640px)',
-              minHeight: 320,
-              overflow: 'hidden',
-              padding: fullscreen ? '6vh 8vw' : '3vh 6vw',
-            }}
-          >
-            {practice.cueLine && <div className="pb-cue-line" />}
-            {countdown > 0 && (
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'grid',
-                  placeItems: 'center',
-                  zIndex: 3,
-                  fontFamily: 'var(--x-font-display)',
-                  fontSize: 'clamp(4rem, 18vw, 9rem)',
-                  fontWeight: 700,
-                  color: 'var(--c-accent)',
-                }}
-              >
-                {countdown}
-              </div>
-            )}
-            {intention.trim() && countdown > 0 && (
-              <p
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  right: 0,
-                  bottom: '12%',
-                  textAlign: 'center',
-                  fontSize: '1rem',
-                  color: 'var(--c-ink-muted)',
-                  zIndex: 3,
-                }}
-              >
-                This one is for {intention.trim()}.
-              </p>
-            )}
-            <div
-              ref={innerRef}
-              className="pb-prompt"
-              style={{
-                ['--prompt-scale' as string]: String(practice.fontScale),
-                transform: `translateY(${-offset}px)${practice.mirror ? ' scaleX(-1)' : ''}`,
-                transition: running ? 'none' : 'transform 260ms ease',
-                whiteSpace: 'pre-wrap',
-                textAlign: 'center',
-              }}
-            >
-              {item.content.replace(/^#{1,6}\s+/gm, '').replace(/^>\s?/gm, '')}
-            </div>
           </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 200px', height: 6, borderRadius: 999, background: 'var(--c-surface-3)', overflow: 'hidden' }}>
-              <div
-                style={{
-                  height: '100%',
-                  width: `${Math.round(progress * 100)}%`,
-                  background: 'var(--c-accent)',
-                  transition: 'width 120ms linear',
-                }}
-              />
-            </div>
-            <span className="pb-muted" style={{ fontSize: '0.78rem' }}>
-              {words} words · {Math.round(progress * 100)}% through · space play/pause · ↑↓ pace · R restart · F fullscreen
-            </span>
-            <Link to={`/read/${encodeURIComponent(item.id)}`} className="pb-btn pb-btn-sm">
-              Open reader
-            </Link>
-          </div>
-
-          {finished && (
-            <section className="pb-panel anim-enter" style={{ padding: '18px 20px' }}>
-              <div className="pb-rule" style={{ marginBottom: 14 }}>
-                <span>❧ After the run</span>
-              </div>
-              <p style={{ fontSize: '1.02rem', lineHeight: 1.7, marginBottom: 14 }}>{closing}</p>
-
-              <label className="pb-label" htmlFor="letter">
-                A letter to yourself, before the real thing
-              </label>
-              <p className="pb-muted" style={{ fontSize: '0.82rem', marginBottom: 8, lineHeight: 1.6 }}>
-                {letterPrompt}
-              </p>
-              <textarea
-                id="letter"
-                className="pb-textarea"
-                style={{ minHeight: 110 }}
-                value={letter}
-                onChange={(event) => setLetter(event.target.value)}
-                placeholder="Dear me, before I walk in…"
-                maxLength={2000}
-              />
-              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="pb-btn pb-btn-primary"
-                  disabled={!letter.trim()}
-                  onClick={() => {
-                    addLetter({ speechId: item.id, speechTitle: item.title, text: letter.trim() });
-                    setLetter('');
-                    toast('Kept on your desk', 'success');
-                  }}
-                >
-                  <Feather size={15} /> Keep this letter
-                </button>
-                <button type="button" className="pb-btn" onClick={restart}>
-                  <RotateCcw size={15} /> Run it again
-                </button>
-              </div>
-            </section>
-          )}
-        </>
+        </section>
       )}
     </div>
   );
 }
 
-function TimerChip({ label, value, tone }: { label: string; value: string; tone?: string }) {
+/* ------------------------------------------------------------------ */
+
+function RehearseHero({
+  items,
+  selectedId,
+  onSelect,
+  title,
+  minutes,
+  words,
+  onStart,
+}: {
+  items: { id: string; title: string; minutes: number }[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+  title?: string;
+  minutes?: number;
+  words?: number;
+  onStart?: () => void;
+}) {
   return (
-    <div className="pb-well" style={{ padding: '6px 12px', textAlign: 'center', minWidth: 92 }}>
-      <div className="pb-mono" style={{ fontSize: '1.05rem', fontWeight: 600, color: tone ?? 'var(--c-ink)' }}>
+    <section className="pb-panel pb-rehearse-hero anim-enter">
+      <div className="pb-rehearse-hero-text">
+        <span className="pb-eyebrow">The Rehearsal Room</span>
+        <h1 className="pb-page-title">{title ?? 'Say it out loud, before it counts'}</h1>
+        <p className="pb-page-sub">
+          {title
+            ? `${words?.toLocaleString()} words · about ${minutes} minute${minutes === 1 ? '' : 's'} at your pace. Go full screen and let it run.`
+            : 'A full-screen stage, your words at your pace, and a clock that tells you the truth. The only part of speaking that actually builds the skill is the part where you say it.'}
+        </p>
+      </div>
+
+      <div className="pb-rehearse-hero-controls">
+        <div className="pb-select-wrap">
+          <select
+            className="pb-select"
+            value={selectedId}
+            onChange={(event) => onSelect(event.target.value)}
+            aria-label="Choose a speech to rehearse"
+          >
+            <option value="">Choose a speech…</option>
+            {items.map((speech) => (
+              <option key={speech.id} value={speech.id}>
+                {speech.title} · {speech.minutes} min
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={15} aria-hidden="true" />
+        </div>
+        {onStart && (
+          <button type="button" className="pb-btn pb-btn-primary pb-btn-lg" onClick={onStart}>
+            <Maximize2 size={17} /> Take the stage
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Clapper() {
+  return (
+    <span className="pb-empty-mark" aria-hidden="true">
+      <Clapperboard size={26} />
+    </span>
+  );
+}
+
+function TimerChip({
+  label,
+  value,
+  tone,
+  className,
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+  className?: string;
+}) {
+  return (
+    <div className={`pb-timer ${className ?? ''}`}>
+      <span className="pb-mono" style={{ color: tone ?? 'var(--c-ink)' }}>
         {value}
-      </div>
-      <div className="pb-muted" style={{ fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-        {label}
-      </div>
+      </span>
+      <span className="pb-timer-label">{label}</span>
     </div>
   );
 }

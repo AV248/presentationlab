@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Keyboard, Sparkles, X } from 'lucide-react';
 import { ThemeStudio } from './ThemeStudio';
 import { useUi } from '../store/ui';
@@ -133,35 +133,38 @@ export function HelpDialog() {
   );
 }
 
-/** Welcome strip shown until the visitor has visited the theme studio. */
+/**
+ * Welcome strip shown once, to a first-time visitor.
+ *
+ * It points at the rehearsal room rather than the theme studio: the thing
+ * that makes you better is speaking out loud, not choosing a colour. The
+ * themes are still one tap away in the drawer for anyone who wants them.
+ */
 export function FirstRun() {
-  const setThemePanel = useUi((s) => s.setThemePanel);
   const setOnboarded = useSettings((s) => s.setOnboarded);
   return (
     <div className="pb-panel" style={{ padding: '16px 18px', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
       <Sparkles size={20} style={{ color: 'var(--c-accent)' }} />
       <div style={{ flex: '1 1 260px' }}>
-        <strong style={{ fontSize: '0.92rem' }}>New here?</strong>
+        <strong style={{ fontSize: '0.92rem' }}>Qualities are not gifted, they are built.</strong>
         <p className="pb-muted" style={{ fontSize: '0.8rem' }}>
-          Try a preset, or open the theme studio and build your own from 134 options.
+          Read something here, then go and say it out loud in the rehearsal room. That is the
+          whole method.
         </p>
       </div>
-      <button
-        type="button"
+      <Link
+        to="/rehearse"
         className="pb-btn pb-btn-sm pb-btn-primary"
-        onClick={() => {
-          setThemePanel(true);
-          setOnboarded(true);
-        }}
+        onClick={() => setOnboarded(true)}
       >
-        Open theme studio
-      </button>
+        Start rehearsing
+      </Link>
       <button
         type="button"
         className="pb-btn pb-btn-sm pb-btn-ghost"
         onClick={() => setOnboarded(true)}
       >
-        No thanks
+        Later
       </button>
     </div>
   );

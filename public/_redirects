@@ -2,4 +2,11 @@
 # Prerendered files (/read/<id>/index.html, /topics/... etc.) already exist on
 # disk and win over this rule; it only catches routes with no static file —
 # chiefly /admin and shared speeches published to the cloud.
+# 2.4 renamed the working rooms. Old links keep their ranking with a 301.
+/practice       /rehearse   301
+/practice/*     /rehearse/:splat   301
+/studio         /write      301
+/studio/*       /write/:splat      301
+/web            /arrivals   301
+
 /*    /index.html   200

@@ -1,7 +1,7 @@
 {
   "name": "presentation-buddy",
   "private": true,
-  "version": "2.3.0",
+  "version": "2.4.0",
   "type": "module",
   "description": "Presentation Buddy 2.3 — premium themes, real ads, shareable links, faster. A fully themeable workspace to write, coach, rehearse and deliver talks.",
   "scripts": {

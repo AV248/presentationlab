@@ -1,10 +1,15 @@
 import { Fragment, type CSSProperties, type ReactNode } from 'react';
+import { isUncommon } from '../services/dictionary';
 
 /**
  * A tiny, safe markdown renderer for speech bodies.
  * Supports: ## / ### headings, - bullets, 1. ordered lists, > quotes,
  * --- rules, **bold**, *italic* and `code`. Nothing is ever injected as
  * raw HTML, so imported content can't break the app.
+ *
+ * When `defineWords` is on, every uncommon word is wrapped in a button so
+ * the reader can tap it for a meaning. The wrapping happens at render time
+ * on plain text runs only — formatting, quotes and code are untouched.
  */
 
 type Block =
@@ -102,7 +107,51 @@ function parseBlocks(source: string): Block[] {
 
 const INLINE = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
 
-function renderInline(text: string): ReactNode[] {
+export type DefineHandler = (word: string, target: HTMLElement) => void;
+
+/**
+ * Split a run of plain text into words, wrapping the uncommon ones in a
+ * button that opens the word lens. Everything else passes through as text,
+ * so spacing and punctuation are preserved exactly.
+ */
+function withDefinitions(text: string, onDefine: DefineHandler, keyPrefix: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  const pattern = /[A-Za-z][A-Za-z'’-]*/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  let index = 0;
+
+  while ((match = pattern.exec(text)) !== null) {
+    const word = match[0];
+    if (!isUncommon(word)) continue;
+    if (match.index > cursor) {
+      out.push(<Fragment key={`${keyPrefix}-t${index}`}>{text.slice(cursor, match.index)}</Fragment>);
+    }
+    out.push(
+      <button
+        key={`${keyPrefix}-w${index}`}
+        type="button"
+        className="pb-define"
+        title={`What does “${word}” mean?`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDefine(word, event.currentTarget);
+        }}
+      >
+        {word}
+      </button>,
+    );
+    cursor = match.index + word.length;
+    index += 1;
+  }
+
+  if (cursor < text.length) {
+    out.push(<Fragment key={`${keyPrefix}-tail`}>{text.slice(cursor)}</Fragment>);
+  }
+  return out.length ? out : [<Fragment key={`${keyPrefix}-all`}>{text}</Fragment>];
+}
+
+function renderInline(text: string, onDefine?: DefineHandler, keyPrefix = 'i'): ReactNode[] {
   const parts = text.split(INLINE).filter((part) => part !== '');
   return parts.map((part, index) => {
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
@@ -114,6 +163,7 @@ function renderInline(text: string): ReactNode[] {
     if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
       return <em key={index}>{part.slice(1, -1)}</em>;
     }
+    if (onDefine) return <Fragment key={index}>{withDefinitions(part, onDefine, `${keyPrefix}-${index}`)}</Fragment>;
     return <Fragment key={index}>{part}</Fragment>;
   });
 }
@@ -122,27 +172,30 @@ interface MarkdownProps {
   text: string;
   className?: string;
   style?: CSSProperties;
+  /** Underline uncommon words and call this when one is tapped. */
+  onDefine?: DefineHandler;
 }
 
-export function Markdown({ text, className, style }: MarkdownProps) {
+export function Markdown({ text, className, style, onDefine }: MarkdownProps) {
   const blocks = parseBlocks(text);
+  const inline = (value: string, key: string) => renderInline(value, onDefine, key);
   return (
     <div className={className} style={style}>
       {blocks.map((block, index) => {
         switch (block.type) {
           case 'heading':
             return block.level === 2 ? (
-              <h2 key={index}>{renderInline(block.text)}</h2>
+              <h2 key={index}>{inline(block.text, `h${index}`)}</h2>
             ) : (
-              <h3 key={index}>{renderInline(block.text)}</h3>
+              <h3 key={index}>{inline(block.text, `h${index}`)}</h3>
             );
           case 'quote':
-            return <blockquote key={index}>{renderInline(block.text)}</blockquote>;
+            return <blockquote key={index}>{inline(block.text, `q${index}`)}</blockquote>;
           case 'bullets':
             return (
               <ul key={index}>
                 {block.items.map((item, i) => (
-                  <li key={i}>{renderInline(item)}</li>
+                  <li key={i}>{inline(item, `b${index}-${i}`)}</li>
                 ))}
               </ul>
             );
@@ -150,14 +203,14 @@ export function Markdown({ text, className, style }: MarkdownProps) {
             return (
               <ol key={index}>
                 {block.items.map((item, i) => (
-                  <li key={i}>{renderInline(item)}</li>
+                  <li key={i}>{inline(item, `o${index}-${i}`)}</li>
                 ))}
               </ol>
             );
           case 'rule':
             return <hr key={index} />;
           default:
-            return <p key={index}>{renderInline(block.text)}</p>;
+            return <p key={index}>{inline(block.text, `p${index}`)}</p>;
         }
       })}
     </div>

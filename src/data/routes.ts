@@ -53,54 +53,85 @@ const website = {
 /* sections (the app's own pages)                                       */
 /* ------------------------------------------------------------------ */
 
-const SECTIONS: { path: string; title: string; description: string }[] = [
+/**
+ * The app's own pages.
+ *
+ * `priority` and `changefreq` are real signals, not decoration: the
+ * rehearsal room is the product, so it ranks just under the home page,
+ * and arrivals genuinely changes every day. Pages that are tools rather
+ * than content (settings, themes) sit lower on purpose — we would rather
+ * Google spend its crawl budget on the library.
+ */
+const SECTIONS: {
+  path: string;
+  title: string;
+  description: string;
+  priority?: number;
+  changefreq?: 'daily' | 'weekly' | 'monthly';
+}[] = [
   {
-    path: '/studio',
-    title: `Writing Studio — speech editor with a structure coach`,
+    path: '/rehearse',
+    title: `Rehearsal Room — fullscreen teleprompter, pacing timer and breathing cues`,
     description:
-      'Write your speech in a calm editor, get live coaching on structure, word choice and pacing, and export when it is ready. Free and works offline.',
+      'Rehearse out loud in a distraction-free fullscreen stage: teleprompter scroll, words-per-minute pacing, countdowns and breathing cues. Free for students.',
+    priority: 0.95,
+    changefreq: 'weekly',
   },
   {
-    path: '/practice',
-    title: `Rehearsal Room — teleprompter, pacing timer and breathing cues`,
+    path: '/write',
+    title: `Writing Desk — speech editor with a built-in dictionary`,
     description:
-      'Rehearse your talk with a teleprompter, words-per-minute pacing, countdowns and breathing cues. The free rehearsal room of Presentation Buddy.',
+      'Write your speech in a calm editor with live structure coaching and a word smith that suggests stronger alternatives as you type. Free and works offline.',
+    priority: 0.9,
+    changefreq: 'weekly',
   },
   {
     path: '/community',
     title: 'Community — shared speeches and the open mic',
     description:
       'Read speeches published by the community, climb the contributor leaderboard with real reactions, and share your own work on the open mic.',
+    priority: 0.7,
+    changefreq: 'daily',
   },
   {
-    path: '/web',
-    title: 'Great Speeches from History — public-domain library',
+    path: '/arrivals',
+    title: 'Fresh Arrivals — five new speeches from the open archives every session',
     description:
-      'Fetch famous public-domain speeches from open archives and read them in your own theme — history’s greatest talks, one click away and free.',
+      'Every session brings five new public-domain speeches drawn live from Wikisource, Project Gutenberg and Wikiquote, each one credited to its source.',
+    priority: 0.85,
+    changefreq: 'daily',
   },
   {
     path: '/desk',
     title: 'Your Desk — saved lines, margin notes and reading history',
     description:
       'Your private desk: bookmarked speeches, memorable lines you saved, margin notes and your reading history — kept on your device, always free.',
+    priority: 0.5,
+    changefreq: 'monthly',
   },
   {
     path: '/control',
     title: 'Control Room — reading, theme and data settings',
     description:
       'Tune Presentation Buddy: reader typography, rehearsal defaults, offline behaviour and your local data. Every setting explained, nothing hidden.',
+    priority: 0.3,
+    changefreq: 'monthly',
   },
   {
     path: '/themes',
     title: 'Theme Studio — 134 options across five design axes',
     description:
       'Design your own workspace: 30 colour worlds, 26 arrangements, 26 materials, 26 type systems and 26 motion personalities — 13.7 million combinations.',
+    priority: 0.6,
+    changefreq: 'monthly',
   },
   {
     path: '/about',
     title: 'About Presentation Buddy — what it is and how it works',
     description:
       'Presentation Buddy is a free, local-first workspace for writing and rehearsing talks: themeable, offline-capable, with a curated speech library.',
+    priority: 0.6,
+    changefreq: 'monthly',
   },
 ];
 
@@ -140,7 +171,19 @@ export function buildPages(): PageMeta[] {
     card: 'presentation-buddy',
     group: 'home',
     jsonLd: [
-      website,
+      // The WebSite block carries a SearchAction, which is what lets Google
+      // render a search box directly under the result for a branded query.
+      {
+        ...website,
+        potentialAction: {
+          '@type': 'SearchAction',
+          target: {
+            '@type': 'EntryPoint',
+            urlTemplate: `${SITE_URL}/?q={search_term_string}`,
+          },
+          'query-input': 'required name=search_term_string',
+        },
+      },
       {
         '@context': 'https://schema.org',
         '@type': 'SoftwareApplication',
@@ -149,7 +192,49 @@ export function buildPages(): PageMeta[] {
         applicationCategory: 'ProductivityApplication',
         operatingSystem: 'Any',
         description: SITE_TAGLINE,
+        browserRequirements: 'Requires JavaScript.',
+        softwareVersion: '2.4',
+        featureList: [
+          'Fullscreen rehearsal stage with teleprompter and pacing timer',
+          'Speech editor with structure coaching and a built-in thesaurus',
+          'Integrated dictionary that defines uncommon words as you read',
+          'Public-domain speech library refreshed from open archives',
+          'Works offline as an installable app',
+        ],
         offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+        publisher: organization,
+      },
+      // A short FAQ on the home page: these are the questions people
+      // actually type, and answering them here is what wins the snippet.
+      {
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: [
+          {
+            '@type': 'Question',
+            name: 'Is Presentation Buddy free?',
+            acceptedAnswer: {
+              '@type': 'Answer',
+              text: 'Yes. Every feature — the rehearsal room, the writing desk, the dictionary and the whole speech library — is free, and the app works offline with no account required.',
+            },
+          },
+          {
+            '@type': 'Question',
+            name: 'How do I practise a speech out loud?',
+            acceptedAnswer: {
+              '@type': 'Answer',
+              text: 'Open the rehearsal room, choose or paste your speech, and start the stage. The page goes fullscreen, your words scroll at your chosen words-per-minute, and a timer tracks whether you are running over or under.',
+            },
+          },
+          {
+            '@type': 'Question',
+            name: 'Can I use it on my phone?',
+            acceptedAnswer: {
+              '@type': 'Answer',
+              text: 'Yes. Presentation Buddy is built mobile-first and installs as an app on iOS and Android, including the fullscreen rehearsal stage.',
+            },
+          },
+        ],
       },
     ],
   });
@@ -161,8 +246,8 @@ export function buildPages(): PageMeta[] {
       title: `${section.title} · ${SITE_NAME}`,
       description: section.description,
       type: 'website',
-      priority: 0.7,
-      changefreq: 'monthly',
+      priority: section.priority ?? 0.7,
+      changefreq: section.changefreq ?? 'monthly',
       card: section.path.slice(1),
       group: 'section',
       jsonLd: [

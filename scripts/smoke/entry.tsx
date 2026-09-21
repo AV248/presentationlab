@@ -83,12 +83,12 @@ async function main() {
     '/read/template-story-structure',
     '/topics',
     '/topics/public-speaking',
-    '/studio',
-    `/studio/${draftId}`,
-    '/practice',
-    '/practice/five-minutes',
+    '/write',
+    `/write/${draftId}`,
+    '/rehearse',
+    '/rehearse/five-minutes',
     '/community',
-    '/web',
+    '/arrivals',
     '/desk',
     '/control',
     '/themes',
@@ -100,9 +100,17 @@ async function main() {
   for (const route of routes) {
     const root = createRoot(container);
     root.render(<Harness route={route} />);
-    await wait(90);
-    const length = (document.body.textContent ?? '').trim().length;
-    check(length > 40, `route ${route}`, `${length} chars`);
+    // Pages are code-split, so wait for the lazy chunk to land rather than
+    // measuring the Suspense fallback and calling it a pass.
+    let length = 0;
+    let settled = false;
+    for (let tries = 0; tries < 40; tries += 1) {
+      await wait(60);
+      length = (document.body.textContent ?? '').trim().length;
+      settled = !container.querySelector('.pb-route-loading');
+      if (settled && length > 150) break;
+    }
+    check(settled && length > 150, `route ${route}`, `${length} chars`);
     root.unmount();
   }
 

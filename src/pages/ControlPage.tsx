@@ -245,7 +245,7 @@ export function ControlPage() {
                   <button
                     type="button"
                     className="pb-btn pb-btn-sm pb-btn-ghost"
-                    onClick={() => navigate(`/studio/${item.id}`)}
+                    onClick={() => navigate(`/write/${item.id}`)}
                   >
                     Edit
                   </button>

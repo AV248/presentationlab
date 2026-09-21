@@ -41,21 +41,21 @@
   ],
   "shortcuts": [
     {
+      "name": "Rehearse out loud",
+      "short_name": "Rehearse",
+      "url": "/rehearse",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
       "name": "Write a speech",
-      "short_name": "Studio",
-      "url": "/studio",
+      "short_name": "Write",
+      "url": "/write",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
-      "name": "Rehearse",
-      "short_name": "Practice",
-      "url": "/practice",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
-    },
-    {
-      "name": "Theme studio",
-      "short_name": "Themes",
-      "url": "/themes",
+      "name": "Fresh arrivals",
+      "short_name": "Arrivals",
+      "url": "/arrivals",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
