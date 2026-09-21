@@ -61,6 +61,24 @@ one per scroll region, dismissible per session, loaded after the page settles, a
 `title`, `description`, `url`, optional `image`, `active`) edited from `/admin`. Offline or with
 an empty collection, the slot quietly disappears and shows a small house card instead.
 
+### Production hardening
+
+- **Security headers** (`public/_headers`, translated for nginx and Caddy in
+  `docs/DEPLOY.md`): HSTS, `X-Frame-Options`, `X-Content-Type-Options`,
+  a tight `Referrer-Policy`, a `Permissions-Policy` that switches off every
+  API this app does not use, and a **Content Security Policy** with
+  `script-src 'self'` — no inline scripts at all. The font loader uses
+  `preload` + a plain stylesheet rather than the usual inline-`onload` trick
+  precisely so that policy can hold.
+- **Cache policy**: hashed `/assets/*` immutable for a year; HTML and `sw.js`
+  always revalidated, so a deploy actually reaches people.
+- **Firestore rules** (`firestore.rules`): default-deny, with counters as the
+  one careful exception — a signed-in person may move `views`, `likes`,
+  `dislikes` and `shares` on any speech and *nothing else*, enforced with
+  `diff().affectedKeys().hasOnly(...)` and a one-step-at-a-time cap.
+- **Service worker**: every fetch path resolves to a real `Response`, so a
+  cache miss while offline degrades instead of throwing.
+
 ### SEO
 
 `npm run build` now ends with a post-build pipeline in `scripts/`:
@@ -71,7 +89,19 @@ an empty collection, the slot quietly disappears and shows a small house card in
 2. **Prerender** — every indexable route is rendered to real HTML with its own title,
    description, canonical, robots, Open Graph/Twitter tags and JSON-LD
    (`WebSite`/`Organization`/`Article`/`BreadcrumbList`), 57 pages total, plus a `noindex` 404.
-3. **Sitemap** — `dist/sitemap.xml` with 56 URLs; `public/robots.txt` points at it.
+3. **Sitemap** — `dist/sitemap.xml` with 56 URLs. Priority and change
+   frequency are real signals rather than decoration: the rehearsal room sits
+   at 0.95, arrivals is marked `daily` because it genuinely changes daily, and
+   tool pages like settings sit at 0.3 so crawl budget goes to the library.
+4. **robots.txt** — allows the assets crawlers need in order to render and
+   judge a page, keeps filter permutations out of the index while explicitly
+   allowing `?q=` (the target of the sitelinks search box), and welcomes the
+   AI crawlers by name.
+
+The home page also carries `WebSite`+`SearchAction` (the sitelinks search
+box), `SoftwareApplication` with a real feature list, and a short `FAQPage`
+answering the questions people actually type. `?q=` is wired to the library
+search, so that markup describes something that genuinely works.
 
 Each page ships with the default theme's CSS variables already inline, so first paint is instant
 and hydration is a no-op. Rankings still take time and backlinks — prerendering removes the

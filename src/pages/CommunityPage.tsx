@@ -123,6 +123,11 @@ export function CommunityPage() {
                     <img
                       src={person.photoURL}
                       alt=""
+                      loading="lazy"
+                      decoding="async"
+                      width={58}
+                      height={58}
+                      referrerPolicy="no-referrer"
                       style={{ width: 58, height: 58, borderRadius: 999, objectFit: 'cover' }}
                     />
                   ) : (

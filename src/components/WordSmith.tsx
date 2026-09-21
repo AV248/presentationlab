@@ -64,33 +64,47 @@ export function WordSmith({ value, caret, onReplace, compact = false }: WordSmit
   const [loading, setLoading] = useState(false);
   const requestRef = useRef(0);
 
+  // Depend on the *word*, not on the target object: `wordAtCaret` returns a
+  // fresh object on every keystroke, so keying the effect on it would refire
+  // the lookup constantly — including while the caret merely moves inside a
+  // word that has not changed.
+  const word = target?.word.toLowerCase() ?? '';
+
   useEffect(() => {
-    if (!target) {
+    if (!word) {
       setAlternatives([]);
       setEntry(null);
+      setLoading(false);
       return undefined;
     }
 
     const token = (requestRef.current += 1);
-    const word = target.word.toLowerCase();
     setLoading(true);
 
     // Wait for a pause in typing: nobody wants a request per keystroke.
     const timer = window.setTimeout(() => {
-      void Promise.all([alternativesFor(word, compact ? 6 : 9), lookup(word)]).then(
-        ([found, definition]) => {
+      void Promise.all([alternativesFor(word, compact ? 6 : 9), lookup(word)])
+        .then(([found, definition]) => {
           if (requestRef.current !== token) return;
           setAlternatives(found);
           setEntry(definition);
-          setLoading(false);
-        },
-      );
+        })
+        .catch(() => {
+          // Offline, rate-limited or blocked: show nothing rather than a
+          // spinner that never resolves.
+          if (requestRef.current !== token) return;
+          setAlternatives([]);
+          setEntry(null);
+        })
+        .finally(() => {
+          if (requestRef.current === token) setLoading(false);
+        });
     }, 420);
 
     return () => {
       window.clearTimeout(timer);
     };
-  }, [target, compact]);
+  }, [word, compact]);
 
   if (!target) {
     return (

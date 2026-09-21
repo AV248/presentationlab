@@ -1,0 +1,58 @@
+# Presentation Buddy — response headers.
+#
+# Netlify/Cloudflare Pages style. If the site is served by nginx or Caddy
+# instead, docs/DEPLOY.md carries the same rules translated.
+
+/*
+  # Clickjacking: the app is never meant to be framed by another site.
+  X-Frame-Options: SAMEORIGIN
+  # Stop browsers guessing a type other than the one we declared.
+  X-Content-Type-Options: nosniff
+  # Send the origin to other sites, the full URL to ourselves.
+  Referrer-Policy: strict-origin-when-cross-origin
+  # This app needs none of these. Saying so is free and shrinks the
+  # attack surface if a dependency is ever compromised.
+  Permissions-Policy: geolocation=(), camera=(), payment=(), usb=(), magnetometer=(), accelerometer=()
+  # HSTS: once a browser has seen this, it will not try plain HTTP again.
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  # Content Security Policy.
+  #   'unsafe-inline' on style-src is required: the theme engine writes
+  #   ~80 CSS custom properties onto the document as inline style, which
+  #   is the whole mechanism behind 13.7M theme combinations.
+  #   connect-src lists exactly the archives and dictionaries we call.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.dictionaryapi.dev https://api.datamuse.com https://en.wikisource.org https://en.wikiquote.org https://gutendex.com https://www.gutenberg.org https://*.googleapis.com https://*.firebaseio.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com wss://*.firebaseio.com; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://login.microsoftonline.com; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'self'; upgrade-insecure-requests
+
+# Hashed build assets: the filename changes whenever the bytes do, so these
+# can be cached permanently.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/icons/*
+  Cache-Control: public, max-age=2592000
+
+/cards/*
+  Cache-Control: public, max-age=2592000
+
+# HTML must always be revalidated, or a deploy never reaches anyone.
+/
+  Cache-Control: public, max-age=0, must-revalidate
+
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+# The service worker decides when the app updates. It must never be stale.
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/manifest.webmanifest
+  Cache-Control: public, max-age=3600
+  Content-Type: application/manifest+json
+
+# Crawler-facing files: fresh enough that a re-crawl sees today's truth.
+/sitemap.xml
+  Cache-Control: public, max-age=3600
+  Content-Type: application/xml; charset=utf-8
+
+/robots.txt
+  Cache-Control: public, max-age=3600
+  Content-Type: text/plain; charset=utf-8

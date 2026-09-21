@@ -27,7 +27,7 @@ const body = urls
     <loc>${loc}</loc>
     <lastmod>${lastmod}</lastmod>
     <changefreq>${changefreq}</changefreq>
-    <priority>${priority.toFixed(1)}</priority>
+    <priority>${priority.toFixed(2).replace(/0$/, '')}</priority>
   </url>`,
   )
   .join('\n');

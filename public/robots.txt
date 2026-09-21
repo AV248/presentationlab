@@ -1,5 +1,65 @@
+# Presentation Buddy — https://presentationbuddy.aavrit.dedyn.io
+#
+# Everything here is public and meant to be indexed. The only closed door is
+# the private admin workspace, which is also served with a noindex tag.
+
 User-agent: *
 Allow: /
 Disallow: /admin
+Disallow: /admin/
+
+# Filtered views produce no unique content — they only re-sort a list that is
+# already fully crawlable — so they are kept out to avoid diluting the library
+# page. ?q= is the exception: it is the target of the sitelinks search box
+# declared in the home page's structured data, so it must stay reachable.
+Allow: /?q=
+Disallow: /*?utm_
+Disallow: /*&
+Disallow: /*?sort=
+Disallow: /*?kind=
+Disallow: /*?source=
+Disallow: /*?category=
+
+# Assets crawlers need in order to render and judge the page. Some bots
+# default to skipping these, and a page that renders without its CSS looks
+# broken to a quality classifier.
+Allow: /assets/
+Allow: /icons/
+Allow: /cards/
+Allow: /*.css$
+Allow: /*.js$
+Allow: /*.svg$
+Allow: /*.png$
+Allow: /*.webmanifest$
+
+# The AI crawlers are allowed deliberately: being quoted by an assistant is
+# how a lot of people will find this site.
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+# Aggressive SEO scrapers that cost bandwidth and return nothing.
+User-agent: AhrefsBot
+Crawl-delay: 10
+
+User-agent: SemrushBot
+Crawl-delay: 10
+
+User-agent: MJ12bot
+Disallow: /
 
 Sitemap: https://presentationbuddy.aavrit.dedyn.io/sitemap.xml

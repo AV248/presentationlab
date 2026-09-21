@@ -54,9 +54,15 @@ export function WordLensCard({
   useEffect(() => {
     let alive = true;
     setEntry(undefined);
-    lookup(word).then((found) => {
-      if (alive) setEntry(found);
-    });
+    lookup(word)
+      .then((found) => {
+        if (alive) setEntry(found);
+      })
+      .catch(() => {
+        // Treat a failed lookup exactly like a word with no entry: the card
+        // says it found nothing instead of spinning forever.
+        if (alive) setEntry(null);
+      });
     return () => {
       alive = false;
     };
