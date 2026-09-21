@@ -1,23 +1,20 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   BookMarked,
-  BookOpenText,
   Clapperboard,
   Feather,
   Globe,
   Info,
   Library,
   LogOut,
-  Menu,
+  MoreHorizontal,
   Palette,
   PenLine,
   Search,
   Shield,
   SlidersHorizontal,
-  Sparkles,
   Trophy,
-  User2,
   X,
 } from 'lucide-react';
 import { Logo } from './Logo';
@@ -34,20 +31,31 @@ export interface NavItem {
   hint: string;
 }
 
-export const NAV: NavItem[] = [
-  { to: '/', label: 'Library', icon: Library, hint: 'Read the collection' },
+/**
+ * The five things this app is for. Everything else is a setting.
+ *
+ * 2.4 cut the navigation from ten flat entries to five verbs plus a
+ * drawer of secondary rooms. The order is the order of the work: you
+ * rehearse what you wrote, from what you read.
+ */
+export const PRIMARY_NAV: NavItem[] = [
+  { to: '/rehearse', label: 'Rehearse', icon: Clapperboard, hint: 'Full-screen teleprompter, pacing and breath' },
+  { to: '/', label: 'Read', icon: Library, hint: 'The collection, and what arrived today' },
+  { to: '/write', label: 'Write', icon: PenLine, hint: 'Draft with a coach and a dictionary at your elbow' },
+  { to: '/arrivals', label: 'Arrivals', icon: Globe, hint: 'Five new speeches from the open archives, every session' },
+  { to: '/desk', label: 'Desk', icon: Feather, hint: 'Lines, notes, letters and your progress' },
+];
+
+export const SECONDARY_NAV: NavItem[] = [
   { to: '/topics', label: 'Guides', icon: BookMarked, hint: 'Speaking guides for every occasion' },
-  { to: '/studio', label: 'Studio', icon: PenLine, hint: 'Write, and let the coach read it back' },
-  { to: '/practice', label: 'Practice', icon: Clapperboard, hint: 'Teleprompter, breathing and pacing' },
   { to: '/community', label: 'Community', icon: Trophy, hint: 'Leaderboard and the open mic' },
-  { to: '/web', label: 'From the web', icon: Globe, hint: 'Public-domain speeches, fetched live' },
-  { to: '/desk', label: 'Your desk', icon: Feather, hint: 'Lines, notes, letters and firsts' },
-  { to: '/themes', label: 'Themes', icon: Palette, hint: 'Five axes, 134 options' },
-  { to: '/control', label: 'Control Room', icon: SlidersHorizontal, hint: 'Content, data, cloud and comfort' },
+  { to: '/themes', label: 'Themes', icon: Palette, hint: 'Make the workspace yours' },
+  { to: '/control', label: 'Settings', icon: SlidersHorizontal, hint: 'Content, data, cloud and comfort' },
   { to: '/about', label: 'About', icon: Info, hint: 'How Presentation Buddy works' },
 ];
 
-const BOTTOM_NAV = NAV.slice(0, 5);
+/** Kept for the command palette and help dialog, which list everything. */
+export const NAV: NavItem[] = [...PRIMARY_NAV, ...SECONDARY_NAV];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
@@ -60,6 +68,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const contrast = useSettings((s) => s.contrast);
   const connect = useCloud((s) => s.connect);
   const [modifier, setModifier] = useState('Ctrl');
+  const drawerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     setModifier(modifierLabel());
@@ -74,6 +83,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.contrast = contrast;
   }, [contrast]);
+
+  // Lock the page behind the drawer so phones do not scroll the layer below.
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [drawerOpen]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -92,6 +111,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         useUi.getState().togglePalette();
         return;
       }
+      if (event.key === 'Escape' && useUi.getState().drawerOpen) {
+        setDrawer(false);
+        return;
+      }
       if (typing) return;
 
       if (event.key === '/') {
@@ -107,80 +130,72 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (event.key === '?') {
         event.preventDefault();
         setHelp(true);
-        return;
-      }
-      if (event.key.toLowerCase() === 'g') {
-        const next = window.prompt(
-          NAV.map((item, index) => `${index + 1} ${item.label}`).join('\n'),
-        );
-        const index = Number(next);
-        if (index >= 1 && index <= NAV.length) navigate(NAV[index - 1].to);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [navigate, openPalette, setHelp, setThemePanel]);
+  }, [navigate, openPalette, setHelp, setThemePanel, setDrawer]);
 
-  const current = NAV.find((item) => item.to === location.pathname);
+  const current = NAV.find((item) =>
+    item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to),
+  );
+
+  const renderNavLink = (item: NavItem) => (
+    <NavLink
+      key={item.to}
+      to={item.to}
+      end={item.to === '/'}
+      className="pb-navlink"
+      title={item.hint}
+    >
+      <item.icon size={18} aria-hidden="true" />
+      <span className="pb-navlink-label">{item.label}</span>
+    </NavLink>
+  );
 
   return (
     <div className="pb-shell">
-      <a href="#main" className="pb-sr-only">
+      <a href="#main" className="pb-skip">
         Skip to content
       </a>
 
-      <aside className="pb-sidebar" data-open={drawerOpen} aria-label="Main navigation">
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 8,
-            marginBottom: 18,
-            paddingInline: 4,
-          }}
-        >
-          <NavLink to="/" style={{ display: 'flex' }}>
-            <Logo size={38} withWordmark />
+      {/* ---- the rail: desktop sidebar, phone/tablet drawer ---- */}
+      <aside
+        ref={drawerRef}
+        className="pb-sidebar"
+        data-open={drawerOpen}
+        aria-label="Main navigation"
+        aria-hidden={undefined}
+      >
+        <div className="pb-sidebar-head">
+          <NavLink to="/" aria-label="Presentation Buddy home" style={{ display: 'flex', minWidth: 0 }}>
+            <Logo size={30} withWordmark />
           </NavLink>
           <button
             type="button"
-            className="pb-icon-btn"
+            className="pb-icon-btn pb-drawer-close"
             onClick={() => setDrawer(false)}
             aria-label="Close navigation"
-            style={{ display: drawerOpen ? undefined : 'none' }}
           >
             <X size={18} />
           </button>
         </div>
 
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {NAV.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/'}
-              className="pb-navlink"
-              title={item.hint}
-            >
-              <item.icon size={18} style={{ flex: '0 0 auto' }} />
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
+        <nav className="pb-nav-group" aria-label="Primary">
+          {PRIMARY_NAV.map(renderNavLink)}
         </nav>
 
-        <div style={{ flex: 1, minHeight: 24 }} />
+        <div className="pb-nav-rule" role="presentation">
+          <span>More</span>
+        </div>
 
-        <button
-          type="button"
-          className="pb-btn pb-btn-primary pb-btn-block"
-          onClick={() => setThemePanel(true)}
-          style={{ marginBottom: 10 }}
-        >
-          <Sparkles size={16} /> Theme studio
-        </button>
+        <nav className="pb-nav-group" aria-label="Secondary">
+          {SECONDARY_NAV.map(renderNavLink)}
+        </nav>
+
+        <div style={{ flex: 1, minHeight: 16 }} />
+
         <AccountChip />
-        <div style={{ height: 8 }} />
         <CloudBadge />
       </aside>
 
@@ -188,35 +203,25 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="pb-drawer-scrim" onClick={() => setDrawer(false)} aria-hidden="true" />
       )}
 
-      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+      {/* ---- the column ---- */}
+      <div className="pb-column">
         <header className="pb-topbar">
           <button
             type="button"
-            className="pb-icon-btn"
+            className="pb-icon-btn pb-drawer-button"
             onClick={() => setDrawer(true)}
             aria-label="Open navigation"
-            data-drawer-button
+            aria-expanded={drawerOpen}
           >
-            <Menu size={19} />
+            <MoreHorizontal size={19} />
           </button>
 
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
-            <span
-              style={{
-                fontFamily: 'var(--x-font-display)',
-                fontWeight: 650,
-                fontSize: '1rem',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {current?.label ?? 'Presentation Buddy'}
-            </span>
-            <span className="pb-muted" style={{ fontSize: '0.78rem', display: 'none' }} data-hint>
-              {current?.hint}
-            </span>
-          </div>
+          <NavLink to="/" className="pb-topbar-mark" aria-label="Presentation Buddy home">
+            <Logo size={24} />
+          </NavLink>
+
+          <span className="pb-topbar-title">{current?.label ?? 'Presentation Buddy'}</span>
+          <span className="pb-topbar-hint">{current?.hint}</span>
 
           <div style={{ flex: 1 }} />
 
@@ -224,52 +229,27 @@ export function AppShell({ children }: { children: ReactNode }) {
             type="button"
             className="pb-btn pb-btn-ghost pb-search-trigger"
             onClick={openPalette}
-            style={{ maxWidth: 260, width: '100%', justifyContent: 'flex-start' }}
-            aria-label="Search and jump"
+            aria-label="Search and commands"
           >
-            <Search size={16} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>Search speeches…</span>
-            <span className="pb-kbd" style={{ marginLeft: 'auto' }}>
-              {modifier}K
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className="pb-icon-btn"
-            onClick={() => setThemePanel(true)}
-            aria-label="Open theme studio"
-            title="Theme studio (T)"
-          >
-            <Palette size={18} />
-          </button>
-          <button
-            type="button"
-            className="pb-icon-btn"
-            onClick={() => setHelp(true)}
-            aria-label="Keyboard shortcuts"
-            title="Shortcuts (?)"
-          >
-            <BookOpenText size={18} />
+            <Search size={16} aria-hidden="true" />
+            <span>Search</span>
+            <kbd className="pb-kbd">{modifier}K</kbd>
           </button>
         </header>
 
-        <main id="main" className="pb-main" tabIndex={-1}>
+        <main id="main" className="pb-main">
           {children}
         </main>
       </div>
 
-      <nav className="pb-bottomnav" aria-label="Primary">
-        {BOTTOM_NAV.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.to === '/'}>
-            <item.icon size={19} />
+      {/* ---- phone tab bar ---- */}
+      <nav className="pb-bottomnav" aria-label="Sections">
+        {PRIMARY_NAV.map((item) => (
+          <NavLink key={item.to} to={item.to} end={item.to === '/'} title={item.hint}>
+            <item.icon size={20} aria-hidden="true" />
             <span>{item.label}</span>
           </NavLink>
         ))}
-        <button type="button" onClick={() => setDrawer(true)} aria-label="More pages">
-          <Menu size={19} />
-          <span>More</span>
-        </button>
       </nav>
     </div>
   );
@@ -287,51 +267,27 @@ function AccountChip() {
       <button
         type="button"
         className="pb-btn pb-btn-block"
-        onClick={() => openSignIn('Sign in to like, share and publish.')}
+        onClick={() => openSignIn('Sign in to publish, react and appear on the leaderboard.')}
       >
-        <User2 size={15} /> Sign in
+        Sign in
       </button>
     );
   }
 
   return (
-    <div className="pb-well" style={{ padding: '10px 12px', display: 'flex', gap: 10, alignItems: 'center' }}>
+    <div className="pb-account">
       {user.photoURL ? (
-        <img src={user.photoURL} alt="" style={{ width: 30, height: 30, borderRadius: 999, objectFit: 'cover' }} />
+        <img src={user.photoURL} alt="" width={28} height={28} className="pb-avatar" />
       ) : (
-        <span
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 999,
-            background: 'var(--c-accent-soft)',
-            border: '1px solid var(--c-accent-line)',
-            color: 'var(--c-accent)',
-            display: 'grid',
-            placeItems: 'center',
-            fontFamily: 'var(--x-font-display)',
-            fontWeight: 700,
-            fontSize: '0.85rem',
-            flex: '0 0 auto',
-          }}
-        >
+        <span className="pb-avatar pb-avatar-letter" aria-hidden="true">
           {(user.displayName ?? user.email ?? '?').slice(0, 1).toUpperCase()}
         </span>
       )}
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: '0.82rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {user.displayName ?? 'Signed in'}
-        </div>
-        <div className="pb-muted" style={{ fontSize: '0.68rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {role ? `${role} · ` : ''}
-          {user.email}
-        </div>
+        <span className="pb-account-name">{user.displayName ?? user.email}</span>
         {role && (
-          <NavLink
-            to="/admin"
-            style={{ fontSize: '0.68rem', color: 'var(--c-accent)', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-          >
-            <Shield size={11} /> Workspace
+          <NavLink to="/admin" className="pb-account-role">
+            <Shield size={11} aria-hidden="true" /> Workspace
           </NavLink>
         )}
       </div>
@@ -370,23 +326,11 @@ function CloudBadge() {
 
   return (
     <div
-      className="pb-well"
-      style={{ padding: '8px 10px', fontSize: '0.72rem', color: 'var(--c-ink-muted)' }}
-      title={error ?? 'Bundled library works offline; cloud adds shared speeches when reachable.'}
+      className="pb-cloud-badge"
+      title={error ?? 'The built-in library works offline; the cloud adds shared speeches when reachable.'}
     >
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span
-          style={{
-            width: 7,
-            height: 7,
-            borderRadius: 999,
-            background: tone,
-            boxShadow: `0 0 8px ${tone}`,
-            flex: '0 0 auto',
-          }}
-        />
-        {label}
-      </span>
+      <span className="pb-dot" style={{ background: tone, boxShadow: `0 0 8px ${tone}` }} />
+      {label}
     </div>
   );
 }

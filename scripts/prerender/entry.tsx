@@ -14,7 +14,7 @@ import { TopicPage } from '../../src/pages/TopicPage';
 import { StudioPage } from '../../src/pages/StudioPage';
 import { PracticePage } from '../../src/pages/PracticePage';
 import { CommunityPage } from '../../src/pages/CommunityPage';
-import { WebPage } from '../../src/pages/WebPage';
+import { ArrivalsPage } from '../../src/pages/ArrivalsPage';
 import { DeskPage } from '../../src/pages/DeskPage';
 import { ControlPage } from '../../src/pages/ControlPage';
 import { ThemesPage } from '../../src/pages/ThemesPage';
@@ -34,10 +34,10 @@ function StaticApp({ route }: { route: string }) {
           <Route path="/read/:id" element={<ReaderPage />} />
           <Route path="/topics" element={<TopicsPage />} />
           <Route path="/topics/:slug" element={<TopicPage />} />
-          <Route path="/studio" element={<StudioPage />} />
-          <Route path="/practice" element={<PracticePage />} />
+          <Route path="/write" element={<StudioPage />} />
+          <Route path="/rehearse" element={<PracticePage />} />
           <Route path="/community" element={<CommunityPage />} />
-          <Route path="/web" element={<WebPage />} />
+          <Route path="/arrivals" element={<ArrivalsPage />} />
           <Route path="/desk" element={<DeskPage />} />
           <Route path="/control" element={<ControlPage />} />
           <Route path="/themes" element={<ThemesPage />} />

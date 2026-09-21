@@ -232,7 +232,7 @@ export function LibraryPage() {
             >
               Clear filters
             </button>
-            <button type="button" className="pb-btn pb-btn-primary" onClick={() => navigate('/studio')}>
+            <button type="button" className="pb-btn pb-btn-primary" onClick={() => navigate('/write')}>
               <PenLine size={16} /> Write one
             </button>
           </div>
@@ -320,7 +320,7 @@ export function LibraryPage() {
                 <button
                   type="button"
                   className="pb-btn"
-                  onClick={() => navigate(`/practice/${encodeURIComponent(selected.id)}`)}
+                  onClick={() => navigate(`/rehearse/${encodeURIComponent(selected.id)}`)}
                 >
                   <Mic2 size={16} /> Rehearse
                 </button>
@@ -365,7 +365,7 @@ export function LibraryPage() {
           keep your own voice, then rehearse until the words belong to you.
         </p>
         <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
-          <button type="button" className="pb-btn pb-btn-primary pb-btn-lg" onClick={() => navigate('/studio')}>
+          <button type="button" className="pb-btn pb-btn-primary pb-btn-lg" onClick={() => navigate('/write')}>
             <PenLine size={18} /> Start writing
           </button>
           <button type="button" className="pb-btn pb-btn-lg" onClick={openRandom}>

@@ -2,11 +2,16 @@
 
 **Read it. Write it. Say it out loud.**
 
-Version 2.3 — a local-first workspace for people who have to stand up and speak, now with a
-five-axis theme engine (13,709,280 combinations across colour, motion, layout, UI material and
-typography), real sponsored slots read from Firestore, shareable deep links for every speech,
-a private `/admin` workspace, 14 speaking-guide topic hubs, and a fully prerendered, crawlable
-site (57 static pages, 32 social share cards, a sitemap) so the library can actually rank.
+Version 2.4 — a local-first workspace built on one idea: **qualities are not gifted, they are
+built.** You climb by doing the reps, so the app is shaped around the rep — a fullscreen
+**Rehearsal Room** where you actually speak out loud, a **Writing Desk** with a dictionary that
+suggests stronger words as you type, a reader that quietly defines the words you do not know,
+and **Fresh Arrivals** that pulls five new public-domain speeches from the open archives every
+session, each credited to the archive it came from.
+
+2.4 is also a de-clutter. The navigation is five rooms instead of eleven links, the phone
+layout was rebuilt mobile-first, and the theme engine (13,709,280 combinations) moved out of
+the way rather than away — it is still all there, just no longer the first thing you see.
 
 ---
 
@@ -17,11 +22,11 @@ site (57 static pages, 32 social share cards, a sitemap) so the library can actu
 | Page | |
 | --- | --- |
 | **Library** | Latest / Most viewed shelves, full-text search, filters by type and source, seven sorts, 22 arrangements |
-| **Reader** | Adjustable size, width and leading; focus mode; reading ruler; text-to-speech; keep-a-line; margin notes; export and print |
-| **Studio** | Autosaving drafts, dictation, first-line prompts, live metrics and a coach that checks hook, evidence, landing, fillers, long sentences, echoes and readability |
-| **Practice** | Teleprompter at your words-per-minute, "who is this for?", a breathing pacer, an over/under clock, and a letter to yourself afterwards |
+| **Reader** | Adjustable size, width and leading; focus mode; reading ruler; text-to-speech; keep-a-line; margin notes; export and print — plus the **word lens**: uncommon words carry a dotted underline, tap one and its meaning arrives beside it without leaving the sentence |
+| **Rehearse** `/rehearse` | **The flagship.** A fullscreen stage: the page disappears, the chrome fades after 2.6s of stillness, and there is nothing left but your words scrolling at your words-per-minute. Set an intention, breathe with the ring, run it, then write yourself a letter about how it went |
+| **Write** `/write` | Autosaving drafts, dictation, first-line prompts, live metrics, a structure coach, and the **word smith** — put your cursor in a word and it offers stronger, shorter or more precise alternatives, one click to swap |
 | **Community** | Leaderboard of real accounts (+1 per like, −1 per three dislikes) and the open mic |
-| **From the web** | Public-domain speeches fetched live from Wikisource, each with its licence and a link home |
+| **Arrivals** `/arrivals` | Five new speeches every session, drawn live from **Wikisource**, **Project Gutenberg** and **Wikiquote**, interleaved round-robin. Every card names its archive and licence; the page footer credits all three. Offline, it says so instead of failing |
 | **Your desk** | Lines you kept, margin notes, letters, and the small firsts worth remembering |
 | **Themes** | Five axes, 134 options, 13,709,280 combinations, 26 layout modes, 14 designer presets |
 | **Control Room** | Content, data portability, cloud status, comfort settings, and the admin panel |
@@ -29,7 +34,24 @@ site (57 static pages, 32 social share cards, a sitemap) so the library can actu
 | **Admin** | A private, noindex `/admin` workspace for role-holders only: ad campaigns, people roles, content moderation, site stats |
 
 Every speech and template has a **share link** (`/read/…`) that deep-links straight into it —
-copy from the reader, the library cards or the practice page.
+copy from the reader, the library cards or the rehearsal room.
+
+### The dictionary
+
+Two faces of one service (`src/services/dictionary.ts`). Definitions come from
+[dictionaryapi.dev](https://api.dictionaryapi.dev), alternatives from
+[Datamuse](https://api.datamuse.com) — both keyless and CORS-open. Results are cached in
+`localStorage` (`pb.dictionary.v1`, 400 entries) so the same word is never fetched twice, and a
+bundled offline core answers common words with no network at all. Every lookup aborts after a
+few seconds rather than hanging, so the feature degrades to silence instead of to a spinner.
+
+### Devices
+
+The stylesheet is mobile-first: the base rules *are* the phone, and each breakpoint adds
+capability as the screen earns it — ≤380px small phones, ≤520px portrait phones, ≥560px
+landscape and small tablets, ≥760px tablets (the tab bar goes away), ≥1100px laptops (the
+sidebar becomes permanent), ≥1600px large displays. Touch pointers get 44px hit targets and no
+hover effects; landscape phones get a shorter stage; installed PWAs get safe-area padding.
 
 ### Sponsored slots
 

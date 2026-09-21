@@ -4,7 +4,7 @@
  *   • same-origin assets → cache first, populate on miss
  * Everything is failure tolerant: a missing cache never breaks the app.
  */
-const VERSION = 'pb-v2';
+const VERSION = 'pb-v3';
 const SHELL = '/index.html';
 const PRECACHE = [SHELL, '/manifest.webmanifest', '/favicon.svg'];
 

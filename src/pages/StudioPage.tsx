@@ -19,6 +19,7 @@ import {
   Type,
 } from 'lucide-react';
 import { Markdown } from '../components/Markdown';
+import { WordSmith } from '../components/WordSmith';
 import { LIBRARY, type Speech } from '../data/speeches';
 import { useLibrary, TEMPLATE_BODY } from '../store/library';
 import { useUi } from '../store/ui';
@@ -36,7 +37,7 @@ import { SITE_URL, usePageMeta } from '../lib/seo';
 const TEMPLATES = LIBRARY.filter((item) => item.kind === 'template');
 
 export function StudioPage() {
-  const meta = pageMetaFor('/studio');
+  const meta = pageMetaFor('/write');
   usePageMeta(meta?.title ?? 'Studio', {
     description: meta?.description,
     image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
@@ -71,7 +72,7 @@ function Remix({ source }: { source: Speech }) {
     if (started.current) return;
     started.current = true;
     const newId = createSpeech({ ...source, title: `${source.title} (remix)` });
-    navigate(`/studio/${newId}`, { replace: true });
+    navigate(`/write/${newId}`, { replace: true });
   }, [createSpeech, navigate, source]);
 
   return (
@@ -116,7 +117,7 @@ function StudioHome() {
       tags: template.tags,
     });
     toast('New draft created from template', 'success');
-    navigate(`/studio/${newId}`);
+    navigate(`/write/${newId}`);
   };
 
   return (
@@ -136,7 +137,7 @@ function StudioHome() {
             className="pb-btn pb-btn-primary pb-btn-lg"
             onClick={() => {
               const newId = createSpeech({ content: TEMPLATE_BODY, title: 'Untitled speech' });
-              navigate(`/studio/${newId}`);
+              navigate(`/write/${newId}`);
             }}
           >
             <FilePlus2 size={18} /> New speech
@@ -166,7 +167,7 @@ function StudioHome() {
                 style={{ padding: '14px 16px', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}
               >
                 <div style={{ flex: '1 1 260px', minWidth: 0 }}>
-                  <Link to={`/studio/${item.id}`} style={{ fontWeight: 650, fontSize: '1rem' }}>
+                  <Link to={`/write/${item.id}`} style={{ fontWeight: 650, fontSize: '1rem' }}>
                     {item.title}
                   </Link>
                   <div className="pb-muted" style={{ fontSize: '0.76rem', marginTop: 3 }}>
@@ -175,7 +176,7 @@ function StudioHome() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <Link to={`/practice/${item.id}`} className="pb-btn pb-btn-sm">
+                  <Link to={`/rehearse/${item.id}`} className="pb-btn pb-btn-sm">
                     <Mic2 size={14} /> Rehearse
                   </Link>
                   <Link to={`/read/${item.id}`} className="pb-btn pb-btn-sm pb-btn-outline">
@@ -266,6 +267,8 @@ function Editor({
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [listening, setListening] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Where the cursor is sitting, so the word smith knows which word you mean.
+  const [caret, setCaret] = useState(0);
   const timer = useRef<number | null>(null);
 
   const stats = useMemo(() => analyse(draft.content), [draft.content]);
@@ -345,7 +348,7 @@ function Editor({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button type="button" className="pb-btn pb-btn-sm pb-btn-ghost" onClick={() => navigate('/studio')}>
+        <button type="button" className="pb-btn pb-btn-sm pb-btn-ghost" onClick={() => navigate('/write')}>
           ← All drafts
         </button>
         <div style={{ flex: 1 }} />
@@ -568,7 +571,13 @@ function Editor({
                 ref={textareaRef}
                 className="pb-textarea"
                 value={draft.content}
-                onChange={(event) => patch('content', event.target.value)}
+                onChange={(event) => {
+                  patch('content', event.target.value);
+                  setCaret(event.target.selectionStart);
+                }}
+                onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+                onKeyUp={(event) => setCaret(event.currentTarget.selectionStart)}
+                onClick={(event) => setCaret(event.currentTarget.selectionStart)}
                 style={{ minHeight: '52vh', fontFamily: 'var(--x-font-body)', lineHeight: 1.7 }}
                 placeholder="Start writing. Use ## for headings, - for bullets, > for quotes."
                 aria-label="Speech script"
@@ -615,7 +624,7 @@ function Editor({
             >
               <Download size={14} /> Export
             </button>
-            <Link to={`/practice/${initial.id}`} className="pb-btn pb-btn-sm pb-btn-primary">
+            <Link to={`/rehearse/${initial.id}`} className="pb-btn pb-btn-sm pb-btn-primary">
               <Mic2 size={14} /> Rehearse this
             </Link>
             <button
@@ -624,7 +633,7 @@ function Editor({
               onClick={() => {
                 deleteSpeech(initial.id);
                 toast('Draft deleted', 'success');
-                navigate('/studio');
+                navigate('/write');
               }}
             >
               <Trash2 size={14} /> Delete
@@ -633,6 +642,31 @@ function Editor({
         </div>
 
         <aside style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="pb-panel" style={{ padding: 16 }}>
+            <span className="pb-eyebrow">Word smith</span>
+            <p className="pb-muted" style={{ fontSize: '0.76rem', margin: '6px 0 12px', lineHeight: 1.6 }}>
+              Put your cursor in a word to see what else it could be.
+            </p>
+            <WordSmith
+              value={draft.content}
+              caret={caret}
+              compact
+              onReplace={(from, to, replacement) => {
+                const next = `${draft.content.slice(0, from)}${replacement}${draft.content.slice(to)}`;
+                patch('content', next);
+                const at = from + replacement.length;
+                setCaret(at);
+                // Put the cursor back where the writer left it.
+                requestAnimationFrame(() => {
+                  const node = textareaRef.current;
+                  if (!node) return;
+                  node.focus();
+                  node.setSelectionRange(at, at);
+                });
+              }}
+            />
+          </div>
+
           <div className="pb-panel" style={{ padding: 16 }}>
             <span className="pb-eyebrow">Live metrics</span>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>

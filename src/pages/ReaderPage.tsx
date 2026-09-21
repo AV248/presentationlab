@@ -19,6 +19,7 @@ import {
   PenLine,
   Mic2,
   StickyNote,
+  BookA,
 } from 'lucide-react';
 import { Markdown } from '../components/Markdown';
 import { ReactionBar } from '../components/ReactionBar';
@@ -29,7 +30,8 @@ import { useSettings } from '../store/settings';
 import { useUi } from '../store/ui';
 import { useCloud } from '../store/cloud';
 import { registerView } from '../services/data';
-import { fetchWebSpeech as fetchWebText } from '../services/webSources';
+import { fetchWebSpeech as fetchWebText, SOURCES, type SourceId } from '../services/webSources';
+import { WordLensCard, useWordLens } from '../components/WordLens';
 import { analyse, formatCount, formatDate, readingMinutes } from '../lib/text';
 import { copyText, downloadFile, supportsSpeechSynthesis } from '../lib/platform';
 import { useGate } from '../components/SignIn';
@@ -65,6 +67,10 @@ export function ReaderPage() {
   const [progress, setLocalProgress] = useState(0);
   const [noteDraft, setNoteDraft] = useState('');
   const [showNotes, setShowNotes] = useState(false);
+  // The dictionary is on by default while reading; it can be switched off
+  // for anyone who finds the underlines distracting.
+  const [defineOn, setDefineOn] = useState(true);
+  const lens = useWordLens();
 
   const stats = useMemo(() => analyse(item?.content ?? ''), [item?.content]);
   const speechId = item?.id;
@@ -101,6 +107,12 @@ export function ReaderPage() {
     if (item.source === 'cloud') void registerView(item.id);
     // Web speeches arrive with an intro; pull the full text when opened.
     if (item.source === 'web' && item.content.length < 1500) {
+      // The id prefix tells us which archive the text came from.
+      const sourceId: SourceId = item.id.startsWith('pg-')
+        ? 'gutenberg'
+        : item.id.startsWith('wq-')
+          ? 'wikiquote'
+          : 'wikisource';
       void fetchWebText({
         id: item.id,
         title: item.title,
@@ -108,7 +120,8 @@ export function ReaderPage() {
         preview: item.preview,
         content: item.content,
         sourceUrl: item.sourceUrl ?? '',
-        source: 'Wikisource',
+        source: SOURCES[sourceId].name,
+        sourceId,
         licence: item.licence ?? 'Public domain',
         fetchedAt: new Date().toISOString(),
       }).then((full: { content: string }) => {
@@ -283,7 +296,7 @@ export function ReaderPage() {
               <button
                 type="button"
                 className="pb-btn pb-btn-sm"
-                onClick={() => navigate(`/practice/${encodeURIComponent(item.id)}`)}
+                onClick={() => navigate(`/rehearse/${encodeURIComponent(item.id)}`)}
               >
                 <Mic2 size={15} /> Rehearse
               </button>
@@ -294,7 +307,7 @@ export function ReaderPage() {
                   const newId = duplicateSpeech(item.id, item);
                   if (newId) {
                     toast('Copied into your drafts', 'success');
-                    navigate(`/studio/${newId}`);
+                    navigate(`/write/${newId}`);
                   }
                 }}
               >
@@ -520,6 +533,18 @@ export function ReaderPage() {
         >
           Ruler
         </button>
+        <button
+          type="button"
+          className={`pb-btn pb-btn-sm ${defineOn ? 'pb-btn-primary' : ''}`}
+          onClick={() => {
+            setDefineOn((on) => !on);
+            lens.close();
+          }}
+          aria-pressed={defineOn}
+          title="Underline uncommon words and show their meaning on tap"
+        >
+          <BookA size={14} /> Meanings
+        </button>
       </section>
 
       <div
@@ -538,6 +563,7 @@ export function ReaderPage() {
         >
           <Markdown
             text={item.content}
+            onDefine={defineOn ? lens.open : undefined}
             className="pb-prose"
             style={
               {
@@ -583,7 +609,7 @@ export function ReaderPage() {
             <button
               type="button"
               className="pb-btn pb-btn-sm pb-btn-ghost"
-              onClick={() => navigate(`/practice/${encodeURIComponent(item.id)}`)}
+              onClick={() => navigate(`/rehearse/${encodeURIComponent(item.id)}`)}
             >
               <Mic2 size={14} /> Say it out loud
             </button>
@@ -641,6 +667,15 @@ export function ReaderPage() {
           </aside>
         )}
       </div>
+
+      {lens.state && (
+        <WordLensCard
+          word={lens.state.word}
+          x={lens.state.x}
+          y={lens.state.y}
+          onClose={lens.close}
+        />
+      )}
     </div>
   );
 }

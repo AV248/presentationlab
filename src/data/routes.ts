@@ -55,16 +55,16 @@ const website = {
 
 const SECTIONS: { path: string; title: string; description: string }[] = [
   {
-    path: '/studio',
-    title: `Writing Studio — speech editor with a structure coach`,
+    path: '/rehearse',
+    title: `Rehearsal Room — fullscreen teleprompter, pacing timer and breathing cues`,
     description:
-      'Write your speech in a calm editor, get live coaching on structure, word choice and pacing, and export when it is ready. Free and works offline.',
+      'Rehearse out loud in a distraction-free fullscreen stage: teleprompter scroll, words-per-minute pacing, countdowns and breathing cues. Free for students.',
   },
   {
-    path: '/practice',
-    title: `Rehearsal Room — teleprompter, pacing timer and breathing cues`,
+    path: '/write',
+    title: `Writing Desk — speech editor with a built-in dictionary`,
     description:
-      'Rehearse your talk with a teleprompter, words-per-minute pacing, countdowns and breathing cues. The free rehearsal room of Presentation Buddy.',
+      'Write your speech in a calm editor with live structure coaching and a word smith that suggests stronger alternatives as you type. Free and works offline.',
   },
   {
     path: '/community',
@@ -73,10 +73,10 @@ const SECTIONS: { path: string; title: string; description: string }[] = [
       'Read speeches published by the community, climb the contributor leaderboard with real reactions, and share your own work on the open mic.',
   },
   {
-    path: '/web',
-    title: 'Great Speeches from History — public-domain library',
+    path: '/arrivals',
+    title: 'Fresh Arrivals — five new speeches from the open archives every session',
     description:
-      'Fetch famous public-domain speeches from open archives and read them in your own theme — history’s greatest talks, one click away and free.',
+      'Every session brings five new public-domain speeches drawn live from Wikisource, Project Gutenberg and Wikiquote, each one credited to its source.',
   },
   {
     path: '/desk',

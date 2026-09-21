@@ -72,7 +72,7 @@ export function CommandPalette() {
         icon: FilePlus2,
         run: () => {
           const id = createSpeech({ title: 'Untitled speech' });
-          navigate(`/studio/${id}`);
+          navigate(`/write/${id}`);
         },
       },
       {
@@ -108,7 +108,7 @@ export function CommandPalette() {
         hint: 'Teleprompter with pacing',
         group: 'Actions',
         icon: Focus,
-        run: () => navigate('/practice'),
+        run: () => navigate('/rehearse'),
       },
       {
         id: 'action-community',
