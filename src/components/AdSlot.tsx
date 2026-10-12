@@ -1,13 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ArrowUpRight, X } from 'lucide-react';
-import {
-  HOUSE_ADS,
-  fetchActiveAds,
-  pickAd,
-  recordAdEvent,
-  type Ad,
-} from '../services/ads';
+import { HOUSE_ADS, fetchActiveAds, pickAd, type Ad } from '../services/ads';
 
 /**
  * A sponsored slot designed to be noticeable without ever being disturbing:
@@ -16,10 +10,15 @@ import {
  *   • labelled "Sponsored" (or "From Presentation Buddy" for house ads)
  *   • reserves its space before the ad arrives, so the page never jumps
  *   • dismissible for the rest of the session
- *   • every external link carries rel="sponsored noopener"
+ *   • every external link carries rel="sponsored noopener noreferrer"
  *
- * Ads are real documents from the Firestore `ads` collection. Offline —
- * or when nobody has bought a slot — it quietly shows a house promo.
+ * Ads are documents from the `servingads` collection in the separate ads
+ * Firebase project. Every URL in them is scheme-checked in src/services/ads.ts
+ * before it reaches this component, so `RedirectURL: "javascript:..."` in the
+ * database cannot become a clickable link.
+ *
+ * Offline — or when nobody has bought a slot — it quietly shows a house promo
+ * for this app's own features instead.
  */
 
 interface AdSlotProps {
@@ -38,11 +37,9 @@ const dismissedForSession = (key: string) => {
 };
 
 export function AdSlot({ seed, variant = 'inline' }: AdSlotProps) {
-  const navigate = useNavigate();
   const [ad, setAd] = useState<Ad | null>(null);
   const [dismissed, setDismissed] = useState(() => dismissedForSession(seed));
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const impressionSent = useRef(false);
+  const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -57,31 +54,19 @@ export function AdSlot({ seed, variant = 'inline' }: AdSlotProps) {
           if (alive) setAd(pickAd(HOUSE_ADS, seed));
         });
     };
-    const idle = window.requestIdleCallback as ((cb: () => void, o?: { timeout: number }) => number) | undefined;
-    const handle = typeof idle === 'function' ? idle(run, { timeout: 3000 }) : window.setTimeout(run, 800);
+    const idle = window.requestIdleCallback as
+      | ((cb: () => void, o?: { timeout: number }) => number)
+      | undefined;
+    const handle =
+      typeof idle === 'function' ? idle(run, { timeout: 3000 }) : window.setTimeout(run, 800);
     return () => {
       alive = false;
       if (typeof handle === 'number') window.clearTimeout(handle);
     };
   }, [seed]);
 
-  // Count an impression only when at least half the card is actually seen.
-  useEffect(() => {
-    if (!ad || ad.house || impressionSent.current) return;
-    const node = hostRef.current;
-    if (!node || typeof IntersectionObserver === 'undefined') return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting) && !impressionSent.current) {
-          impressionSent.current = true;
-          void recordAdEvent(ad.id, 'impression');
-        }
-      },
-      { threshold: 0.5 },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [ad]);
+  // A new ad means a new image; forget that a previous one failed to load.
+  useEffect(() => setImageFailed(false), [ad?.id]);
 
   if (dismissed) return null;
 
@@ -94,27 +79,18 @@ export function AdSlot({ seed, variant = 'inline' }: AdSlotProps) {
     setDismissed(true);
   };
 
-  const open = () => {
-    if (!ad) return;
-    if (!ad.house) void recordAdEvent(ad.id, 'click');
-    if (ad.house || ad.url.startsWith('/')) {
-      navigate(ad.url);
-    } else {
-      window.open(ad.url, '_blank', 'noopener,noreferrer');
-    }
-  };
+  const label = ad?.house ? 'From Presentation Buddy' : 'Sponsored';
 
   return (
     <div
-      ref={hostRef}
       className={`pb-ad ${variant === 'rail' ? 'pb-ad-rail' : ''}`}
-      aria-label={ad?.house ? 'From Presentation Buddy' : 'Sponsored message'}
+      aria-label={label}
       data-empty={ad ? 'false' : 'true'}
     >
       {ad && (
         <>
           <div className="pb-ad-head">
-            <span className="pb-ad-tag">{ad.house ? 'From Presentation Buddy' : 'Sponsored'}</span>
+            <span className="pb-ad-tag">{label}</span>
             <button
               type="button"
               className="pb-icon-btn pb-ad-close"
@@ -125,15 +101,66 @@ export function AdSlot({ seed, variant = 'inline' }: AdSlotProps) {
               <X size={13} />
             </button>
           </div>
-          <button type="button" className="pb-ad-body" onClick={open}>
-            <span className="pb-ad-title">{ad.title}</span>
-            {ad.body && <span className="pb-ad-copy">{ad.body}</span>}
-            <span className="pb-ad-cta">
-              {ad.cta} <ArrowUpRight size={13} aria-hidden="true" />
-            </span>
-          </button>
+
+          {/*
+            A real anchor, not a click handler: it can be opened in a new tab,
+            copied, and inspected — and the rel value tells search engines the
+            link is paid, which is what keeps the site's own rankings clean.
+          */}
+          {ad.url.startsWith('/') ? (
+            <Link className="pb-ad-body" to={ad.url}>
+              <AdContent ad={ad} imageFailed={imageFailed} onImageError={() => setImageFailed(true)} />
+            </Link>
+          ) : (
+            <a
+              className="pb-ad-body"
+              href={ad.url}
+              target="_blank"
+              rel="sponsored noopener noreferrer"
+            >
+              <AdContent ad={ad} imageFailed={imageFailed} onImageError={() => setImageFailed(true)} />
+            </a>
+          )}
         </>
       )}
     </div>
+  );
+}
+
+function AdContent({
+  ad,
+  imageFailed,
+  onImageError,
+}: {
+  ad: Ad;
+  imageFailed: boolean;
+  onImageError: () => void;
+}) {
+  const showImage = Boolean(ad.imageUrl) && !imageFailed;
+
+  return (
+    <>
+      {showImage && (
+        // aspect-ratio reserves the box before the bytes arrive, so a slow
+        // image never pushes the article out from under the reader.
+        <span className="pb-ad-media">
+          <img
+            className="pb-ad-img"
+            src={ad.imageUrl as string}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
+            onError={onImageError}
+          />
+        </span>
+      )}
+
+      <span className="pb-ad-title">{ad.title}</span>
+      {ad.body && <span className="pb-ad-copy">{ad.body}</span>}
+      <span className="pb-ad-cta">
+        {ad.cta} <ArrowUpRight size={13} aria-hidden="true" />
+      </span>
+    </>
   );
 }

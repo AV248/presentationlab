@@ -1,15 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  Crown,
-  KeyRound,
-  Megaphone,
-  Plus,
-  RefreshCw,
-  Shield,
-  Trash2,
-  Users,
-  FileText,
-} from 'lucide-react';
+import { Crown, KeyRound, Megaphone, RefreshCw, Shield, Users, FileText } from 'lucide-react';
 import { useAuth } from '../store/auth';
 import { useUi } from '../store/ui';
 import { usePageMeta } from '../lib/seo';
@@ -24,15 +14,9 @@ import {
   type CloudSpeech,
   type Post,
 } from '../services/data';
-import {
-  createAd,
-  deleteAd,
-  fetchAllAds,
-  updateAd,
-  type Ad,
-  type AdInput,
-} from '../services/ads';
+import { fetchAllAds, type Ad } from '../services/ads';
 import { FIREBASE_ENABLED } from '../services/firebase';
+import { ADS_ENABLED } from '../services/firebaseAds';
 import { formatCount } from '../lib/text';
 
 /**
@@ -44,7 +28,6 @@ import { formatCount } from '../lib/text';
 
 type Tab = 'overview' | 'ads' | 'people' | 'content';
 
-const EMPTY_AD: AdInput = { title: '', body: '', url: '', cta: 'Learn more', weight: 1, active: true };
 
 export function AdminPage() {
   usePageMeta('Workspace · Presentation Buddy', {
@@ -67,10 +50,6 @@ export function AdminPage() {
   const [users, setUsers] = useState<Awaited<ReturnType<typeof fetchUsers>>>([]);
   const [ads, setAds] = useState<Ad[]>([]);
   const [adsError, setAdsError] = useState<string | null>(null);
-
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<AdInput>(EMPTY_AD);
-  const [saving, setSaving] = useState(false);
 
   const isAdmin = role === 'admin' || role === 'owner';
   const isOwner = role === 'owner';
@@ -180,54 +159,6 @@ export function AdminPage() {
   }
 
   /* ------------------------------------------------------------ */
-  /* ad desk                                                        */
-  /* ------------------------------------------------------------ */
-
-  const startNew = () => {
-    setEditingId(null);
-    setDraft(EMPTY_AD);
-  };
-
-  const startEdit = (ad: Ad) => {
-    setEditingId(ad.id);
-    setDraft({ title: ad.title, body: ad.body, url: ad.url, cta: ad.cta, weight: ad.weight, active: ad.active });
-  };
-
-  const saveAd = () => {
-    if (!draft.title.trim() || !draft.url.trim()) {
-      toast('An ad needs at least a title and a link.', 'warn');
-      return;
-    }
-    setSaving(true);
-    const action = editingId ? updateAd(editingId, draft) : createAd(draft).then(() => undefined);
-    void action
-      .then(async () => {
-        toast(editingId ? 'Ad updated' : 'Ad created', 'success');
-        setEditingId(null);
-        setDraft(EMPTY_AD);
-        setAds(await fetchAllAds());
-      })
-      .catch((error: unknown) => toast((error as Error)?.message ?? 'Save failed', 'error'))
-      .finally(() => setSaving(false));
-  };
-
-  const toggleAd = (ad: Ad) => {
-    void updateAd(ad.id, { active: !ad.active })
-      .then(async () => setAds(await fetchAllAds()))
-      .catch((error: unknown) => toast((error as Error)?.message ?? 'Update failed', 'error'));
-  };
-
-  const removeAd = (ad: Ad) => {
-    if (!window.confirm(`Delete "${ad.title}" for good?`)) return;
-    void deleteAd(ad.id)
-      .then(async () => {
-        toast('Ad deleted', 'success');
-        setAds(await fetchAllAds());
-      })
-      .catch((error: unknown) => toast((error as Error)?.message ?? 'Delete failed', 'error'));
-  };
-
-  /* ------------------------------------------------------------ */
   /* view                                                           */
   /* ------------------------------------------------------------ */
 
@@ -274,7 +205,7 @@ export function AdminPage() {
           <Stat label="Published speeches" value={formatCount(speeches.length)} />
           <Stat label="Open-mic notes" value={formatCount(posts.length)} />
           <Stat label="Accounts" value={formatCount(users.length)} />
-          <Stat label="Ads (active)" value={`${ads.filter((ad) => ad.active).length} / ${ads.length}`} />
+          <Stat label="Ads serving" value={formatCount(ads.length)} />
           <div className="pb-panel" style={{ gridColumn: '1 / -1', padding: '14px 16px' }}>
             <p className="pb-muted" style={{ fontSize: '0.84rem', lineHeight: 1.7, margin: 0 }}>
               Reactions, shares and views move only from real, signed-in people — the counters
@@ -288,116 +219,84 @@ export function AdminPage() {
       {tab === 'ads' && (
         <section>
           <div className="pb-panel" style={{ padding: '16px 18px', marginBottom: 14 }}>
-            <h2 style={{ fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <Megaphone size={16} /> {editingId ? 'Edit ad' : 'New ad'}
+            <h2 style={{ fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Megaphone size={16} /> Live inventory
             </h2>
-            <p className="pb-muted" style={{ fontSize: '0.8rem', marginBottom: 12 }}>
-              Ads appear as quiet, labelled sponsored cards inside the library, reader and
-              community pages. Keep them honest: a title, a short pitch, one link.
+            <p className="pb-muted" style={{ fontSize: '0.8rem', lineHeight: 1.7, marginBottom: 10 }}>
+              Sponsored cards are served from the <span className="pb-mono">servingads</span>{' '}
+              collection of a <strong>separate</strong> Firebase project (
+              <span className="pb-mono">a-a-v-r-i-t</span>). This app deliberately holds no write
+              credential for it, so this list is read-only — add, edit or pause ads in that
+              project's own Firebase console.
             </p>
-            {adsError && (
-              <p className="pb-muted" style={{ fontSize: '0.8rem', marginBottom: 10 }}>
-                {adsError} (Check Firestore rules: <span className="pb-mono">ads</span> needs
-                public read, admin write.)
+            <p className="pb-muted" style={{ fontSize: '0.78rem', lineHeight: 1.7 }}>
+              Every document needs <span className="pb-mono">Title</span>,{' '}
+              <span className="pb-mono">Content</span>, <span className="pb-mono">ImageURL</span>,{' '}
+              <span className="pb-mono">DescriptionPreview</span> and{' '}
+              <span className="pb-mono">RedirectURL</span>. Both URLs are scheme-checked before
+              they reach the page, so a document carrying a{' '}
+              <span className="pb-mono">javascript:</span> link is skipped rather than rendered.
+            </p>
+            {!ADS_ENABLED && (
+              <p className="pb-muted" style={{ fontSize: '0.8rem', marginTop: 10 }}>
+                The ads project is not configured on this installation (
+                <span className="pb-mono">VITE_ADS_FIREBASE_*</span>), so the site is showing its
+                own house promos.
               </p>
             )}
-            <div className="pb-form-grid">
-              <label>
-                <span>Title</span>
-                <input
-                  className="pb-input"
-                  value={draft.title}
-                  onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-                  placeholder="What the offer is"
-                />
-              </label>
-              <label>
-                <span>Link (https://… or /internal-path)</span>
-                <input
-                  className="pb-input"
-                  value={draft.url}
-                  onChange={(e) => setDraft({ ...draft, url: e.target.value })}
-                  placeholder="https://example.com/landing"
-                />
-              </label>
-              <label style={{ gridColumn: '1 / -1' }}>
-                <span>Body (one or two sentences)</span>
-                <textarea
-                  className="pb-input"
-                  rows={2}
-                  value={draft.body}
-                  onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-                  placeholder="Why someone should care, in plain language."
-                />
-              </label>
-              <label>
-                <span>Button label</span>
-                <input
-                  className="pb-input"
-                  value={draft.cta}
-                  onChange={(e) => setDraft({ ...draft, cta: e.target.value })}
-                />
-              </label>
-              <label>
-                <span>Weight (higher = shown more)</span>
-                <input
-                  className="pb-input"
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={draft.weight}
-                  onChange={(e) => setDraft({ ...draft, weight: Math.max(1, Number(e.target.value) || 1) })}
-                />
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'end' }}>
-                <input
-                  type="checkbox"
-                  checked={draft.active}
-                  onChange={(e) => setDraft({ ...draft, active: e.target.checked })}
-                />
-                <span>Active</span>
-              </label>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button type="button" className="pb-btn pb-btn-primary pb-btn-sm" onClick={saveAd} disabled={saving}>
-                <Plus size={14} /> {saving ? 'Saving…' : editingId ? 'Save changes' : 'Create ad'}
-              </button>
-              {(editingId || draft !== EMPTY_AD) && (
-                <button type="button" className="pb-btn pb-btn-sm pb-btn-ghost" onClick={startNew}>
-                  Clear
-                </button>
-              )}
-            </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {ads.map((ad) => (
-              <div key={ad.id} className="pb-panel-flat" style={{ padding: '12px 14px' }}>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                  <div style={{ flex: '1 1 240px', minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
-                      {ad.title}{' '}
-                      {!ad.active && <span className="pb-stamp" style={{ marginLeft: 6 }}>paused</span>}
-                    </div>
-                    <div className="pb-muted" style={{ fontSize: '0.76rem', marginTop: 2 }}>{ad.url}</div>
-                    {ad.body && <div className="pb-soft" style={{ fontSize: '0.82rem', marginTop: 6, lineHeight: 1.55 }}>{ad.body}</div>}
+              <div
+                key={ad.id}
+                className="pb-panel-flat"
+                style={{ padding: '12px 14px', display: 'flex', gap: 12, alignItems: 'flex-start' }}
+              >
+                {ad.imageUrl && (
+                  <img
+                    src={ad.imageUrl}
+                    alt=""
+                    width={72}
+                    height={40}
+                    loading="lazy"
+                    decoding="async"
+                    referrerPolicy="no-referrer"
+                    style={{
+                      width: 72,
+                      height: 40,
+                      objectFit: 'cover',
+                      borderRadius: 6,
+                      flex: '0 0 auto',
+                      border: '1px solid var(--c-line)',
+                    }}
+                  />
+                )}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{ad.title}</div>
+                  <div
+                    className="pb-muted"
+                    style={{ fontSize: '0.74rem', marginTop: 2, wordBreak: 'break-all' }}
+                  >
+                    {ad.url}
                   </div>
-                  <button type="button" className="pb-btn pb-btn-sm" onClick={() => startEdit(ad)}>
-                    Edit
-                  </button>
-                  <button type="button" className="pb-btn pb-btn-sm pb-btn-ghost" onClick={() => toggleAd(ad)}>
-                    {ad.active ? 'Pause' : 'Activate'}
-                  </button>
-                  <button type="button" className="pb-icon-btn" onClick={() => removeAd(ad)} aria-label={`Delete ${ad.title}`}>
-                    <Trash2 size={14} />
-                  </button>
+                  {ad.body && (
+                    <div className="pb-soft" style={{ fontSize: '0.82rem', marginTop: 6, lineHeight: 1.55 }}>
+                      {ad.body}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
-            {!ads.length && !adsError && (
+            {!ads.length && (
               <p className="pb-muted" style={{ fontSize: '0.85rem' }}>
-                No ads yet — until the first one is created, the site shows its own house
+                No ad documents were returned — until there are some, the site shows its own house
                 promos instead.
+              </p>
+            )}
+            {adsError && (
+              <p className="pb-muted" style={{ fontSize: '0.8rem' }}>
+                {adsError}
               </p>
             )}
           </div>

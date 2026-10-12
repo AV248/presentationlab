@@ -29,6 +29,12 @@ export interface FirebaseBundle {
   db: unknown;
   signInWithPopup: (auth: unknown, provider: unknown) => Promise<{ user: Record<string, unknown> }>;
   signInWithRedirect: (auth: unknown, provider: unknown) => Promise<void>;
+  /**
+   * Exchanges a Firebase *custom* token — minted on our server from a
+   * verified Clerk session — for a Firebase Auth session. This is what lets
+   * Firestore security rules keep using `request.auth.uid` unchanged.
+   */
+  signInWithCustomToken: (auth: unknown, token: string) => Promise<{ user: Record<string, unknown> }>;
   getRedirectResult: (auth: unknown) => Promise<{ user?: Record<string, unknown> } | null>;
   signOut: (auth: unknown) => Promise<void>;
   onAuthStateChanged: (auth: unknown, next: (user: Record<string, unknown> | null) => void) => () => void;
@@ -91,6 +97,7 @@ export function loadFirebase(): Promise<FirebaseBundle | null> {
       db: fsMod.getFirestore(app),
       signInWithPopup: authMod.signInWithPopup as unknown as FirebaseBundle['signInWithPopup'],
       signInWithRedirect: authMod.signInWithRedirect as unknown as FirebaseBundle['signInWithRedirect'],
+      signInWithCustomToken: authMod.signInWithCustomToken as unknown as FirebaseBundle['signInWithCustomToken'],
       getRedirectResult: authMod.getRedirectResult as unknown as FirebaseBundle['getRedirectResult'],
       signOut: authMod.signOut as unknown as FirebaseBundle['signOut'],
       onAuthStateChanged: authMod.onAuthStateChanged as FirebaseBundle['onAuthStateChanged'],

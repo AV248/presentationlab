@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { AuthProvider } from './components/AuthProvider';
 import './styles/index.css';
 
 const container = document.getElementById('root');
@@ -13,7 +14,11 @@ if (container.firstChild) container.replaceChildren();
 
 createRoot(container).render(
   <StrictMode>
-    <App />
+    {/* Clerk owns sign-in when it is configured; without it this is a
+        transparent wrapper and the app stays fully local. */}
+    <AuthProvider>
+      <App />
+    </AuthProvider>
   </StrictMode>,
 );
 

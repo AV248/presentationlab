@@ -12,3 +12,13 @@ coverage
 npm-debug.log*
 yarn-error.log*
 *.tsbuildinfo
+
+# Secrets. The only env file that is ever committed is .env.example, which
+# holds placeholders. Everything real — Clerk keys, Firebase config, service
+# accounts — lives in .env locally and in Vercel's environment variables in
+# production. Firebase *web* config is public by design, but the Clerk secret
+# key and any service account are not, and none of them belong in git.
+.env
+.env.*
+!.env.example
+.vercel

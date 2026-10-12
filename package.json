@@ -1,23 +1,30 @@
 {
   "name": "presentation-buddy",
   "private": true,
-  "version": "2.4.0",
+  "version": "2.5.0",
   "type": "module",
-  "description": "Presentation Buddy 2.3 — premium themes, real ads, shareable links, faster. A fully themeable workspace to write, coach, rehearse and deliver talks.",
+  "description": "Presentation Buddy 2.5 \u2014 Clerk authentication, a separated ads project, richer structured data, and a production-hardened Vercel deploy.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/postbuild.mjs",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.api.json",
     "smoke": "node scripts/smoke/run.mjs",
-    "verify": "npm run typecheck && npm run smoke",
+    "verify": "npm run typecheck && npm run audit:secrets && npm run smoke",
     "cards": "node scripts/cards/run.mjs",
     "prerender": "node scripts/prerender/run.mjs",
-    "sitemap": "node scripts/sitemap/run.mjs"
+    "sitemap": "node scripts/sitemap/run.mjs",
+    "typecheck:app": "tsc --noEmit -p tsconfig.json",
+    "typecheck:api": "tsc --noEmit -p tsconfig.api.json",
+    "audit:secrets": "node scripts/check-secrets.mjs"
   },
   "dependencies": {
+    "@clerk/backend": "^3.23.2",
+    "@clerk/clerk-react": "^5.61.10",
+    "@clerk/themes": "^2.4.57",
     "clsx": "^2.1.1",
     "firebase": "^12.19.0",
+    "firebase-admin": "^14.5.0",
     "lucide-react": "^1.47.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -26,6 +33,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.2.0",

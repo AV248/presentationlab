@@ -64,13 +64,20 @@ await build({
   outfile,
   loader: { '.css': 'empty' },
   define: {
-    'import.meta.env': JSON.stringify({
-      PROD: false,
-      DEV: true,
-      BASE_URL: '/',
-      VITE_FIREBASE_API_KEY: '',
-      VITE_FIREBASE_PROJECT_ID: '',
-    }),
+    // Each key is defined individually. esbuild only rewrites the literal
+    // `import.meta.env.X` member expression; defining the whole
+    // `import.meta.env` object produces an empty shim and silently does
+    // nothing, which is what this block used to do.
+    'import.meta.env.PROD': 'false',
+    'import.meta.env.DEV': 'true',
+    'import.meta.env.BASE_URL': JSON.stringify('/'),
+    // Firebase, Clerk and the ads project are deliberately left unset: the
+    // smoke test exercises the fully-local app, which is the configuration
+    // most likely to be somebody's first run and the one that must never
+    // break. Clerk in particular needs a real browser and a real network.
+    'import.meta.env.VITE_FIREBASE_API_KEY': JSON.stringify(''),
+    'import.meta.env.VITE_FIREBASE_PROJECT_ID': JSON.stringify(''),
+    'import.meta.env.VITE_CLERK_PUBLISHABLE_KEY': JSON.stringify(''),
   },
   logLevel: 'error',
 });

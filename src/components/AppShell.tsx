@@ -18,6 +18,8 @@ import {
   X,
 } from 'lucide-react';
 import { Logo } from './Logo';
+import { AccountMenu } from './AuthProvider';
+import { CLERK_ENABLED } from '../services/clerk';
 import { useUi } from '../store/ui';
 import { useSettings } from '../store/settings';
 import { useCloud } from '../store/cloud';
@@ -291,17 +293,23 @@ function AccountChip() {
           </NavLink>
         )}
       </div>
-      <button
-        type="button"
-        className="pb-icon-btn"
-        title="Sign out"
-        aria-label="Sign out"
-        onClick={() => {
-          void signOut().then(() => toast('Signed out. Your drafts stay on this device.', 'info'));
-        }}
-      >
-        <LogOut size={15} />
-      </button>
+      {/* Clerk's own menu offers profile management and switching accounts;
+          without it we keep the plain sign-out button. */}
+      {CLERK_ENABLED ? (
+        <AccountMenu />
+      ) : (
+        <button
+          type="button"
+          className="pb-icon-btn"
+          title="Sign out"
+          aria-label="Sign out"
+          onClick={() => {
+            void signOut().then(() => toast('Signed out. Your drafts stay on this device.', 'info'));
+          }}
+        >
+          <LogOut size={15} />
+        </button>
+      )}
     </div>
   );
 }
