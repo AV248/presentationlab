@@ -141,3 +141,111 @@ export function subscribeToAuth(next: (user: AuthUser | null) => void): () => vo
   });
   return () => stop();
 }
+
+/* ------------------------------------------------------------------ */
+/* Clerk → Firebase token exchange                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Where our own serverless function lives. In production Vercel serves
+ * `api/clerk-firebase-token.ts` here; in `vite dev` a small plugin mounts the
+ * same handler so local development behaves identically.
+ */
+export const TOKEN_ENDPOINT = '/api/clerk-firebase-token';
+
+/**
+ * The Clerk user id we last exchanged. Clerk and Firebase sessions are both
+ * long-lived, so without this the bridge would re-mint a token on every
+ * render pass that touched auth.
+ */
+let exchangedFor: string | null = null;
+
+export type ExchangeFailure =
+  | 'not-configured'
+  | 'no-session'
+  | 'endpoint-missing'
+  | 'server-misconfigured'
+  | 'unauthorized'
+  | 'server-error'
+  | 'network';
+
+export interface ExchangeOutcome {
+  ok: boolean;
+  reason?: ExchangeFailure;
+}
+
+/**
+ * Swaps a verified Clerk session for a Firebase Auth session.
+ *
+ * The Clerk session token is sent to *our* function, which verifies it with
+ * Clerk's secret key and, only then, mints a Firebase custom token carrying
+ * the same user id. The browser never sees the Admin credential, and
+ * Firestore rules continue to match on `request.auth.uid`.
+ *
+ * Every failure mode is non-fatal and named: reading the public library
+ * never depended on being signed in to Firebase, so a missing endpoint
+ * degrades to "signed in to Clerk, cloud writes unavailable" rather than
+ * breaking the app.
+ */
+export async function exchangeClerkSessionForFirebase(
+  clerkUserId: string,
+  getToken: () => Promise<string | null>,
+): Promise<ExchangeOutcome> {
+  if (!FIREBASE_ENABLED) return { ok: false, reason: 'not-configured' };
+  if (exchangedFor === clerkUserId) return { ok: true };
+
+  try {
+    const sessionToken = await getToken();
+    if (!sessionToken) return { ok: false, reason: 'no-session' };
+
+    const response = await fetch(TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${sessionToken}`,
+      },
+      // The body is empty on purpose: identity comes from the bearer token,
+      // never from anything the client asserts about itself.
+      body: '{}',
+    });
+
+    if (response.status === 404) return { ok: false, reason: 'endpoint-missing' };
+    if (response.status === 401 || response.status === 403) return { ok: false, reason: 'unauthorized' };
+    if (response.status === 501) return { ok: false, reason: 'server-misconfigured' };
+    if (!response.ok) return { ok: false, reason: 'server-error' };
+
+    const payload = (await response.json()) as { token?: unknown; error?: unknown };
+    const customToken = typeof payload.token === 'string' ? payload.token : null;
+    if (!customToken) return { ok: false, reason: 'server-error' };
+
+    const bundle = await loadFirebase();
+    if (!bundle) return { ok: false, reason: 'not-configured' };
+
+    await bundle.signInWithCustomToken(bundle.auth, customToken);
+    exchangedFor = clerkUserId;
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'network' };
+  }
+}
+
+/** Forget the cached exchange — call after an explicit sign-out. */
+export function resetTokenExchange() {
+  exchangedFor = null;
+}
+
+/** Mirror the signed-in person into `users` and `bloggers`. Best effort. */
+export function ensureProfile(user: AuthUser): void {
+  void syncProfile(user);
+}
+
+/** Sign out of Firebase only, leaving the Clerk session alone. */
+export async function signOutFirebaseOnly(): Promise<void> {
+  resetTokenExchange();
+  try {
+    const bundle = await loadFirebase();
+    if (bundle) await bundle.signOut(bundle.auth);
+  } catch {
+    /* nothing is signed in, or Firebase never loaded — both are fine */
+  }
+}

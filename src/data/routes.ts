@@ -49,6 +49,83 @@ const website = {
   publisher: organization,
 };
 
+/**
+ * Breadcrumbs.
+ *
+ * Worth more than they look. They are what lets Google replace a bare URL
+ * under a result with a "Home › Speaking Guides › Wedding Toasts" trail — a
+ * second, richer entry point into the site for every page that has one.
+ */
+function breadcrumb(trail: { name: string; path: string }[]): Record<string, unknown> {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: trail.map((crumb, index) => ({
+      '@type': 'ListItem',
+      position: index + 1,
+      name: crumb.name,
+      item: absoluteUrl(crumb.path),
+    })),
+  };
+}
+
+/** "Rehearsal Room — fullscreen teleprompter…" → "Rehearsal Room". */
+function shortName(title: string): string {
+  return title.split(' — ')[0]!.trim() || title.trim();
+}
+
+/**
+ * A HowTo for the rehearsal room.
+ *
+ * Of everything on this site, "how do I practise a presentation" is the
+ * query most likely to come from someone who will actually use the app, and
+ * HowTo is one of the few schema types that can produce an illustrated rich
+ * result rather than a line of text.
+ */
+const REHEARSE_HOWTO = {
+  '@context': 'https://schema.org',
+  '@type': 'HowTo',
+  name: 'How to rehearse a presentation out loud',
+  description:
+    'Use a fullscreen teleprompter, a words-per-minute target and a pacing timer to rehearse a talk until the timing is muscle memory.',
+  totalTime: 'PT15M',
+  supply: [{ '@type': 'HowToSupply', name: 'A finished or half-finished speech' }],
+  tool: [{ '@type': 'HowToTool', name: 'Presentation Buddy rehearsal room' }],
+  step: [
+    {
+      '@type': 'HowToStep',
+      position: 1,
+      name: 'Load your speech',
+      text: 'Open the rehearsal room and pick one from the library, or paste your own. Nothing is uploaded — it stays on your device.',
+      url: absoluteUrl('/rehearse'),
+    },
+    {
+      '@type': 'HowToStep',
+      position: 2,
+      name: 'Set your pace',
+      text: 'Choose a words-per-minute target. Conversational speech sits around 130 wpm; 150 is brisk. The teleprompter scrolls at the speed you chose.',
+    },
+    {
+      '@type': 'HowToStep',
+      position: 3,
+      name: 'Start the stage',
+      text: 'The page goes fullscreen and everything else fades away after a few seconds of stillness, so you are looking at your words and nothing else.',
+    },
+    {
+      '@type': 'HowToStep',
+      position: 4,
+      name: 'Say it out loud',
+      text: 'Speak to the scroll. The timer shows whether you are running over or under as you go, rather than surprising you at the end.',
+    },
+    {
+      '@type': 'HowToStep',
+      position: 5,
+      name: 'Run it again',
+      text: 'Rehearse until the timing feels boring. The third run is usually where a talk stops being read and starts being said.',
+    },
+  ],
+};
+
 /* ------------------------------------------------------------------ */
 /* sections (the app's own pages)                                       */
 /* ------------------------------------------------------------------ */
@@ -259,6 +336,12 @@ export function buildPages(): PageMeta[] {
           url: absoluteUrl(section.path),
           isPartOf: { '@type': 'WebSite', name: SITE_NAME, url: SITE_URL },
         },
+        breadcrumb([
+          { name: 'Home', path: '/' },
+          { name: shortName(section.title), path: section.path },
+        ]),
+        // The rehearsal room is the product; it gets the only HowTo.
+        ...(section.path === '/rehearse' ? [REHEARSE_HOWTO] : []),
       ],
     });
   }
@@ -289,7 +372,11 @@ export function buildPages(): PageMeta[] {
           url: absoluteUrl(`/topics/${topic.slug}`),
         })),
       },
-    ],
+        breadcrumb([
+          { name: 'Home', path: '/' },
+          { name: 'Speaking Guides', path: '/topics' },
+        ]),
+      ],
   });
 
   /* topic hubs */
@@ -322,6 +409,11 @@ export function buildPages(): PageMeta[] {
             })),
           },
         },
+        breadcrumb([
+          { name: 'Home', path: '/' },
+          { name: 'Speaking Guides', path: '/topics' },
+          { name: topic.title, path: `/topics/${topic.slug}` },
+        ]),
       ],
     });
   }
@@ -349,9 +441,22 @@ export function buildPages(): PageMeta[] {
           dateModified: speech.createdAt,
           articleSection: speech.category,
           keywords: speech.tags.join(', '),
+          inLanguage: 'en',
+          // An image is what qualifies a result for a thumbnail, and a
+          // word count is one of the things Google shows for long reads.
+          image: absoluteUrl(
+            CARD_READS.includes(speech.id) ? `/cards/read-${speech.id}.png` : '/cards/presentation-buddy.png',
+          ),
+          wordCount: speech.content.split(/\s+/).filter(Boolean).length,
           mainEntityOfPage: absoluteUrl(`/read/${speech.id}`),
           isPartOf: { '@type': 'WebSite', name: SITE_NAME, url: SITE_URL },
+          about: { '@type': 'Thing', name: speech.occasion },
         },
+        breadcrumb([
+          { name: 'Home', path: '/' },
+          { name: speech.category, path: '/topics' },
+          { name: speech.title, path: `/read/${speech.id}` },
+        ]),
       ],
     });
   }

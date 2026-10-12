@@ -1,6 +1,7 @@
 /**
  * Post-build pipeline (runs after `vite build`):
- *   bundle → 32 share cards → 57 prerendered pages → a 56-URL sitemap.
+ *   bundle → 32 share cards → 57 prerendered pages → a 56-URL sitemap
+ *   → robots.txt
  */
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,8 @@ const steps = [
   ['share cards', 'cards/run.mjs'],
   ['prerendered pages', 'prerender/run.mjs'],
   ['sitemap', 'sitemap/run.mjs'],
+  // After the sitemap so both files always name the same origin.
+  ['robots.txt', 'robots/run.mjs'],
 ];
 
 for (const [label, script] of steps) {
@@ -23,4 +26,4 @@ for (const [label, script] of steps) {
   }
 }
 
-console.log('\nPost-build complete: cards, prerendered pages and sitemap are in dist/.');
+console.log('\nPost-build complete: cards, prerendered pages, sitemap and robots.txt are in dist/.');

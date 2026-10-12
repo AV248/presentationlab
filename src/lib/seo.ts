@@ -10,7 +10,32 @@ import { useEffect } from 'react';
  */
 
 export const SITE_NAME = 'Presentation Buddy';
-export const SITE_URL = 'https://presentationbuddy.aavrit.dedyn.io';
+
+/**
+ * The canonical origin.
+ *
+ * Every canonical tag, sitemap URL, Open Graph URL and structured-data @id
+ * derives from this, so it has to be the domain the site is actually served
+ * from. Set VITE_SITE_URL in Vercel the moment you know the production
+ * domain: if it still points somewhere else, search engines are told that
+ * every page is a duplicate of a site you do not control.
+ *
+ * The fallback keeps local builds and the prerender scripts working without
+ * any environment at all.
+ */
+const DEFAULT_SITE_URL = 'https://presentationbuddy.aavrit.dedyn.io';
+
+function readSiteUrl(): string {
+  // Read the property directly off import.meta.env rather than caching
+  // `import.meta` in a variable first: the build scripts (sitemap, robots)
+  // substitute `import.meta.env.VITE_SITE_URL` at bundle time, and esbuild
+  // can only match the literal member expression.
+  const configured = import.meta.env?.VITE_SITE_URL?.trim();
+  // Trailing slashes would produce "https://site.com//read/x".
+  return (configured || DEFAULT_SITE_URL).replace(/\/+$/, '');
+}
+
+export const SITE_URL = readSiteUrl();
 export const SITE_TAGLINE = 'Write, coach, rehearse and deliver talks that land';
 export const DEFAULT_DESCRIPTION =
   'Presentation Buddy is a free, beautifully themeable workspace to write speeches, coach your structure, rehearse with a teleprompter and pacing timer, and read a curated library of real example speeches.';

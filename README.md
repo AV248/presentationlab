@@ -2,7 +2,7 @@
 
 **Read it. Write it. Say it out loud.**
 
-Version 2.4 — a local-first workspace built on one idea: **qualities are not gifted, they are
+Version 2.5 — a local-first workspace built on one idea: **qualities are not gifted, they are
 built.** You climb by doing the reps, so the app is shaped around the rep — a fullscreen
 **Rehearsal Room** where you actually speak out loud, a **Writing Desk** with a dictionary that
 suggests stronger words as you type, a reader that quietly defines the words you do not know,
@@ -12,6 +12,16 @@ session, each credited to the archive it came from.
 2.4 is also a de-clutter. The navigation is five rooms instead of eleven links, the phone
 layout was rebuilt mobile-first, and the theme engine (13,709,280 combinations) moved out of
 the way rather than away — it is still all there, just no longer the first thing you see.
+
+2.5 turns it into something you can put in front of real people. **Clerk** owns sign-in,
+**presentations and all user data live in their own Firebase project**, and **ads are served
+from a second, separate Firebase project this app cannot write to**. Structured data was
+widened — breadcrumbs on every page, `Article` on every speech, a `HowTo` on the rehearsal
+room — so the site can appear as more than a line of text in search results.
+
+> Deploying? **[docs/VERCEL.md](docs/VERCEL.md)** has every environment variable, the
+> Firestore rules for both projects, and the order to do things in.
+> If you are on nginx or Caddy instead, see **[docs/DEPLOY.md](docs/DEPLOY.md)**.
 
 ---
 
@@ -114,8 +124,10 @@ technical blocker, promotion is what actually climbs the results.
 The app runs completely without Firebase. To switch on the shared library and community:
 
 1. **Create a Firebase project** and add a Web app.
-2. **Enable Authentication → Sign-in methods → Google and Microsoft.** (For Microsoft, Azure AD
-   needs no extra configuration for the default tenant; add your own tenant ID if you use one.)
+2. **Do not enable any Firebase sign-in method.** Clerk owns sign-in; Firebase Auth exists only
+   to accept the custom tokens our own function mints from a verified Clerk session. This is
+   deliberate: `firestore.rules` names exactly the providers it accepts, so switching on
+   anonymous or email/password auth here would grant nothing.
 3. **Create a Firestore database** (production mode is fine).
 4. **Deploy the rules** in `firestore.rules`:
    ```bash
@@ -148,10 +160,44 @@ The app runs completely without Firebase. To switch on the shared library and co
 | `admins/{uid}` | Role documents: `owner` or `admin` |
 | `admin` | Legacy e-mail allow-list from v1 — read only, never written, no passwords |
 | `sponsors` | Optional sponsor slots shown before sponsor-supported speeches |
-| `ads` | Sponsored campaigns for the theme-native ad slots: `title`, `description`, `url`, optional `image`, `active`, `weight`. Written only from `/admin` by role-holders; read by everyone per the rules. |
+| `servingads` | **Not in this project.** Ad documents — `Title`, `Content`, `ImageURL`, `DescriptionPreview`, `RedirectURL` — live in the separate ads project. See below. |
 
 Points follow the original rule and are computed from real counters:
 `points = likesReceived − floor(dislikesReceived / 3)`.
+
+### Two Firebase projects, on purpose
+
+| Project | Holds | This app can |
+| --- | --- | --- |
+| **Data** (`reflectioncapturedthoughts`) | presentations, profiles, reactions, roles | read and write, under `firestore.rules` |
+| **Ads** (`a-a-v-r-i-t`) | the `servingads` collection | **read only** — no write credential exists |
+
+Keeping ad content in its own project means a bug or a leaked credential in the main app
+cannot alter or spam the ads, and an ad operator's mistake cannot reach presentations or
+profiles. The ads project's rules are four lines: public read of `servingads`, everything else
+denied.
+
+Because `servingads` is world-readable and edited outside this codebase, every field is treated
+as untrusted input. `src/services/ads.ts` parses `ImageURL` and `RedirectURL` and requires
+`http(s)` before either reaches the DOM, so a document containing `RedirectURL: "javascript:…"`
+is skipped rather than rendered. Ads are labelled *Sponsored* and carry
+`rel="sponsored noopener noreferrer"`, which is what keeps paid links from touching your own
+rankings.
+
+### How sign-in reaches Firestore
+
+Clerk signs the visitor in. Firestore cannot validate a Clerk JWT by itself, so
+`api/clerk-firebase-token.ts` verifies the Clerk session **server-side** with your secret key
+and mints a Firebase custom token for the same person. `request.auth.uid` in the rules is then
+the Clerk user id.
+
+That function is the only place the Firebase Admin credential is ever read. If it were in the
+browser bundle it would be a full read/write key to your database — which is the mistake this
+design exists to make impossible. `npm run verify` fails the build if anything secret ends up
+under a `VITE_` prefix.
+
+Until the service account is configured the endpoint returns `501`; visitors can still sign in
+and browse the library, and only cloud writes are unavailable.
 
 ---
 

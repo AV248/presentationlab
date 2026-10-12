@@ -2,25 +2,62 @@ rules_version = '2';
 
 // Presentation Buddy — Firestore security rules.
 //
-// Reading the library is open to everyone. Writing anything — a speech, a
-// like, a share, a note — requires a signed-in account (Google or Microsoft
-// via Firebase Authentication). People may only delete their own work, and
-// only an owner or admin may touch anyone else's.
+// THIS FILE IS FOR THE DATA PROJECT: `reflectioncapturedthoughts`
+// The ads project (`a-a-v-r-i-t`) has its own, much smaller file:
+// firestore.ads.rules.
 //
-// The one deliberate exception is *counters*. A like on someone else's
-// speech has to move a number on a document you do not own, so the rules
-// below allow a signed-in person to change `views`, `likes`, `dislikes` and
-// `shares` — and nothing else — on any speech. `diff().affectedKeys()` is
-// what makes that safe: the moment a write touches the title, the body or
-// the author it stops being a counter update and the owner check applies.
+// ─────────────────────────────────────────────────────────────────────────────
+// HOW SIGN-IN REACHES THESE RULES
+// ─────────────────────────────────────────────────────────────────────────────
+// Clerk owns sign-in. Firestore cannot validate a Clerk JWT on its own, so
+// api/clerk-firebase-token.ts verifies the Clerk session server-side and mints
+// a Firebase custom token carrying the Clerk user id. By the time a write
+// reaches this file, `request.auth.uid` is that Clerk user id — stable across
+// sessions and devices.
+//
+// isSignedIn() therefore requires either that minted token or one of the
+// legacy Firebase providers. Enabling anonymous or email/password auth in the
+// Firebase console does NOT open a door here: those providers are named and
+// everything else is refused.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// THE SHAPE OF THE POLICY
+// ─────────────────────────────────────────────────────────────────────────────
+// Reading the library is open to everyone. Writing anything — a speech, a
+// like, a share, a note — requires a signed-in account. People may only delete
+// their own work, and only an owner or admin may touch anyone else's.
+//
+// The one deliberate exception is *counters*. A like on someone else's speech
+// has to move a number on a document you do not own, so a signed-in person may
+// change `views`, `likes`, `dislikes` and `shares` — and nothing else.
+// `diff().affectedKeys()` is what makes that safe: the moment a write touches
+// the title, the body or the author it stops being a counter update and the
+// owner check applies instead.
 //
 // Deploy with:  firebase deploy --only firestore:rules
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ------------------------------------------------------------------
+    // Identity
+    // ------------------------------------------------------------------
+
+    // True only for the two sign-in paths this app actually uses.
+    //
+    // Being explicit here is the point: if someone later flips on anonymous
+    // or email/password auth in the Firebase console — for testing, or by
+    // accident — it grants nothing. Anonymous sign-in in particular is a
+    // common way to accidentally give the whole internet write access.
     function isSignedIn() {
-      return request.auth != null;
+      return request.auth != null
+        && (
+          // Minted by api/clerk-firebase-token.ts from a verified Clerk session.
+          request.auth.token.get('provider', '') == 'clerk'
+          // Legacy Firebase providers, kept for installs without Clerk.
+          || request.auth.token.firebase.sign_in_provider == 'google.com'
+          || request.auth.token.firebase.sign_in_provider == 'microsoft.com'
+        );
     }
 
     function isOwner(uid) {
@@ -44,6 +81,10 @@ service cloud.firestore {
       return hasAdminDoc() && adminDoc().role == 'owner';
     }
 
+    // ------------------------------------------------------------------
+    // Counter guards
+    // ------------------------------------------------------------------
+
     // The set of keys a write actually changed.
     function changed() {
       return request.resource.data.diff(resource.data).affectedKeys();
@@ -54,30 +95,36 @@ service cloud.firestore {
       return changed().hasOnly(['views', 'likes', 'dislikes', 'shares']);
     }
 
-    // Counters may only ever move by one step at a time, and never below
-    // zero. This keeps a hostile client from writing likes = 10000000.
-    function sane(field) {
+    // A counter may only ever move up by `max` per write, and never below
+    // zero. Without this a hostile client could write likes = 10000000 in
+    // one shot, which is exactly what a leaderboard invites.
+    function bumpedBy(field, max) {
       return !(field in changed())
         || (request.resource.data[field] is int
             && request.resource.data[field] >= 0
-            && request.resource.data[field] <= resource.data.get(field, 0) + 1);
+            && request.resource.data[field] <= resource.data.get(field, 0) + max);
     }
 
     function saneCounters() {
-      return sane('views') && sane('likes') && sane('dislikes') && sane('shares');
+      return bumpedBy('views', 1)
+        && bumpedBy('likes', 1)
+        && bumpedBy('dislikes', 1)
+        && bumpedBy('shares', 1);
     }
 
     // ------------------------------------------------------------------
-    // Speeches. Anyone may read; signed-in people may publish and may only
-    // change or remove their own — except for the public counters, which
-    // any signed-in person may nudge by one.
+    // Speeches
+    //
+    // Anyone may read; signed-in people may publish and may only change or
+    // remove their own — except for the public counters, which any
+    // signed-in person may nudge by one.
     // ------------------------------------------------------------------
     match /presentations/{speechId} {
       allow read: if true;
 
-      // Note the capitalised field names: they are the original schema
-      // from the first version of this site and the client still writes
-      // them, so the rules have to validate the same keys the code sends.
+      // Note the capitalised field names: they are the original schema from
+      // the first version of this site and the client still writes them, so
+      // the rules have to validate the same keys the code sends.
       allow create: if isSignedIn()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.Title is string
@@ -101,9 +148,11 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------------------
-    // Reactions. One document per (person, speech). Only you can write
-    // yours, and the id must be your own uid joined to the speech so a
-    // person can never hold two reactions on one speech.
+    // Reactions. One document per (person, speech).
+    //
+    // The id must be your own uid joined to the speech id, so a person can
+    // never hold two reactions on one speech — and, more importantly, so
+    // they cannot write a reaction under somebody else's id.
     // ------------------------------------------------------------------
     match /reactions/{reactionId} {
       allow read: if isSignedIn();
@@ -136,34 +185,51 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------------------
-    // Contributor profiles and real point counters (the old "bloggers").
+    // Contributor profiles and reaction tallies (the old "bloggers").
     //
     // You maintain your own profile. Everyone else may only move the
-    // received-reaction tallies, because a like on your speech is recorded
-    // by the person giving it, not by you.
+    // received-reaction tallies, because a like on your speech has to be
+    // recorded by the person giving it, not by you. Those three fields are
+    // capped so the leaderboard cannot be written directly.
     // ------------------------------------------------------------------
     match /bloggers/{uid} {
       allow read: if true;
       allow create: if isOwner(uid) || isAdmin();
+
       allow update: if isOwner(uid)
         || isAdmin()
         || (isSignedIn()
-            && changed().hasOnly(['likesReceived', 'dislikesReceived', 'points', 'updatedAt']));
+            && changed().hasOnly(['likesReceived', 'dislikesReceived', 'points', 'updatedAt'])
+            && bumpedBy('likesReceived', 1)
+            && bumpedBy('dislikesReceived', 1)
+            // Points can move by more than one when several reactions are
+            // reconciled at once, but never by an unbounded amount.
+            && bumpedBy('points', 100));
+
       allow delete: if isSiteOwner();
     }
 
     // ------------------------------------------------------------------
     // Profile mirror for every signed-in person.
+    //
+    // The key list is closed: without hasOnly() an account could use its
+    // own profile document as a scratch pad of arbitrary size.
     // ------------------------------------------------------------------
     match /users/{uid} {
       allow read: if isSignedIn();
-      allow create, update: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+             'uid', 'email', 'displayName', 'photoURL', 'providerId',
+             'lastSeen', 'createdAt'
+           ]);
       allow delete: if isSiteOwner();
     }
 
     // ------------------------------------------------------------------
     // Roles. Readable by their holder; writable only by the site owner.
-    // Nobody can grant themselves a role from the client.
+    // Nobody can grant themselves a role from the client — this is the
+    // collection that, if writable, would hand over the whole workspace.
     // ------------------------------------------------------------------
     match /admins/{uid} {
       allow read: if isSignedIn();
@@ -179,10 +245,17 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Ad campaigns edited from /admin and read by every visitor.
+    // ------------------------------------------------------------------
+    // Legacy local ad collection — NO LONGER USED.
+    //
+    // Ads moved to the `servingads` collection in the separate ads project
+    // (see firestore.ads.rules). Nothing in the app reads or writes this
+    // one any more, so it is closed: allowing writes to a collection no
+    // code uses is pure attack surface.
+    // ------------------------------------------------------------------
     match /ads/{adId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     // ------------------------------------------------------------------
@@ -195,7 +268,8 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Anything not named above is denied outright.
+    // Anything not named above is denied outright. This catch-all is what
+    // makes a typo in a collection name fail closed rather than open.
     match /{document=**} {
       allow read, write: if false;
     }

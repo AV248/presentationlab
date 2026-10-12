@@ -1,67 +1,103 @@
-import { loadFirebase, FIREBASE_ENABLED } from './firebase';
+import { loadAdsFirebase, ADS_ENABLED, ADS_COLLECTION } from './firebaseAds';
 
 /**
- * Sponsored slots ("ads") are real documents in the Firestore `ads`
- * collection, managed from the /admin workspace:
+ * Sponsored slots.
  *
- *   ads/{id}  { title, body, url, cta?, weight?, active, createdAt, updatedAt,
- *               impressions?, clicks? }
+ * Ads are documents in the `servingads` collection of a SECOND Firebase
+ * project (`a-a-v-r-i-t`), kept deliberately separate from the project that
+ * holds presentations and user data. See src/services/firebaseAds.ts for why.
  *
- * Rules: public read of active ads; only admins/owner may write.
+ * Document shape (capitalised, as the collection is written by another app):
  *
- * The fetch degrades quietly everywhere: no config, no network or a denied
- * read simply falls back to house ads (small promos for the app's own
- * features, labelled as such) so the layout never jumps and the console
- * never logs an error.
+ *   servingads/{id}
+ *     Title              string  headline
+ *     Content            string  full body copy
+ *     ImageURL           string  https image
+ *     DescriptionPreview string  one-line teaser shown on the card
+ *     RedirectURL        string  https destination for the click
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * EVERY FIELD IS UNTRUSTED INPUT
+ * ─────────────────────────────────────────────────────────────────────────────
+ * This collection is edited outside this codebase, so a document could contain
+ * `RedirectURL: "javascript:..."` — by accident, or because someone with
+ * access to that project turned malicious. Rendering that into an <a href>
+ * would be script execution on our origin, with our users' sessions.
+ *
+ * So both URL fields are parsed andScheme-checked before they are allowed
+ * near the DOM; anything that is not http(s) — or a same-origin path — is
+ * dropped and the ad is skipped entirely. Titles and copy are rendered as
+ * React text, never as HTML.
+ *
+ * The ads project is read-only from here. No write of any kind is attempted:
+ * not to record impressions, not to count clicks. Advertiser analytics belong
+ * to the RedirectURL they control.
+ *
+ * As always: no config, no network, or a denied read falls back to house ads
+ * (small promos for this app's own features, labelled as such), so the layout
+ * never jumps and the console never logs an error.
  */
 
 export interface Ad {
   id: string;
   title: string;
+  /** Short teaser shown on the card (DescriptionPreview, or a trim of Content). */
   body: string;
+  /** Full copy (Content), kept for the expanded rail variant. */
+  content: string;
+  /** Validated https image, or null when absent or unsafe. */
+  imageUrl: string | null;
+  /** Validated http(s) destination, or a same-origin path. */
   url: string;
   cta: string;
   weight: number;
-  active: boolean;
   /** House ads are Presentation Buddy's own — no advertiser is invented. */
   house: boolean;
 }
 
-const CACHE_KEY = 'pb.ads.v1';
+const CACHE_KEY = 'pb.servingads.v1';
 const CACHE_TTL = 10 * 60 * 1000;
+const MAX_ADS = 40;
 
 export const HOUSE_ADS: Ad[] = [
   {
     id: 'house-themes',
     title: '13.7 million ways this page can look',
     body: 'Five design axes, 134 hand-set options and 14 curated presets. Open the theme studio and make the workspace yours.',
+    content: 'Five design axes, 134 hand-set options and 14 curated presets. Open the theme studio and make the workspace yours.',
+    imageUrl: null,
     url: '/themes',
     cta: 'Open the theme studio',
     weight: 2,
-    active: true,
     house: true,
   },
   {
     id: 'house-rehearse',
     title: 'Your talk improves on the third rehearsal',
     body: 'Teleprompter, pacing timer and breathing cues — rehearse any speech in this library with the tools built for it.',
+    content: 'Teleprompter, pacing timer and breathing cues — rehearse any speech in this library with the tools built for it.',
+    imageUrl: null,
     url: '/rehearse',
     cta: 'Rehearse a speech',
     weight: 2,
-    active: true,
     house: true,
   },
   {
     id: 'house-publish',
     title: 'Have a talk you are proud of?',
     body: 'Publish it to the shared library for other speakers to read and react to. Real audience, real applause.',
+    content: 'Publish it to the shared library for other speakers to read and react to. Real audience, real applause.',
+    imageUrl: null,
     url: '/write',
     cta: 'Start writing',
     weight: 1,
-    active: true,
     house: true,
   },
 ];
+
+/* ------------------------------------------------------------------ */
+/* Validation                                                           */
+/* ------------------------------------------------------------------ */
 
 function str(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -71,26 +107,67 @@ function num(value: unknown, fallback = 1): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+/**
+ * Accept a same-origin path or an absolute http(s) URL. Reject everything
+ * else — `javascript:`, `data:`, `vbscript:`, `file:`, and the
+ * protocol-relative `//host` form, which would silently leave the origin.
+ */
+function safeUrl(raw: string): string | null {
+  const value = raw.trim();
+  if (!value) return null;
+
+  // Internal route. Kept relative so it resolves on any deployment origin
+  // (preview URLs, the production domain, localhost).
+  if (value.startsWith('/') && !value.startsWith('//')) return value;
+
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+const safeImageUrl = safeUrl;
+
+/* ------------------------------------------------------------------ */
+/* Mapping                                                              */
+/* ------------------------------------------------------------------ */
+
 function mapAd(id: string, data: Record<string, unknown>): Ad | null {
-  const title = str(data.title ?? data.Title);
-  const url = str(data.url ?? data.Link ?? data.link);
-  const body = str(data.body ?? data.Content ?? data.content ?? data.description ?? data.Description);
+  // The collection is capitalised; the lowercase spellings are accepted so
+  // that a document written by some other tool still renders.
+  const title = str(data.Title ?? data.title);
+  const url = safeUrl(str(data.RedirectURL ?? data.redirectURL ?? data.redirectUrl ?? data.url));
+
+  // An ad with no headline or no safe destination is not an ad.
   if (!title || !url) return null;
+
+  const content = str(data.Content ?? data.content);
+  const preview = str(data.DescriptionPreview ?? data.descriptionPreview ?? data.description);
+
   return {
     id,
     title,
-    body,
+    body: preview || content.slice(0, 180),
+    content,
+    imageUrl: safeImageUrl(str(data.ImageURL ?? data.imageURL ?? data.imageUrl)),
     url,
-    cta: str(data.cta ?? data.CTA, 'Learn more'),
+    cta: str(data.CTA ?? data.cta, 'Learn more'),
     weight: Math.max(1, num(data.weight, 1)),
-    active: data.active !== false,
     house: false,
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Cache                                                                */
+/* ------------------------------------------------------------------ */
+
 interface CacheShape {
   at: number;
-  ads: Ad[];
+  /** Raw Firestore documents, not mapped ads — see readCache. */
+  ads: { id?: unknown } & Record<string, unknown>[];
 }
 
 function readCache(): Ad[] | null {
@@ -98,8 +175,16 @@ function readCache(): Ad[] | null {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CacheShape;
-    if (!Array.isArray(parsed.ads) || Date.now() - parsed.at > CACHE_TTL) return null;
-    return parsed.ads;
+    if (!Array.isArray(parsed.ads) || typeof parsed.at !== 'number') return null;
+    if (Date.now() - parsed.at > CACHE_TTL) return null;
+
+    // Cached documents are re-validated rather than trusted. localStorage is
+    // readable by any script on the origin, and a stale shape from an older
+    // release would otherwise flow straight into the DOM.
+    return parsed.ads
+      .filter((candidate): candidate is Record<string, unknown> => Boolean(candidate) && typeof candidate === 'object')
+      .map((candidate) => mapAd(String(candidate.id ?? ''), candidate))
+      .filter((ad): ad is Ad => ad !== null);
   } catch {
     return null;
   }
@@ -107,17 +192,33 @@ function readCache(): Ad[] | null {
 
 function writeCache(ads: Ad[]) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), ads } satisfies CacheShape));
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), ads }));
   } catch {
     /* a full cache never costs an ad */
   }
 }
 
+export function clearAdCache() {
+  try {
+    localStorage.removeItem(CACHE_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Fetching                                                             */
+/* ------------------------------------------------------------------ */
+
 let flight: Promise<Ad[]> | null = null;
 
-/** Active ads from Firestore. Empty array on any failure — never throws. */
+/**
+ * Active ads from the `servingads` collection. Empty array on any failure —
+ * never throws, never logs.
+ */
 export async function fetchActiveAds(options: { fresh?: boolean } = {}): Promise<Ad[]> {
-  if (!FIREBASE_ENABLED) return [];
+  if (!ADS_ENABLED) return [];
+
   if (!options.fresh) {
     const cached = readCache();
     if (cached) return cached;
@@ -126,17 +227,23 @@ export async function fetchActiveAds(options: { fresh?: boolean } = {}): Promise
 
   flight = (async () => {
     try {
-      const bundle = await loadFirebase();
+      const bundle = await loadAdsFirebase();
       if (!bundle) return [];
-      const snap = await bundle.fs.getDocs(
-        bundle.fs.query(bundle.fs.collection(bundle.db, 'ads'), bundle.fs.limit(40)),
+
+      const { fs, db } = bundle;
+      const snap = await fs.getDocs(
+        fs.query(fs.collection(db, ADS_COLLECTION), fs.limit(MAX_ADS)),
       );
+
       const ads = snap.docs
         .map((doc) => mapAd(doc.id, doc.data()))
-        .filter((ad): ad is Ad => ad !== null && ad.active);
+        .filter((ad): ad is Ad => ad !== null);
+
       writeCache(ads);
       return ads;
     } catch {
+      // A denied read, an offline device and a typo'd project id all land
+      // here. House ads cover it.
       return [];
     } finally {
       window.setTimeout(() => {
@@ -148,71 +255,15 @@ export async function fetchActiveAds(options: { fresh?: boolean } = {}): Promise
   return flight;
 }
 
-/** Every ad (active or not) for the admin workspace. */
+/**
+ * Every ad in the collection, for the admin overview.
+ *
+ * Read-only by design: this app holds no write credential for the ads
+ * project, so the function exists to *show* what is live, not to change it.
+ */
 export async function fetchAllAds(): Promise<Ad[]> {
-  const bundle = await loadFirebase();
-  if (!bundle) return [];
-  const snap = await bundle.fs.getDocs(
-    bundle.fs.query(bundle.fs.collection(bundle.db, 'ads'), bundle.fs.limit(100)),
-  );
-  return snap.docs
-    .map((doc) => mapAd(doc.id, doc.data()))
-    .filter((ad): ad is Ad => Boolean(ad))
-    .sort((a, b) => a.title.localeCompare(b.title));
-}
-
-export interface AdInput {
-  title: string;
-  body: string;
-  url: string;
-  cta: string;
-  weight: number;
-  active: boolean;
-}
-
-export async function createAd(input: AdInput): Promise<{ id: string }> {
-  const bundle = await loadFirebase();
-  if (!bundle) throw new Error('The ad desk needs a configured, reachable Firestore.');
-  const ref = await bundle.fs.addDoc(bundle.fs.collection(bundle.db, 'ads'), {
-    ...input,
-    impressions: 0,
-    clicks: 0,
-    createdAt: bundle.fs.serverTimestamp(),
-    updatedAt: bundle.fs.serverTimestamp(),
-  });
-  writeCache([]);
-  return { id: ref.id };
-}
-
-export async function updateAd(id: string, patch: Partial<AdInput>): Promise<void> {
-  const bundle = await loadFirebase();
-  if (!bundle) throw new Error('The ad desk needs a configured, reachable Firestore.');
-  await bundle.fs.updateDoc(bundle.fs.doc(bundle.db, 'ads', id), {
-    ...patch,
-    updatedAt: bundle.fs.serverTimestamp(),
-  });
-  writeCache([]);
-}
-
-export async function deleteAd(id: string): Promise<void> {
-  const bundle = await loadFirebase();
-  if (!bundle) throw new Error('The ad desk needs a configured, reachable Firestore.');
-  await bundle.fs.deleteDoc(bundle.fs.doc(bundle.db, 'ads', id));
-  writeCache([]);
-}
-
-/** Best-effort analytics. A denied write is a perfectly normal outcome. */
-export async function recordAdEvent(id: string, kind: 'impression' | 'click'): Promise<void> {
-  if (id.startsWith('house-')) return;
-  try {
-    const bundle = await loadFirebase();
-    if (!bundle) return;
-    await bundle.fs.updateDoc(bundle.fs.doc(bundle.db, 'ads', id), {
-      [kind === 'impression' ? 'impressions' : 'clicks']: bundle.fs.increment(1),
-    });
-  } catch {
-    /* counters never interrupt the reader */
-  }
+  const ads = await fetchActiveAds({ fresh: true });
+  return [...ads].sort((a, b) => a.title.localeCompare(b.title));
 }
 
 /** Deterministic weighted pick so one page view does not reshuffle on rerender. */
@@ -221,10 +272,11 @@ export function pickAd(ads: Ad[], seed: string): Ad | null {
   let hash = 0;
   for (let i = 0; i < seed.length; i += 1) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
   const total = ads.reduce((sum, ad) => sum + ad.weight, 0);
+  if (total <= 0) return ads[hash % ads.length] ?? null;
   let roll = hash % total;
   for (const ad of ads) {
     roll -= ad.weight;
     if (roll < 0) return ad;
   }
-  return ads[ads.length - 1];
+  return ads[ads.length - 1] ?? null;
 }

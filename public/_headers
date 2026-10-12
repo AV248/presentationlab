@@ -16,11 +16,20 @@
   # HSTS: once a browser has seen this, it will not try plain HTTP again.
   Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
   # Content Security Policy.
-  #   'unsafe-inline' on style-src is required: the theme engine writes
-  #   ~80 CSS custom properties onto the document as inline style, which
-  #   is the whole mechanism behind 13.7M theme combinations.
-  #   connect-src lists exactly the archives and dictionaries we call.
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.dictionaryapi.dev https://api.datamuse.com https://en.wikisource.org https://en.wikiquote.org https://gutendex.com https://www.gutenberg.org https://*.googleapis.com https://*.firebaseio.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com wss://*.firebaseio.com; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://login.microsoftonline.com; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'self'; upgrade-insecure-requests
+  #
+  #   'unsafe-inline' on style-src is required: the theme engine writes ~80
+  #   CSS custom properties onto the document as inline style, which is the
+  #   whole mechanism behind the theme combinations.
+  #
+  #   'unsafe-inline' on script-src is required by Clerk, which injects a
+  #   small bootstrap script. This is the one real weakening of the policy
+  #   and it is deliberate — see docs/VERCEL.md for the nonce-based
+  #   alternative if you want to close it later.
+  #
+  #   connect-src lists exactly the archives, dictionaries and auth hosts
+  #   the app calls. img-src allows https: because ad images come from
+  #   domains the advertiser controls.
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://suitable-bison-4886.clerk.accounts.dev https://clerk.aavrit.dedyn.io; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://api.dictionaryapi.dev https://api.datamuse.com https://en.wikisource.org https://en.wikiquote.org https://gutendex.com https://www.gutenberg.org https://*.googleapis.com https://*.firebaseio.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://suitable-bison-4886.clerk.accounts.dev https://clerk.aavrit.dedyn.io https://clerk.accounts.dev wss://*.firebaseio.com; worker-src 'self' blob:; frame-src 'self' https://suitable-bison-4886.clerk.accounts.dev https://clerk.aavrit.dedyn.io https://challenges.cloudflare.com https://*.firebaseapp.com https://accounts.google.com https://login.microsoftonline.com; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'self'; upgrade-insecure-requests
 
 # Hashed build assets: the filename changes whenever the bytes do, so these
 # can be cached permanently.

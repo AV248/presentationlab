@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
-import { Check, Heart, PencilLine, Share2, X } from 'lucide-react';
+import { SignInButton, SignUpButton } from '@clerk/clerk-react';
+import { Check, Heart, LogIn, PencilLine, Share2, X } from 'lucide-react';
 import { useUi } from '../store/ui';
-import { useAuth } from '../store/auth';
-import { isFirebaseAvailable } from '../store/auth';
+import { useAuth, isSignInAvailable } from '../store/auth';
+import { CLERK_ENABLED, CLERK_IS_LIVE } from '../services/clerk';
 import type { SignInProvider } from '../services/auth';
 
 const PROVIDERS: { id: SignInProvider; name: string; icon: React.ReactNode; note: string }[] = [
@@ -55,7 +56,7 @@ export function SignInSheet() {
   const error = useAuth((s) => s.error);
   const signInWith = useAuth((s) => s.signInWith);
   const clearError = useAuth((s) => s.clearError);
-  const configured = isFirebaseAvailable();
+  const configured = isSignInAvailable();
 
   useEffect(() => {
     if (!open) return undefined;
@@ -96,9 +97,38 @@ export function SignInSheet() {
           <div className="pb-well" style={{ padding: 16, fontSize: '0.86rem' }}>
             <strong>Sign-in is not switched on for this installation.</strong>
             <p className="pb-muted" style={{ marginTop: 6, lineHeight: 1.6 }}>
-              Add the Firebase environment variables (see <span className="pb-mono">.env.example</span>)
-              and enable the Google and Microsoft providers in the Firebase console. Everything else
-              in Presentation Buddy keeps working without it.
+              Add the Clerk or Firebase environment variables (see{' '}
+              <span className="pb-mono">.env.example</span>) and enable your sign-in methods.
+              Everything else in Presentation Buddy keeps working without it.
+            </p>
+          </div>
+        ) : CLERK_ENABLED ? (
+          /* Clerk renders its own modal, pre-filled with every sign-in method
+             enabled in the Clerk dashboard — so adding a provider there is all
+             it takes to offer it here. */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <SignInButton mode="modal">
+              <button type="button" className="pb-btn pb-btn-lg pb-btn-primary pb-btn-block">
+                <LogIn size={16} aria-hidden="true" />
+                Continue
+              </button>
+            </SignInButton>
+
+            <SignUpButton mode="modal">
+              <button type="button" className="pb-btn pb-btn-lg pb-btn-block">
+                Create an account
+              </button>
+            </SignUpButton>
+
+            <p className="pb-muted" style={{ fontSize: '0.76rem', lineHeight: 1.6, marginTop: 2 }}>
+              Email, Google and whichever other methods are enabled appear in one step.
+              {!CLERK_IS_LIVE && (
+                <>
+                  {' '}
+                  <strong>Development keys are in use</strong> — add your live Clerk keys before
+                  launching.
+                </>
+              )}
             </p>
           </div>
         ) : (
@@ -166,7 +196,8 @@ export function SignInSheet() {
 
         <p className="pb-muted" style={{ fontSize: '0.76rem', marginTop: 18, lineHeight: 1.6 }}>
           We store your name, e-mail address and profile picture so your speeches can be attributed
-          to you. Nothing else. No password ever reaches us — that is handled by Google or Microsoft.
+          to you. Nothing else. No password ever reaches us — that is handled by{' '}
+          {CLERK_ENABLED ? 'Clerk' : 'Google or Microsoft'}.
         </p>
       </div>
     </div>
