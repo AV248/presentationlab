@@ -3,8 +3,9 @@
  * domain should 301 to the canonical host (docs/VERCEL.md). */
 export const SHORT_URL = 'https://pb.devs.surf';
 export function shortUrl(path = '/'): string {
-  const clean = path.startsWith('/') ? path : `/${path}`;
-  return `${SHORT_URL}${clean}`;
+  // Accepts a path OR a full canonical URL — either way the only thing a
+  // user ever copies or shares is pb.devs.surf/<same path>.
+  return `${SHORT_URL}${shortPath(path)}`;
 }
 export function shortPath(urlOrPath: string): string {
   try { const u = new URL(urlOrPath); return u.pathname + u.search; } catch { return urlOrPath.startsWith('/') ? urlOrPath : `/${urlOrPath}`; }

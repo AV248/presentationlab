@@ -3596,3 +3596,12 @@ a:hover > .pb-underline::after,
   .pb-feedback{max-width:560px}
 }
 @media (prefers-reduced-motion:reduce){.pb-splash-stairs,.pb-splash-dot,.pb-splash-word,.pb-splash-tag{animation-duration:.01s!important;animation-delay:0s!important}}
+
+/* ---- 2.6.2 splash: pure sky, retro falling leaves ---- */
+.pb-splash{background:#ffffff;color:#2e211a;overflow:hidden}
+.pb-splash-leaves{position:absolute;inset:0;pointer-events:none}
+.pb-splash-leaf{position:absolute;top:-24px;border-radius:2px 62% 4px 62%;opacity:.85;transform:rotate(45deg);animation-name:pb-leaf-fall;animation-timing-function:linear;animation-iteration-count:infinite;box-shadow:inset 0 0 0 1px rgba(90,50,10,.18)}
+@keyframes pb-leaf-fall{0%{transform:translate3d(0,-24px,0) rotate(35deg)}25%{transform:translate3d(14px,26vh,0) rotate(150deg)}50%{transform:translate3d(-10px,52vh,0) rotate(265deg)}75%{transform:translate3d(12px,78vh,0) rotate(380deg)}100%{transform:translate3d(-6px,106vh,0) rotate(495deg)}}
+.pb-splash-word{color:#2e211a}
+.pb-splash-tag{color:#7a6753}
+@media (prefers-reduced-motion:reduce){.pb-splash-leaf{display:none}}

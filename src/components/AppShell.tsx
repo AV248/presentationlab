@@ -350,10 +350,10 @@ function CloudBadge() {
 }
 
 function FestivalRibbon() {
-  const override = useProfile((s) => s.festivalOverride);
+  // Owner-selected in Firestore only — visitors cannot change the season.
   const [site, setSite] = useState<string | null>(null);
   useEffect(() => { void fetchSiteFestival().then(setSite); }, []);
-  const f = festivalById(override ?? site);
+  const f = festivalById(site);
   if (f.id === 'none') return null;
   return <div className="pb-festival" role="note"><span aria-hidden="true">{f.emoji}</span><span><strong>{f.name}.</strong> {f.greeting}</span></div>;
 }

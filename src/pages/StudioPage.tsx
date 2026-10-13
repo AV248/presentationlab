@@ -287,6 +287,10 @@ function Editor({
     timer.current = window.setTimeout(() => {
       updateSpeech(initial.id, {
         title: draft.title,
+        slug: contentSlug(draft.title),
+        credits: draft.credits,
+        signature: draft.signature,
+        allowCopy: draft.allowCopy,
         author: draft.author,
         category: draft.category,
         occasion: draft.occasion,
@@ -362,7 +366,7 @@ function Editor({
         if (hit && hit.score >= COPYRIGHT_THRESHOLD) { toast(`This looks too close to “${hit.title}” (${Math.round(hit.score*100)}% overlap). Rewrite in your own words before publishing.`, 'error'); return; }
         setPublishing(true);
         publishSpeech({ title: draft.title, content: draft.content, preview: draft.preview, category: draft.category, occasion: draft.occasion, tags: draft.tags.split(',').map((x)=>x.trim()).filter(Boolean), ad: false, username: profile.username, slug: contentSlug(draft.title), credits: draft.credits, signature: draft.signature || profile.signature, allowCopy: draft.allowCopy }, user!.uid, user!.displayName ?? user!.email ?? 'Anonymous')
-          .then(({ id: cloudId }) => { updateSpeech(initial.id, { cloudId, status: 'published' }); toast(`Published — ${shortUrl(`/${profile.username}/${contentSlug(draft.title)}`)}`, 'success'); setWizard(false); void connect(true); })
+          .then(({ id: cloudId }) => { updateSpeech(initial.id, { cloudId, status: 'published', username: profile.username, slug: contentSlug(draft.title), credits: draft.credits, signature: draft.signature || profile.signature, allowCopy: draft.allowCopy }); toast(`Published — ${shortUrl(`/${profile.username}/${contentSlug(draft.title)}`)}`, 'success'); setWizard(false); void connect(true); })
           .catch((e: unknown) => toast((e as Error)?.message ?? 'Publish failed', 'error'))
           .finally(() => setPublishing(false));
       }} />}

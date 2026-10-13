@@ -11,8 +11,8 @@ import { AXES, COMBINATIONS } from '../design/index';
 import { detectPlatform } from '../lib/platform';
 import { pageMetaFor } from '../data/routes';
 import { FESTIVALS } from '../data/festivals';
-import { useProfile } from '../store/profile';
-import { useUi } from '../store/ui';
+import { useEffect, useState } from 'react';
+import { fetchSiteFestival } from '../services/profiles';
 import { SITE_URL, usePageMeta } from '../lib/seo';
 
 const DEVICE_NOTES = [
@@ -85,9 +85,9 @@ export function ThemesPage() {
         </div>
       </section>
 
-      <FestivalPicker />
-
       <ThemeStudio variant="page" />
+
+      <FestivalLayer />
 
       <section className="pb-panel" style={{ padding: '18px 20px' }}>
         <h2 style={{ fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -144,24 +144,27 @@ export function ThemesPage() {
   );
 }
 
-function FestivalPicker() {
-  const override = useProfile((s) => s.festivalOverride);
-  const setOverride = useProfile((s) => s.setFestivalOverride);
-  const toast = useUi((s) => s.toast);
+function FestivalLayer() {
+  const [siteId, setSiteId] = useState<string | null>(null);
+  useEffect(() => { void fetchSiteFestival().then(setSiteId); }, []);
+  const active = FESTIVALS.find((f) => f.id === (siteId ?? 'none')) ?? FESTIVALS[0];
   return (
     <section className="pb-panel" style={{ padding: '18px 20px' }}>
-      <h2 style={{ fontSize: '1.05rem', marginBottom: 6 }}>Festival & occasion themes</h2>
-      <p className="pb-muted" style={{ fontSize: '0.84rem', marginBottom: 14 }}>The site owner sets one season for everyone from Firestore; you can always wear a different one on this device. Currently: <strong>{FESTIVALS.find((f) => f.id === (override ?? 'none'))?.name ?? 'Site default'}</strong></p>
+      <h2 style={{ fontSize: '1.05rem', marginBottom: 6 }}>Festival layer — set by the owner</h2>
+      <p className="pb-muted" style={{ fontSize: '0.84rem', marginBottom: 14, lineHeight: 1.65 }}>
+        One festival at a time, chosen by the site owner and served from Firestore. It sits <em>on top of</em> whatever theme you build above — your colours, motion, layout and type stay yours; the season only lends its accent and a greeting. It cannot be changed from this page.
+        {' '}Currently live: <strong>{active.emoji} {active.name}</strong>{siteId ? '' : ' (no festival set — the everyday look)'}.
+      </p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(210px,100%),1fr))', gap: 10 }}>
-        {FESTIVALS.map((f) => (
-          <button key={f.id} type="button" className="pb-well" aria-pressed={(override ?? 'none') === f.id} onClick={() => { setOverride(f.id === 'none' ? null : f.id); toast(f.id === 'none' ? 'Back to the site theme' : `${f.name} — ${f.greeting}`, 'success'); }} style={{ padding: '12px 14px', textAlign: 'left', cursor: 'pointer', borderColor: (override ?? 'none') === f.id ? 'var(--c-accent)' : undefined }}>
+        {FESTIVALS.filter((f) => f.id !== 'none').map((f) => (
+          <div key={f.id} className="pb-well" style={{ padding: '12px 14px', borderColor: f.id === active.id ? 'var(--c-accent)' : undefined }} aria-current={f.id === active.id || undefined}>
             <span style={{ fontSize: '1.2rem' }}>{f.emoji}</span> <strong style={{ fontSize: '0.9rem' }}>{f.name}</strong>
+            {f.id === active.id && <span className="pb-chip pb-chip-accent" style={{ marginLeft: 8, fontSize: '0.66rem' }}>Live now</span>}
             <span className="pb-muted" style={{ display: 'block', fontSize: '0.74rem', marginTop: 4 }}>{f.group} · {f.note}</span>
             <span style={{ display: 'flex', gap: 5, marginTop: 8 }}><i style={{ width: 16, height: 16, borderRadius: 5, background: f.accent, display: 'block' }} /><i style={{ width: 16, height: 16, borderRadius: 5, background: f.accent2, display: 'block' }} /></span>
-          </button>
+          </div>
         ))}
       </div>
-      {override && <button type="button" className="pb-btn pb-btn-sm pb-btn-ghost" style={{ marginTop: 12 }} onClick={() => setOverride(null)}>Use the site's festival theme</button>}
     </section>
   );
 }

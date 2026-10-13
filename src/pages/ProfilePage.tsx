@@ -12,6 +12,7 @@ import { fetchSpeechesByUsername, type CloudSpeech } from '../services/data';
 import { shortUrl } from '../lib/share';
 import { copyText } from '../lib/platform';
 import { usePageMeta } from '../lib/seo';
+import { Markdown } from '../components/Markdown';
 
 /** /:username — everything about a person and their work.
  *  /:username/:slug — one of their creations, at their own address. */
@@ -33,9 +34,11 @@ export function HandlePage() {
   const localWorks = useMemo(() => isMine ? mine.filter((m) => m.status === 'published') : [], [isMine, mine]);
   if (RESERVED_HANDLES.has(username)) return <NotFoundHandle username={username} />;
   if (slug) {
-    const work = works.find((w) => (w.slug || '') === slug) ?? localWorks.find((w) => w.id === slug);
-    if (work) return <NavigateWork id={work.id} />;
-    if (loaded && !work) return <NotFoundHandle username={username} what="speech" />;
+    const work = works.find((w) => (w.slug || '') === slug || w.id === slug)
+      ?? localWorks.find((w) => (w.slug || '') === slug || w.id === slug);
+    if (work) return <HandleWork username={username} work={work} />;
+    if ((loaded || isMine) && !work) return <NotFoundHandle username={username} what="speech" />;
+    return <p className="pb-muted" style={{ padding: 24 }}>Opening @{username}/{slug}…</p>;
   }
   const display = profile ?? (isMine ? { username, uid: user?.uid ?? '', displayName: me.displayName || username, bio: me.bio, location: me.location, website: me.website, signature: me.signature, createdAt: '' } : null);
   return (
@@ -60,13 +63,35 @@ export function HandlePage() {
         {[...works, ...localWorks].length === 0 && <div className="pb-panel" style={{ padding:24 }}><p className="pb-muted">{loaded || !isMine ? 'Nothing published here yet.' : 'Publish from the Writing Desk and it will live at this address.'}</p></div>}
         <div style={{ display:'grid', gap:10 }}>
           {works.map((w) => (<article key={w.id} className="pb-panel" style={{ padding:'16px 18px' }}><Link to={`/${username}/${w.slug || w.id}`} style={{ fontWeight:700, fontSize:'1.05rem' }}>{w.title}</Link><p className="pb-soft" style={{ marginTop:6, lineHeight:1.6 }}>{w.preview}</p><div style={{ display:'flex', gap:8, marginTop:10 }}><Link className="pb-btn pb-btn-sm" to={`/read/${w.id}`}>Read</Link><Link className="pb-btn pb-btn-sm pb-btn-ghost" to={`/rehearse/${w.id}`}><Mic2 size={13}/> Rehearse</Link></div></article>))}
-          {localWorks.map((w) => (<article key={w.id} className="pb-panel" style={{ padding:'16px 18px' }}><Link to={`/read/${w.id}`} style={{ fontWeight:700, fontSize:'1.05rem' }}>{w.title}</Link><p className="pb-soft" style={{ marginTop:6, lineHeight:1.6 }}>{w.preview}</p></article>))}
+          {localWorks.map((w) => (<article key={w.id} className="pb-panel" style={{ padding:'16px 18px' }}><Link to={`/${username}/${w.slug || w.id}`} style={{ fontWeight:700, fontSize:'1.05rem' }}>{w.title}</Link><p className="pb-soft" style={{ marginTop:6, lineHeight:1.6 }}>{w.preview}</p></article>))}
         </div>
       </section>
     </div>
   );
 }
-function NavigateWork({ id }: { id: string }) { const navigate = useNavigate(); useEffect(() => { navigate(`/read/${id}`, { replace: true }); }, [id, navigate]); return <p className="pb-muted" style={{ padding:24 }}>Opening…</p>; }
+function HandleWork({ username, work }: { username: string; work: { id: string; title: string; preview: string; content: string; category: string; credits?: string; signature?: string; allowCopy?: boolean } }) {
+  const toast = useUi((s) => s.toast);
+  const url = shortUrl(`/${username}/${(work as { slug?: string }).slug ?? work.id}`);
+  const protectedWork = work.allowCopy === false;
+  return (
+    <article className={`pb-panel anim-enter${protectedWork ? ' pb-protected' : ''}`} style={{ padding:'clamp(20px,4vw,40px)' }}
+      onCopy={protectedWork ? (e) => { e.preventDefault(); toast('© This work is protected by its writer.', 'warn'); } : undefined}
+      onContextMenu={protectedWork ? (e) => e.preventDefault() : undefined}>
+      <span className="pb-eyebrow">@{username} · {work.category}</span>
+      <h1 style={{ fontSize:'clamp(1.6rem,4vw,2.4rem)', margin:'10px 0' }}>{work.title}</h1>
+      {work.preview && <p className="pb-soft" style={{ lineHeight:1.65, maxInlineSize:'62ch' }}>{work.preview}</p>}
+      <div style={{ display:'flex', gap:8, flexWrap:'wrap', margin:'16px 0' }}>
+        <button type="button" className="pb-btn" onClick={async () => { const ok = await copyText(url); toast(ok ? url : 'Copy failed', ok ? 'success' : 'error'); }}>Copy {url}</button>
+        <Link className="pb-btn pb-btn-ghost" to={`/rehearse/${work.id}`}><Mic2 size={14} /> Rehearse it</Link>
+        <Link className="pb-btn pb-btn-ghost" to={`/${username}`}>More by @{username}</Link>
+      </div>
+      <Markdown text={work.content} className="pb-prose" />
+      {work.credits && <p className="pb-muted" style={{ fontSize:'0.8rem', marginTop:20 }}>Credits: {work.credits}</p>}
+      {work.signature && <p style={{ fontFamily:'var(--x-font-display)', fontStyle:'italic', marginTop:10 }}>— {work.signature}</p>}
+      {protectedWork && <p className="pb-chip" style={{ marginTop:14 }}>© Protected by the writer — read & rehearse here, share the link</p>}
+    </article>
+  );
+}
 function NotFoundHandle({ username, what }: { username: string; what?: string }) { return (<div className="pb-panel" style={{ padding:36, textAlign:'center' }}><h2 style={{ marginBottom:8 }}>{what ? 'That speech is not here' : 'No one holds this handle yet'}</h2><p className="pb-muted" style={{ marginBottom:16 }}>@{username} {what ? 'has not published it at this address.' : 'is free. If it is yours, claim it before someone else climbs with it.'}</p><Link to="/claim" className="pb-btn pb-btn-primary">Claim a username</Link></div>); }
 
 /** /claim — choose a unique username, add bio & signature. Login required;
