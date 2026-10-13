@@ -216,12 +216,15 @@ service cloud.firestore {
     // own profile document as a scratch pad of arbitrary size.
     // ------------------------------------------------------------------
     match /users/{uid} {
-      allow read: if isSignedIn();
+      // 2.6: public profile fields (bio, handle) are read by /:username pages.
+      allow read: if true;
       allow create, update: if isOwner(uid)
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.keys().hasOnly([
              'uid', 'email', 'displayName', 'photoURL', 'providerId',
-             'lastSeen', 'createdAt'
+             'lastSeen', 'createdAt',
+             // 2.6 public profile
+             'username', 'bio', 'location', 'website', 'signature', 'updatedAt'
            ]);
       allow delete: if isSiteOwner();
     }
@@ -266,6 +269,36 @@ service cloud.firestore {
     match /admin/{docId} {
       allow read: if isSignedIn();
       allow write: if false;
+    }
+
+    // ------------------------------------------------------------------
+    // 2.6 — username handles. handles/{username} is the uniqueness lock:
+    // create-only for the claimer, never deletable by the holder alone,
+    // so a handle cannot be stolen or silently re-pointed.
+    // ------------------------------------------------------------------
+    match /handles/{username} {
+      allow read: if true;
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && username.matches('^[a-z0-9_]{3,24}$');
+      allow update: if isSiteOwner();
+      allow delete: if isSiteOwner();
+    }
+
+    // 2.6 — feedback. Anyone may leave it (stars + words); only admins read.
+    match /feedback/{feedbackId} {
+      allow read: if isAdmin();
+      allow create: if request.resource.data.rating is int
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5
+        && request.resource.data.get('text', '').size() <= 4000;
+      allow update, delete: if isSiteOwner();
+    }
+
+    // 2.6 — site theme. Owner picks the festival; everyone reads it.
+    match /siteSettings/{docId} {
+      allow read: if true;
+      allow write: if isSiteOwner();
     }
 
     // Anything not named above is denied outright. This catch-all is what

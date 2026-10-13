@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, X } from 'lucide-react';
+import { shortUrl } from '../lib/share';
+import { shareOrCopy } from '../lib/platform';
 import { HOUSE_ADS, fetchActiveAds, pickAd, type Ad } from '../services/ads';
 
 /**
@@ -107,7 +109,11 @@ export function AdSlot({ seed, variant = 'inline' }: AdSlotProps) {
             copied, and inspected — and the rel value tells search engines the
             link is paid, which is what keeps the site's own rankings clean.
           */}
-          {ad.url.startsWith('/') ? (
+          {ad.id.startsWith('house-share') ? (
+            <button type="button" className="pb-ad-body" style={{ all: 'unset', cursor: 'pointer', display: 'block', width: '100%' }} onClick={() => { void shareOrCopy('Presentation Buddy', 'Write, rehearse and deliver talks that land.', shortUrl('/')); }}>
+              <AdContent ad={ad} imageFailed={imageFailed} onImageError={() => setImageFailed(true)} />
+            </button>
+          ) : ad.url.startsWith('/') ? (
             <Link className="pb-ad-body" to={ad.url}>
               <AdContent ad={ad} imageFailed={imageFailed} onImageError={() => setImageFailed(true)} />
             </Link>

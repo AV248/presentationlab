@@ -15,6 +15,8 @@ import {
   type Post,
 } from '../services/data';
 import { fetchAllAds, type Ad } from '../services/ads';
+import { FESTIVALS } from '../data/festivals';
+import { fetchSiteFestival, setSiteFestival } from '../services/profiles';
 import { FIREBASE_ENABLED } from '../services/firebase';
 import { ADS_ENABLED } from '../services/firebaseAds';
 import { formatCount } from '../lib/text';
@@ -26,7 +28,7 @@ import { formatCount } from '../lib/text';
  * already holds the 'admin' or 'owner' role in the admins collection.
  */
 
-type Tab = 'overview' | 'ads' | 'people' | 'content';
+type Tab = 'overview' | 'ads' | 'people' | 'content' | 'site';
 
 
 export function AdminPage() {
@@ -181,6 +183,7 @@ export function AdminPage() {
             ['ads', 'Ad desk'],
             ['people', isOwner ? 'People & roles' : 'People'],
             ['content', 'Published content'],
+            ['site', 'Site theme'],
           ] as [Tab, string][]
         ).map(([id, label]) => (
           <button
@@ -302,6 +305,8 @@ export function AdminPage() {
           </div>
         </section>
       )}
+
+      {tab === 'site' && <SiteThemeTab isOwner={isOwner} />}
 
       {tab === 'people' && (
         <section>
@@ -428,5 +433,22 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div style={{ fontFamily: 'var(--x-font-display)', fontWeight: 700, fontSize: '1.15rem' }}>{value}</div>
       <div className="pb-muted" style={{ fontSize: '0.72rem' }}>{label}</div>
     </div>
+  );
+}
+
+function SiteThemeTab({ isOwner }: { isOwner: boolean }) {
+  const toast = useUi((s) => s.toast);
+  const [current, setCurrent] = useState<string>('none');
+  useEffect(() => { void fetchSiteFestival().then((id) => setCurrent(id ?? 'none')); }, []);
+  return (
+    <section className="pb-panel" style={{ padding: '16px 18px' }}>
+      <h2 style={{ fontSize: '1rem', marginBottom: 6 }}>Festival theme for the whole site</h2>
+      <p className="pb-muted" style={{ fontSize: '0.84rem', marginBottom: 14 }}>{isOwner ? 'Stored in Firestore siteSettings/theme — every visitor sees it on their next visit. People may still personalise on their own device.' : 'Only the owner can change the site theme.'}</p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {FESTIVALS.map((f) => (
+          <button key={f.id} type="button" disabled={!isOwner} className={`pb-chip ${current === f.id ? 'pb-chip-accent' : ''}`} onClick={() => { void setSiteFestival(f.id).then(() => { setCurrent(f.id); toast(`Site theme: ${f.name}`, 'success'); }).catch((e: Error) => toast(e.message, 'error')); }}>{f.emoji} {f.name}</button>
+        ))}
+      </div>
+    </section>
   );
 }

@@ -22,6 +22,9 @@ import { AccountMenu } from './AuthProvider';
 import { CLERK_ENABLED } from '../services/clerk';
 import { useUi } from '../store/ui';
 import { useSettings } from '../store/settings';
+import { festivalById } from '../data/festivals';
+import { useProfile } from '../store/profile';
+import { fetchSiteFestival, SUPPORT_EMAIL, SUPPORT_URL } from '../services/profiles';
 import { useCloud } from '../store/cloud';
 import { useAuth } from '../store/auth';
 import { modifierLabel, isApple } from '../lib/platform';
@@ -198,6 +201,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div style={{ flex: 1, minHeight: 16 }} />
 
         <AccountChip />
+        <HandleLink />
+        <a className="pb-navlink" href={SUPPORT_URL} target="_blank" rel="noopener noreferrer" title={`Support — ${SUPPORT_EMAIL}`}><span className="pb-navlink-label">Contact support</span></a>
         <CloudBadge />
       </aside>
 
@@ -207,6 +212,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* ---- the column ---- */}
       <div className="pb-column">
+        <FestivalRibbon />
         <header className="pb-topbar">
           <button
             type="button"
@@ -341,4 +347,21 @@ function CloudBadge() {
       {label}
     </div>
   );
+}
+
+function FestivalRibbon() {
+  // Owner-selected in Firestore only — visitors cannot change the season.
+  const [site, setSite] = useState<string | null>(null);
+  useEffect(() => { void fetchSiteFestival().then(setSite); }, []);
+  const f = festivalById(site);
+  if (f.id === 'none') return null;
+  return <div className="pb-festival" role="note"><span aria-hidden="true">{f.emoji}</span><span><strong>{f.name}.</strong> {f.greeting}</span></div>;
+}
+function HandleLink() {
+  const username = useProfile((s) => s.username);
+  const user = useAuth((s) => s.user);
+  if (!user) return null;
+  return username
+    ? <NavLink className="pb-navlink" to={`/${username}`}><span className="pb-navlink-label">@{username} — your page</span></NavLink>
+    : <NavLink className="pb-navlink" to="/claim"><span className="pb-navlink-label">Claim your @username</span></NavLink>;
 }

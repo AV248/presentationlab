@@ -6,7 +6,7 @@ import { useUi } from '../store/ui';
 import { useCloud } from '../store/cloud';
 import { recordShare, setReaction } from '../services/data';
 import { shareOrCopy } from '../lib/platform';
-import { absoluteUrl } from '../lib/seo';
+import { shortUrl } from '../lib/share';
 import { useGate } from './SignIn';
 
 interface ReactionBarProps {
@@ -58,7 +58,7 @@ export function ReactionBar({ item, onCountsChange }: ReactionBarProps) {
   // account needed to send it; the counter only moves when someone signed
   // in shares a published speech.
   const share = () => {
-    const url = absoluteUrl(`/read/${encodeURIComponent(item.id)}`);
+    const url = shortUrl(item.username && (item as {slug?:string}).slug ? `/${item.username}/${(item as {slug?:string}).slug}` : `/read/${encodeURIComponent(item.id)}`);
     void (async () => {
       const result = await shareOrCopy(item.title, item.preview, url);
       if (result === 'failed') {

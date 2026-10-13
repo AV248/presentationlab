@@ -13,6 +13,13 @@ export interface Speech {
   preview: string;
   content: string;
   createdAt: string;
+  /** 2.6 — handle publishing. All optional; built-ins predate them. */
+  username?: string;
+  slug?: string;
+  credits?: string;
+  signature?: string;
+  /** Writer's copyright choice: false blocks copy/download/print. */
+  allowCopy?: boolean;
 }
 
 /**

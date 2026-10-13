@@ -1814,7 +1814,7 @@ a:hover > .pb-underline::after,
   position: absolute;
   left: 0;
   right: 0;
-  top: 42%;
+  top: 50%;
   height: 1px;
   background: var(--c-accent);
   opacity: 0.45;
@@ -3546,3 +3546,62 @@ a:hover > .pb-underline::after,
     border-bottom: 0;
   }
 }
+
+/* ================= 2.6 ================= */
+/* Entry splash — "The Rise" draws itself */
+.pb-splash{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--c-bg);transition:opacity .38s ease}
+.pb-splash-leave{opacity:0;pointer-events:none}
+.pb-splash-stairs{stroke-dasharray:60;stroke-dashoffset:60;animation:pb-rise 1.05s cubic-bezier(.6,0,.2,1) .15s forwards}
+@keyframes pb-rise{to{stroke-dashoffset:0}}
+.pb-splash-dot{opacity:0;transform-origin:24.5px 5px;animation:pb-dot .9s ease 1.05s forwards}
+@keyframes pb-dot{0%{opacity:0;transform:translateY(4px) scale(.4)}35%{opacity:1;transform:translateY(0) scale(1.25)}55%{transform:scale(.85)}75%{transform:scale(1.1)}100%{opacity:1;transform:scale(1)}}
+.pb-splash-word{font-family:var(--x-font-display);font-weight:700;font-size:clamp(1.5rem,5vw,2.2rem);letter-spacing:-.02em;opacity:0;animation:pb-fadeup .6s ease 1.25s forwards}
+.pb-splash-word span{color:var(--c-accent)}
+.pb-splash-tag{color:var(--c-ink-muted);font-size:.9rem;opacity:0;animation:pb-fadeup .6s ease 1.45s forwards;text-align:center;padding-inline:20px}
+@keyframes pb-fadeup{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+/* Feedback */
+.pb-feedback{position:relative;max-width:520px;width:min(520px,calc(100vw - 28px))}
+.pb-feedback-x{position:absolute;top:10px;right:10px}
+.pb-stars{display:flex;gap:4px;margin:14px 0}
+.pb-stars button{all:unset;cursor:pointer;padding:4px;border-radius:8px}
+.pb-stars button:focus-visible{outline:2px solid var(--c-accent)}
+/* Festival ribbon */
+.pb-festival{display:flex;gap:8px;align-items:center;justify-content:center;padding:7px 14px;font-size:.82rem;background:var(--c-accent-soft);color:var(--c-ink);border-bottom:1px solid var(--c-accent-line);text-align:center}
+/* Copyright-protected reading */
+.pb-protected{user-select:none;-webkit-user-select:none}
+.pb-protected img{-webkit-user-drag:none}
+/* Publish wizard */
+.pb-wizard-steps{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.pb-wizard-steps span{padding:5px 10px;border-radius:999px;border:1px solid var(--c-line);font-size:.74rem;color:var(--c-ink-muted)}
+.pb-wizard-steps span[data-on="true"]{background:var(--c-accent);color:var(--c-accent-ink);border-color:transparent}
+/* Device-specific optimisation (2.6) */
+/* phones */
+@media (max-width:759px){
+  .pb-main{padding-bottom:calc(84px + var(--safe-bottom,0px))}
+  .pb-card,.pb-panel{max-width:100%}
+  input,textarea,select{font-size:16px} /* stops iOS focus zoom */
+  .pb-stage-bar{flex-wrap:wrap;row-gap:6px}
+  .pb-topbar-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  [data-studio-grid]{grid-template-columns:minmax(0,1fr)!important}
+}
+/* tablets: two-column reading, roomier stage */
+@media (min-width:760px) and (max-width:1099px){
+  .pb-main{max-width:920px;margin-inline:auto;width:100%}
+  .pb-stage-viewport{height:clamp(380px,60dvh,640px)}
+  .pb-prompt{max-width:40ch}
+}
+/* desktops: wide stage, denser library */
+@media (min-width:1100px){
+  .pb-prompt{max-width:46ch;font-size:calc(1.65rem * var(--prompt-scale,1))}
+  .pb-feedback{max-width:560px}
+}
+@media (prefers-reduced-motion:reduce){.pb-splash-stairs,.pb-splash-dot,.pb-splash-word,.pb-splash-tag{animation-duration:.01s!important;animation-delay:0s!important}}
+
+/* ---- 2.6.2 splash: pure sky, retro falling leaves ---- */
+.pb-splash{background:#ffffff;color:#2e211a;overflow:hidden}
+.pb-splash-leaves{position:absolute;inset:0;pointer-events:none}
+.pb-splash-leaf{position:absolute;top:-24px;border-radius:2px 62% 4px 62%;opacity:.85;transform:rotate(45deg);animation-name:pb-leaf-fall;animation-timing-function:linear;animation-iteration-count:infinite;box-shadow:inset 0 0 0 1px rgba(90,50,10,.18)}
+@keyframes pb-leaf-fall{0%{transform:translate3d(0,-24px,0) rotate(35deg)}25%{transform:translate3d(14px,26vh,0) rotate(150deg)}50%{transform:translate3d(-10px,52vh,0) rotate(265deg)}75%{transform:translate3d(12px,78vh,0) rotate(380deg)}100%{transform:translate3d(-6px,106vh,0) rotate(495deg)}}
+.pb-splash-word{color:#2e211a}
+.pb-splash-tag{color:#7a6753}
+@media (prefers-reduced-motion:reduce){.pb-splash-leaf{display:none}}

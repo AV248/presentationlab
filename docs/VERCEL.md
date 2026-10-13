@@ -306,3 +306,13 @@ ranked down: real prerendered HTML per route, valid structured data
 301s from the old route names so existing rankings carry over.
 
 The rest is content and promotion.
+
+
+## Short domain — pb.devs.surf (2.6)
+
+Share links are printed as `https://pb.devs.surf/<same path>`. To make them
+resolve: add `pb.devs.surf` under Vercel → Project → Settings → Domains,
+point its DNS at Vercel as instructed there, and add a domain-level redirect
+to `https://presentationbuddy.aavrit.dedyn.io` (301, preserve path). No code
+change is needed — the app already generates short links everywhere a link
+is shared or copied.

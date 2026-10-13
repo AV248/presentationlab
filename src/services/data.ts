@@ -86,6 +86,11 @@ function mapSpeech(id: string, data: Record<string, unknown>): CloudSpeech {
     content: content || 'This speech has no body text yet.',
     createdAt: created ? created.slice(0, 10) : new Date().toISOString().slice(0, 10),
     uid: str(data.uid ?? data.authorUid),
+    username: str(data.username) || undefined,
+    slug: str(data.slug) || undefined,
+    credits: str(data.Credits ?? data.credits) || undefined,
+    signature: str(data.Signature ?? data.signature) || undefined,
+    allowCopy: data.allowCopy === false ? false : true,
     views: num(data.views),
     likes: num(data.likes),
     dislikes: num(data.dislikes),
@@ -164,6 +169,11 @@ export interface PublishInput {
   occasion: string;
   tags: string[];
   ad?: boolean;
+  username?: string;
+  slug?: string;
+  credits?: string;
+  signature?: string;
+  allowCopy?: boolean;
 }
 
 export async function publishSpeech(
@@ -184,6 +194,11 @@ export async function publishSpeech(
     Tags: input.tags.join(', '),
     Author: authorName,
     uid,
+    username: input.username ?? '',
+    slug: input.slug ?? '',
+    Credits: input.credits ?? '',
+    Signature: input.signature ?? '',
+    allowCopy: input.allowCopy !== false,
     ad: Boolean(input.ad),
     views: 0,
     likes: 0,
@@ -209,6 +224,9 @@ export async function updateSpeechDoc(id: string, patch: Partial<PublishInput>):
   if (patch.occasion !== undefined) payload.Occasion = patch.occasion;
   if (patch.tags !== undefined) payload.Tags = patch.tags.join(', ');
   if (patch.ad !== undefined) payload.ad = Boolean(patch.ad);
+  if (patch.credits !== undefined) payload.Credits = patch.credits;
+  if (patch.signature !== undefined) payload.Signature = patch.signature;
+  if (patch.allowCopy !== undefined) payload.allowCopy = patch.allowCopy !== false;
   await f.updateDoc(f.doc(db, 'presentations', id), payload);
 }
 
@@ -583,4 +601,15 @@ export function describeError(error: unknown): string {
   if (code === 'unavailable') return 'You appear to be offline.';
   if (code === 'failed-precondition') return 'This query needs a Firestore index.';
   return message.replace(/^FirebaseError:\s*/, '').slice(0, 160) || 'Something went wrong.';
+}
+
+/** All published speeches belonging to one /username handle. */
+export async function fetchSpeechesByUsername(username: string): Promise<CloudSpeech[]> {
+  if (!FIREBASE_ENABLED) return [];
+  const bundle = await fs(); if (!bundle) return [];
+  const { fs: f, db } = bundle;
+  try {
+    const snap = await f.getDocs(f.query(f.collection(db, 'presentations'), f.where('username', '==', username), f.limit(100)));
+    return snap.docs.map((d) => mapSpeech(d.id, d.data()));
+  } catch { return []; }
 }

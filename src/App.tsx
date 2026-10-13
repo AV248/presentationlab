@@ -7,6 +7,8 @@ import { CommandPalette } from './components/CommandPalette';
 import { HelpDialog, ThemeSheet } from './components/Overlays';
 import { SignInSheet } from './components/SignIn';
 import { AppRoutes } from './components/AppRoutes';
+import { Splash } from './components/Splash';
+import { FeedbackDialog } from './components/FeedbackDialog';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useThemeEngine } from './hooks/useThemeEngine';
 import { useCloud } from './store/cloud';
@@ -39,6 +41,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <Splash />
       <Ambient />
       <ScrollToTop />
       <AppShell>
@@ -50,6 +53,7 @@ export default function App() {
       <ThemeSheet />
       <SignInSheet />
       <HelpDialog />
+      <FeedbackDialog />
       <Toasts />
     </BrowserRouter>
   );

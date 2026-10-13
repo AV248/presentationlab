@@ -270,7 +270,7 @@ export function buildPages(): PageMeta[] {
         operatingSystem: 'Any',
         description: SITE_TAGLINE,
         browserRequirements: 'Requires JavaScript.',
-        softwareVersion: '2.4',
+        softwareVersion: '2.6.2',
         featureList: [
           'Fullscreen rehearsal stage with teleprompter and pacing timer',
           'Speech editor with structure coaching and a built-in thesaurus',

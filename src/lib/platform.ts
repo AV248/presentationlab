@@ -83,6 +83,8 @@ export function downloadFile(filename: string, contents: string, mime = 'text/pl
 
 export async function shareOrCopy(title: string, text: string, url?: string): Promise<'shared' | 'copied' | 'failed'> {
   const target = url ?? (typeof window !== 'undefined' ? window.location.href : '');
+  // Native share sheets still get title/text (that is the sheet's own UI);
+  // only the clipboard is restricted to the bare URL.
   if (typeof navigator !== 'undefined' && navigator.share) {
     try {
       await navigator.share({ title, text, url: target });
@@ -91,7 +93,10 @@ export async function shareOrCopy(title: string, text: string, url?: string): Pr
       /* user dismissed or unsupported payload */
     }
   }
-  const ok = await copyText(`${title}\n\n${text}\n\n${target}`);
+  // 2.6.2: a shared link is ONLY the short URL — no title, no blurb pasted
+  // around it. pb.devs.surf/<same path>, nothing else touches the clipboard.
+  void title; void text;
+  const ok = await copyText(target);
   return ok ? 'copied' : 'failed';
 }
 

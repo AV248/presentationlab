@@ -36,6 +36,8 @@ const ThemesPage = lazy(() =>
 );
 const AboutPage = lazy(() => import('../pages/AboutPage').then((m) => ({ default: m.AboutPage })));
 const AdminPage = lazy(() => import('../pages/AdminPage').then((m) => ({ default: m.AdminPage })));
+const ClaimPage = lazy(() => import('../pages/ProfilePage').then((m) => ({ default: m.ClaimPage })));
+const HandlePage = lazy(() => import('../pages/ProfilePage').then((m) => ({ default: m.HandlePage })));
 
 function RouteFallback() {
   return (
@@ -73,6 +75,11 @@ export function AppRoutes() {
         <Route path="/themes" element={<ThemesPage />} />
         <Route path="/about" element={<AboutPage />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/claim" element={<ClaimPage />} />
+
+        {/* 2.6 handles: /:username and /:username/:slug (own content only) */}
+        <Route path="/:username" element={<HandlePage />} />
+        <Route path="/:username/:slug" element={<HandlePage />} />
 
         {/* 2.3 paths, kept alive forever */}
         <Route path="/practice" element={<Navigate to="/rehearse" replace />} />
