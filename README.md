@@ -2,7 +2,7 @@
 
 **Read it. Write it. Say it out loud.**
 
-Version 2.5 — a local-first workspace built on one idea: **qualities are not gifted, they are
+Version 2.6 — animated “Rise” entry, `/username` handles with `pb.devs.surf` short links, step-by-step publishing with copyright protection & originality screening, 20 festival/occasion themes the owner sets from Firestore, a central star-feedback dialog saved to Firestore, emotional share moments, centred rehearsal start, and separate phone/tablet/desktop optimisation. (2.5 — a local-first workspace built on one idea: **qualities are not gifted, they are
 built.** You climb by doing the reps, so the app is shaped around the rep — a fullscreen
 **Rehearsal Room** where you actually speak out loud, a **Writing Desk** with a dictionary that
 suggests stronger words as you type, a reader that quietly defines the words you do not know,
@@ -45,6 +45,23 @@ room — so the site can appear as more than a line of text in search results.
 
 Every speech and template has a **share link** (`/read/…`) that deep-links straight into it —
 copy from the reader, the library cards or the rehearsal room.
+
+### What's new in 2.6
+
+| Ask | Shipped |
+| --- | --- |
+| Animated logo on entry | Empty screen → stairs draw up → dot blinks awake → wordmark. Once a session, skippable, reduced-motion safe (`Splash.tsx`) |
+| Free to read, login to react/create, username to share | Reactions already gated by sign-in; publishing now requires a claimed unique `/username` (`handles/{username}` lock in Firestore, `/claim` page with bio/location/website/signature) |
+| Your path is yours | `/:username` is the person; `/:username/:slug` is only their content. Reserved words can never be claimed |
+| Short links | Every share/copy uses `https://pb.devs.surf` + the exact same path; canonical SEO stays on the main domain. Attach `pb.devs.surf` in Vercel → Domains and 301 it to the canonical host (docs/VERCEL.md) |
+| Feedback | Central dialog at a random moment (1.5–4 min in, ≤ once/fortnight, never mid-rehearsal): 5 stars, then words → Firestore `feedback` (queued locally offline) |
+| Share moments | Emotional house cards (“Someone you know is quietly dreading a presentation…”) that share the short link — never popups, dismissible per session |
+| Rehearsal | Teleprompter now starts with its first line at the middle of the screen; cue line sits at 50% |
+| Copyright | Writers can block copy/download/print per speech; publishing screens content against the library (8-word shingle overlap) and pauses near-duplicates |
+| Easy publishing | Wizard: Title → Preview → Tags → Credits → Content → Signature → Category. Only Title + Content mandatory |
+| Support | amaavrit@yahoo.com + contact.aavrit.dedyn.io in About and the sidebar |
+| Festival themes | 20 across Nepali/Hindu/Muslim/Christian/Buddhist/global & occasions (Dashain, Tihar/Diwali, Holi, Eid, Christmas…). Owner picks one in Admin → Site theme (`siteSettings/theme`); anyone may override on their device in Themes |
+| Devices | Dedicated phone (≤759px), tablet (760–1099px) and desktop (≥1100px) optimisation passes on top of the existing breakpoints |
 
 ### The dictionary
 

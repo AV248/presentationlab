@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent as ReactClipboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -73,6 +73,7 @@ export function ReaderPage() {
   const lens = useWordLens();
 
   const stats = useMemo(() => analyse(item?.content ?? ''), [item?.content]);
+  const copyrightProtected = item?.allowCopy === false;
   const speechId = item?.id;
 
   // Every speech is its own addressable, shareable, indexable page.
@@ -201,6 +202,7 @@ export function ReaderPage() {
   };
 
   const exportFile = (type: 'md' | 'txt') => {
+    if (copyrightProtected) { toast('The writer has protected this speech — please enjoy it here, and share the link instead.', 'warn'); return; }
     const body =
       type === 'md'
         ? `# ${item.title}\n\n_${item.author} · ${item.occasion}_\n\n${item.content}\n`
@@ -355,19 +357,22 @@ export function ReaderPage() {
                 type="button"
                 className="pb-icon-btn"
                 onClick={async () => {
+                  if (copyrightProtected) { toast('© The writer protected this speech — copying and downloads are off. The link is yours to share.', 'warn'); return; }
                   const ok = await copyText(`${item.title}\n\n${item.content}`);
                   toast(ok ? 'Speech copied' : 'Copy failed', ok ? 'success' : 'error');
                 }}
-                title="Copy text"
+                title={copyrightProtected ? 'Copying is off — the writer protected this work' : 'Copy text'}
               >
                 <Copy size={16} />
               </button>
+              {!copyrightProtected && (<>
               <button type="button" className="pb-icon-btn" onClick={() => exportFile('md')} title="Download">
                 <Download size={16} />
               </button>
               <button type="button" className="pb-icon-btn" onClick={() => window.print()} title="Print / PDF">
                 <Printer size={16} />
               </button>
+              </>)}
             </div>
 
             {speaking && (
@@ -556,9 +561,9 @@ export function ReaderPage() {
         }}
         data-reader-grid
       >
-        <article
+        <article data-copyright={copyrightProtected ? 'protected' : undefined} onCopy={copyrightProtected ? (e: ReactClipboardEvent) => { e.preventDefault(); toast('© This work is protected by its writer.', 'warn'); } : undefined} onContextMenu={copyrightProtected ? (e: ReactMouseEvent) => e.preventDefault() : undefined}
           ref={articleRef}
-          className={`pb-panel ${reader.readingRuler ? 'pb-ruler' : ''}`}
+          className={`pb-panel ${reader.readingRuler ? 'pb-ruler' : ''} ${copyrightProtected ? 'pb-protected' : ''}`}
           style={{ padding: 'clamp(20px, 4vw, 44px)' }}
         >
           <Markdown
@@ -590,12 +595,17 @@ export function ReaderPage() {
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 22, flexWrap: 'wrap' }}>
+            {!copyrightProtected && (<>
             <button type="button" className="pb-btn pb-btn-sm" onClick={() => exportFile('txt')}>
               <Download size={14} /> .txt
             </button>
             <button type="button" className="pb-btn pb-btn-sm" onClick={() => exportFile('md')}>
               <Download size={14} /> .md
             </button>
+            </>)}
+            {copyrightProtected && <span className="pb-chip" title="The writer chose to protect this work">© Protected by the writer — read & rehearse here, share the link</span>}
+            {item.credits && <span className="pb-muted" style={{ fontSize: '0.78rem' }}>Credits: {item.credits}</span>}
+            {item.signature && <span style={{ fontFamily: 'var(--x-font-display)', fontStyle: 'italic' }}>— {item.signature}</span>}
             <button
               type="button"
               className="pb-btn pb-btn-sm"

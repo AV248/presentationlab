@@ -222,6 +222,15 @@ export function AboutPage() {
           <p className="pb-muted" style={{ fontSize: '0.82rem', lineHeight: 1.7 }}>{COLOPHON.promise}</p>
         </div>
 
+        <div className="pb-well" style={{ padding: '14px 16px', marginTop: 18 }}>
+          <strong style={{ fontSize: '0.92rem' }}>Contact support</strong>
+          <p className="pb-muted" style={{ fontSize: '0.84rem', lineHeight: 1.65, marginTop: 6 }}>Stuck, locked out, or something feels broken? Write to us — a person reads it.</p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+            <a className="pb-btn pb-btn-sm" href="mailto:amaavrit@yahoo.com">amaavrit@yahoo.com</a>
+            <a className="pb-btn pb-btn-sm pb-btn-ghost" href="https://contact.aavrit.dedyn.io" target="_blank" rel="noopener noreferrer">contact.aavrit.dedyn.io</a>
+          </div>
+        </div>
+
         <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
           <Link to="/studio" className="pb-btn pb-btn-primary">
             <PenLine size={16} /> Start writing

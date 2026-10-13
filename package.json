@@ -1,9 +1,9 @@
 {
   "name": "presentation-buddy",
   "private": true,
-  "version": "2.5.0",
+  "version": "2.6.0",
   "type": "module",
-  "description": "Presentation Buddy 2.5 \u2014 Clerk authentication, a separated ads project, richer structured data, and a production-hardened Vercel deploy.",
+  "description": "Presentation Buddy 2.6 \u2014 animated entry, /username handles with short pb.devs.surf links, step publishing with copyright protection, festival themes, central feedback, and per-device optimisation.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/postbuild.mjs",

@@ -321,7 +321,9 @@ export function PracticePage() {
             transition: running ? 'none' : 'transform 260ms ease',
           }}
         >
+          <div aria-hidden="true" style={{ height: '38vh' }} />
           {stageText}
+          <div aria-hidden="true" style={{ height: '12vh' }} />
         </div>
       </div>
 

@@ -61,6 +61,28 @@ const MAX_ADS = 40;
 
 export const HOUSE_ADS: Ad[] = [
   {
+    id: 'house-share-heart',
+    title: 'Someone you know is quietly dreading a presentation',
+    body: 'They will not ask for help. But a link that arrives at the right moment — with a rehearsal room inside it — can change the night before, and the morning after. Pass it on, gently.',
+    content: 'They will not ask for help. But a link that arrives at the right moment — with a rehearsal room inside it — can change the night before, and the morning after. Pass it on, gently.',
+    imageUrl: null,
+    url: '/',
+    cta: 'Share Presentation Buddy',
+    weight: 3,
+    house: true,
+  },
+  {
+    id: 'house-share-first',
+    title: 'Every confident speaker was once terrified in a smaller room',
+    body: 'This place exists so that first, shaky rehearsal happens somewhere kind. If it helped you find one true sentence, it might help them find theirs.',
+    content: 'This place exists so that first, shaky rehearsal happens somewhere kind. If it helped you find one true sentence, it might help them find theirs.',
+    imageUrl: null,
+    url: '/',
+    cta: 'Share the rehearsal room',
+    weight: 2,
+    house: true,
+  },
+  {
     id: 'house-themes',
     title: '13.7 million ways this page can look',
     body: 'Five design axes, 134 hand-set options and 14 curated presets. Open the theme studio and make the workspace yours.',

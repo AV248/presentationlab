@@ -26,6 +26,10 @@ import { useUi } from '../store/ui';
 import { useAuth } from '../store/auth';
 import { useCloud } from '../store/cloud';
 import { publishSpeech } from '../services/data';
+import { useProfile } from '../store/profile';
+import { checkOriginality, contentSlug, COPYRIGHT_THRESHOLD } from '../lib/identity';
+import { LIBRARY as LIB } from '../data/speeches';
+import { shortUrl } from '../lib/share';
 import { FIRST_LINES, pick } from '../lib/heart';
 import { useGate } from '../components/SignIn';
 import { analyse, formatDate } from '../lib/text';
@@ -252,6 +256,7 @@ function Editor({
   const connect = useCloud((s) => s.connect);
   const gate = useGate();
   const [publishing, setPublishing] = useState(false);
+  const [wizard, setWizard] = useState(false);
 
   const [draft, setDraft] = useState({
     title: initial.title,
@@ -262,6 +267,9 @@ function Editor({
     tags: initial.tags.join(', '),
     preview: initial.preview,
     content: initial.content,
+    credits: initial.credits ?? '',
+    signature: initial.signature ?? '',
+    allowCopy: initial.allowCopy !== false,
   });
   const [view, setView] = useState<ViewMode>('split');
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -347,6 +355,17 @@ function Editor({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {wizard && <PublishWizard draft={draft} patch={patch as never} publishing={publishing} onClose={() => setWizard(false)} onPublish={() => {
+        const profile = useProfile.getState();
+        if (!profile.username) { toast('Claim your username first — your speech needs its own address.', 'warn'); navigate('/claim'); return; }
+        const hit = checkOriginality(draft.content, LIB.filter(i=>i.id!==initial.id));
+        if (hit && hit.score >= COPYRIGHT_THRESHOLD) { toast(`This looks too close to “${hit.title}” (${Math.round(hit.score*100)}% overlap). Rewrite in your own words before publishing.`, 'error'); return; }
+        setPublishing(true);
+        publishSpeech({ title: draft.title, content: draft.content, preview: draft.preview, category: draft.category, occasion: draft.occasion, tags: draft.tags.split(',').map((x)=>x.trim()).filter(Boolean), ad: false, username: profile.username, slug: contentSlug(draft.title), credits: draft.credits, signature: draft.signature || profile.signature, allowCopy: draft.allowCopy }, user!.uid, user!.displayName ?? user!.email ?? 'Anonymous')
+          .then(({ id: cloudId }) => { updateSpeech(initial.id, { cloudId, status: 'published' }); toast(`Published — ${shortUrl(`/${profile.username}/${contentSlug(draft.title)}`)}`, 'success'); setWizard(false); void connect(true); })
+          .catch((e: unknown) => toast((e as Error)?.message ?? 'Publish failed', 'error'))
+          .finally(() => setPublishing(false));
+      }} />}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button type="button" className="pb-btn pb-btn-sm pb-btn-ghost" onClick={() => navigate('/write')}>
           ← All drafts
@@ -388,33 +407,9 @@ function Editor({
           type="button"
           className="pb-btn pb-btn-sm pb-btn-primary"
           disabled={publishing}
-          onClick={() => {
-            gate(() => {
-              setPublishing(true);
-              publishSpeech(
-                {
-                  title: draft.title,
-                  content: draft.content,
-                  preview: draft.preview,
-                  category: draft.category,
-                  occasion: draft.occasion,
-                  tags: draft.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
-                  ad: false,
-                },
-                user!.uid,
-                user!.displayName ?? user!.email ?? 'Anonymous',
-              )
-                .then(({ id: cloudId }) => {
-                  updateSpeech(initial.id, { cloudId, status: 'published' });
-                  toast('Published to the shared library', 'success');
-                  void connect(true);
-                })
-                .catch((error: unknown) => toast((error as Error)?.message ?? 'Publish failed', 'error'))
-                .finally(() => setPublishing(false));
-            }, 'Sign in to publish — we need to know whose words these are.');
-          }}
+          onClick={() => gate(() => setWizard(true), 'Sign in to publish — we need to know whose words these are.')}
         >
-          {publishing ? <span className="pb-spinner" /> : <Upload size={14} />} Publish
+<Upload size={14} /> Publish in steps…
         </button>
       </div>
 
@@ -804,4 +799,39 @@ interface SpeechRecognitionLike {
   onresult: ((event: RecognitionEvent) => void) | null;
   onerror: ((event: unknown) => void) | null;
   onend: (() => void) | null;
+}
+
+/* Publish in easy steps (2.6): Title → Preview → Tags → Credits → Content → Signature → Category.
+   Only Title and Content are mandatory. Content step runs the originality screen. */
+const WIZARD_STEPS = ['Title','Preview','Tags','Credits','Content','Signature','Category'] as const;
+function PublishWizard({ draft, patch, publishing, onClose, onPublish }: { draft: { title: string; preview: string; tags: string; credits: string; content: string; signature: string; category: string; occasion: string; allowCopy: boolean }; patch: (k: never, v: never) => void; publishing: boolean; onClose: () => void; onPublish: () => void }) {
+  const [step, setStep] = useState(0);
+  const profile = useProfile();
+  const hit = useMemo(() => checkOriginality(draft.content, LIB.map((i) => ({ id: i.id, title: i.title, content: i.content }))), [draft.content]);
+  const blocked = hit && hit.score >= COPYRIGHT_THRESHOLD;
+  const name = WIZARD_STEPS[step];
+  const set = (k: string, v: string | boolean) => (patch as (k: string, v: unknown) => void)(k, v);
+  return (
+    <div className="pb-overlay" role="dialog" aria-modal="true" aria-label="Publish your speech" onClick={onClose}>
+      <div className="pb-modal" style={{ maxWidth: 640, width: 'min(640px, calc(100vw - 28px))' }} onClick={(e) => e.stopPropagation()}>
+        <span className="pb-eyebrow">Publish · step {step + 1} of {WIZARD_STEPS.length}</span>
+        <h2 style={{ margin: '8px 0 12px' }}>{name}</h2>
+        <div className="pb-wizard-steps">{WIZARD_STEPS.map((s, i) => <span key={s} data-on={i === step}>{s}</span>)}</div>
+        {name === 'Title' && <><label className="pb-label">Title *</label><input className="pb-input" value={draft.title} onChange={(e) => set('title', e.target.value)} placeholder="The name your speech climbs under" /></>}
+        {name === 'Preview' && <><label className="pb-label">Preview</label><textarea className="pb-textarea" rows={3} value={draft.preview} onChange={(e) => set('preview', e.target.value)} placeholder="One honest line that makes a stranger stop scrolling" /></>}
+        {name === 'Tags' && <><label className="pb-label">Tags</label><input className="pb-input" value={draft.tags} onChange={(e) => set('tags', e.target.value)} placeholder="manifestation, morning, courage" /><p className="pb-muted" style={{fontSize:'.78rem',marginTop:6}}>Comma separated. Three good ones beat ten vague ones.</p></>}
+        {name === 'Credits' && <><label className="pb-label">Credits</label><input className="pb-input" value={draft.credits} onChange={(e) => set('credits', e.target.value)} placeholder="Who helped, inspired or is quoted — credit them here" /><label style={{display:'flex',gap:8,alignItems:'flex-start',marginTop:14,fontSize:'.86rem',lineHeight:1.5}}><input type="checkbox" checked={!draft.allowCopy} onChange={(e) => set('allowCopy', !e.target.checked)} style={{marginTop:3}} /> <span><strong>Protect my copyright.</strong> Readers can read and rehearse here, but cannot copy, download or print this speech.</span></label></>}
+        {name === 'Content' && <><label className="pb-label">Content *</label><textarea className="pb-textarea" rows={8} value={draft.content} onChange={(e) => set('content', e.target.value)} />{hit ? <p style={{fontSize:'.82rem',lineHeight:1.6,marginTop:8,color: blocked ? 'var(--c-bad)' : 'var(--c-warn)'}}>{blocked ? `⛔ Too close to “${hit.title}” (${Math.round(hit.score*100)}% overlapping passages${hit.sharedPhrase ? ` — e.g. “${hit.sharedPhrase}…”` : ''}). Publishing is paused until this is in your own words.` : `Note: a passage resembles “${hit.title}”. If you quoted it, credit it in the Credits step.`}</p> : <p className="pb-muted" style={{fontSize:'.82rem',marginTop:8}}>✓ No matching content found in the library. Your words read as your own.</p>}</>}
+        {name === 'Signature' && <><label className="pb-label">Signature</label><input className="pb-input" value={draft.signature} onChange={(e) => set('signature', e.target.value)} placeholder={profile.signature || 'The line you sign with'} /></>}
+        {name === 'Category' && <><label className="pb-label">Category</label><input className="pb-input" value={draft.category} onChange={(e) => set('category', e.target.value)} placeholder="Manifestation" /><label className="pb-label" style={{marginTop:12}}>Occasion</label><input className="pb-input" value={draft.occasion} onChange={(e) => set('occasion', e.target.value)} placeholder="Morning gathering" />{!profile.username && <p style={{fontSize:'.84rem',marginTop:10}}>You will claim your username next — your speech will live at <span className="pb-mono">{shortUrl(`/you/${contentSlug(draft.title || 'your-speech')}`)}</span></p>}</>}
+        <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
+          <button type="button" className="pb-btn pb-btn-ghost" onClick={onClose}>Keep writing</button>
+          <div style={{ flex: 1 }} />
+          {step > 0 && <button type="button" className="pb-btn" onClick={() => setStep(step - 1)}>Back</button>}
+          {step < WIZARD_STEPS.length - 1 ? <button type="button" className="pb-btn pb-btn-primary" disabled={(name === 'Title' && !draft.title.trim()) || (name === 'Content' && (!draft.content.trim() || Boolean(blocked)))} onClick={() => setStep(step + 1)}>Continue</button>
+          : <button type="button" className="pb-btn pb-btn-primary" disabled={publishing || !draft.title.trim() || !draft.content.trim() || Boolean(blocked)} onClick={onPublish}>{publishing ? 'Publishing…' : 'Publish my speech'}</button>}
+        </div>
+      </div>
+    </div>
+  );
 }
