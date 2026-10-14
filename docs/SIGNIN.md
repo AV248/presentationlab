@@ -78,6 +78,15 @@ Clerk → **Logs** is the server side of the same story:
 - `oauth_callback.failed` → the provider refused; the reason is in the event.
 - nothing at all → the frontend never reached Clerk (1, 4).
 
+## Claiming a handle needs the same cloud session
+
+`handles/{username}` is written under Firestore rules, so it needs the custom
+token from `/api/clerk-firebase-token` — the same chain described above. When
+that chain is broken the symptom is *"Missing or insufficient permissions"* on
+the claim, not an obvious auth message. The Claim page now names the cause
+(from the token exchange's own reason), offers to retry the connection, and
+points at the environment check in the sign-in sheet.
+
 ## What the app does about these, in code
 
 - `/sso-callback` is a real, prerendered page that finishes the handshake and

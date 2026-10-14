@@ -297,7 +297,13 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.uid == request.auth.uid
         && username.matches('^[a-z0-9_]{3,24}$');
-      allow update: if isSiteOwner();
+      // The holder may maintain their own document (a timestamp, a later
+      // mirror) but never hand it to anybody else: `uid` is immutable, so a
+      // handle cannot be silently re-pointed at another account.
+      allow update: if isSiteOwner()
+        || (isSignedIn()
+          && resource.data.uid == request.auth.uid
+          && request.resource.data.uid == resource.data.uid);
       allow delete: if isSiteOwner();
     }
 

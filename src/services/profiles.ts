@@ -5,6 +5,68 @@ const str = (v: unknown, f = '') => typeof v === 'string' ? v : f;
 export interface PublicProfile { username: string; uid: string; displayName: string; bio: string; location: string; website: string; signature: string; createdAt: string }
 /** Claim /username: handles/{username} is the uniqueness lock (create-only
  * in firestore.rules); users/{uid} mirrors the profile for the leaderboard. */
+/** Does a handle exist? `unknown` when we simply cannot tell (denied read,
+ * offline, Firebase unconfigured) — never guess "free" in that case. */
+export async function fetchHandleState(username: string): Promise<'held' | 'free' | 'unknown'> {
+  if (!FIREBASE_ENABLED) return 'unknown';
+  const b = await fs(); if (!b) return 'unknown';
+  try {
+    const snap = await b.fs.getDoc(b.fs.doc(b.db, 'handles', username));
+    return snap.exists() ? 'held' : 'free';
+  } catch { return 'unknown'; }
+}
+
+/** The outcome of an automatic claim, spelled out for the caller. */
+export interface AutoClaimResult { ok: boolean; username: string; reason?: 'taken' | 'unavailable' | 'invalid' }
+
+/**
+ * Claim the username a person already set in Clerk.
+ *
+ * Clerk is where the username lives, but the *site's* address book is
+ * `handles/{username}` — so a name set in Manage Account is not a handle
+ * until it is written here. Doing that automatically on sign-in is what makes
+ * the sidebar say @name instead of asking for something the person already
+ * gave. Deliberately quiet and idempotent:
+ *
+ *   • never steals: a handle held by somebody else is reported, not taken
+ *   • never updates the handle document: rules allow create-only, so a retry
+ *     skips the write rather than being refused as an "insufficient
+ *     permission" error
+ *   • only mirrors displayName into `users/{uid}` when we have one, merged, so
+ *     nothing a person has already written is blanked
+ */
+export async function autoClaimUsername(uid: string, raw: string, displayName?: string): Promise<AutoClaimResult> {
+  const v = validateUsername(raw);
+  if (!v.ok) return { ok: false, username: v.username, reason: 'invalid' };
+  if (!FIREBASE_ENABLED) return { ok: false, username: v.username, reason: 'unavailable' };
+  const b = await fs(); if (!b) return { ok: false, username: v.username, reason: 'unavailable' };
+  const { fs: f, db } = b;
+  try {
+    // Already claimed on some device? Whatever is recorded wins.
+    const own = await fetchOwnProfile(uid);
+    if (own?.username) return { ok: true, username: own.username };
+
+    const ref = f.doc(db, 'handles', v.username);
+    const existing = await f.getDoc(ref);
+    const holder = existing.exists() ? str((existing.data() ?? {}).uid) : '';
+    if (holder && holder !== uid) return { ok: false, username: v.username, reason: 'taken' };
+
+    // Create-only: when the document already exists with our own uid, the
+    // write is skipped (rules forbid updates, and there is nothing to change).
+    if (!holder) {
+      await f.setDoc(ref, { uid, username: v.username, updatedAt: f.serverTimestamp() });
+    }
+    await f.setDoc(
+      f.doc(db, 'users', uid),
+      { uid, username: v.username, ...(displayName ? { displayName } : {}), updatedAt: f.serverTimestamp() },
+      { merge: true },
+    );
+    return { ok: true, username: v.username };
+  } catch {
+    return { ok: false, username: v.username, reason: 'unavailable' };
+  }
+}
+
 export async function claimUsername(uid: string, raw: string, profile: Partial<PublicProfile>): Promise<string> {
   const v = validateUsername(raw); if (!v.ok) throw new Error(v.error);
   // Local-first: claiming works offline as a reservation on this device;
@@ -19,8 +81,15 @@ export async function claimUsername(uid: string, raw: string, profile: Partial<P
   }
   const ref = f.doc(db, 'handles', v.username);
   const existing = await f.getDoc(ref);
-  if (existing.exists() && str((existing.data() ?? {}).uid) !== uid) throw new Error('That username is already taken. Try another.');
-  await f.setDoc(ref, { uid, username: v.username, updatedAt: f.serverTimestamp() });
+  const holder = existing.exists() ? str((existing.data() ?? {}).uid) : '';
+  if (holder && holder !== uid) throw new Error('That username is already taken. Try another.');
+  // rules allow create-only for the claimant, so an existing document of our
+  // own is left exactly as it is — rewriting it reads as an update and is
+  // refused as "insufficient permissions", which is how a *retry* used to
+  // fail for somebody who had already claimed the very same handle.
+  if (!holder) {
+    await f.setDoc(ref, { uid, username: v.username, updatedAt: f.serverTimestamp() });
+  }
   await f.setDoc(f.doc(db, 'users', uid), { uid, username: v.username, displayName: profile.displayName ?? '', bio: profile.bio ?? '', location: profile.location ?? '', website: profile.website ?? '', signature: profile.signature ?? '', updatedAt: f.serverTimestamp() }, { merge: true });
   return v.username;
 }
