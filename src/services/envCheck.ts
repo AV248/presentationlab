@@ -256,6 +256,21 @@ export async function probeServerEnv(): Promise<ServerProbe> {
     }
 
     if (response.status === 501) {
+      // 501 covers two unrelated faults, and conflating them sent people to
+      // Vercel for days. `clerk_sdk_unavailable` is the function failing to load
+      // its *own* dependency — a packaging problem that no environment variable
+      // can fix. Only the other codes name a variable.
+      if (code === 'clerk_sdk_unavailable') {
+        return {
+          reachable: true,
+          ok: false,
+          label: 'Deployment is missing a dependency',
+          detail:
+            payload.message ??
+            'The function could not load the Clerk SDK. That is a packaging problem in the deployment, not a missing variable.',
+          missing: [],
+        };
+      }
       const missing = /([A-Z][A-Z_]{3,})/.exec(payload.message ?? '')?.[1];
       return {
         reachable: true,

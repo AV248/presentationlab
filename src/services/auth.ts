@@ -167,14 +167,35 @@ export type ExchangeFailure =
   | 'no-session'
   | 'endpoint-missing'
   | 'server-misconfigured'
+  /** 501 clerk_sdk_unavailable: the function is deployed but its own
+   *  dependency was not shipped with it. A packaging fault, never a variable. */
+  | 'sdk-unavailable'
   | 'method-rejected'
   | 'unauthorized'
   | 'server-error'
+  /** Firebase Auth refused the custom token we minted (auth/invalid-custom-token
+   *  and friends). Almost always a service account from another project. */
+  | 'auth-rejected'
   | 'network';
 
 export interface ExchangeOutcome {
   ok: boolean;
   reason?: ExchangeFailure;
+  /**
+   * The specific words behind the failure: the server's own `message`, or
+   * Firebase's `auth/…` code. Shown to the operator, because "network error"
+   * for a rejected token wasted days once.
+   */
+  detail?: string;
+}
+
+/** Read a JSON body without ever throwing — a 501 body may be anything. */
+async function readBody(response: Response): Promise<{ error?: string; message?: string; token?: string }> {
+  try {
+    return (await response.json()) as { error?: string; message?: string; token?: string };
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -213,8 +234,23 @@ export async function exchangeClerkSessionForFirebase(
     });
 
     if (response.status === 404) return { ok: false, reason: 'endpoint-missing' };
-    if (response.status === 401 || response.status === 403) return { ok: false, reason: 'unauthorized' };
-    if (response.status === 501) return { ok: false, reason: 'server-misconfigured' };
+    if (response.status === 401 || response.status === 403) {
+      const body = await readBody(response);
+      return { ok: false, reason: 'unauthorized', detail: body.message ?? body.error ?? `HTTP ${response.status}` };
+    }
+    if (response.status === 501) {
+      // Two very different faults share this status: a missing/!malformed
+      // server variable, and a dependency that was never packaged into the
+      // function. The server names which; pass that through instead of
+      // guessing.
+      const body = await readBody(response);
+      const packaging = body.error === 'clerk_sdk_unavailable';
+      return {
+        ok: false,
+        reason: packaging ? 'sdk-unavailable' : 'server-misconfigured',
+        detail: body.message ?? body.error ?? 'The endpoint answered 501 without a message.',
+      };
+    }
     // 405 means the function is alive but refused the method — almost always
     // something rewriting the request (a redirect that turns POST into GET,
     // or a proxy in front of it) rather than anything in this app, which
@@ -222,18 +258,32 @@ export async function exchangeClerkSessionForFirebase(
     if (response.status === 405) return { ok: false, reason: 'method-rejected' };
     if (!response.ok) return { ok: false, reason: 'server-error' };
 
-    const payload = (await response.json()) as { token?: unknown; error?: unknown };
+    const payload = await readBody(response);
     const customToken = typeof payload.token === 'string' ? payload.token : null;
-    if (!customToken) return { ok: false, reason: 'server-error' };
+    if (!customToken) {
+      return { ok: false, reason: 'server-error', detail: payload.message ?? 'The endpoint returned no token.' };
+    }
 
     const bundle = await loadFirebase();
     if (!bundle) return { ok: false, reason: 'not-configured' };
 
-    await bundle.signInWithCustomToken(bundle.auth, customToken);
+    try {
+      await bundle.signInWithCustomToken(bundle.auth, customToken);
+    } catch (error) {
+      // This is where a project mismatch shows up: Firebase Auth verifies the
+      // custom token against *its* project's keys, so a token signed by another
+      // project's service account is refused outright. Reporting it as
+      // "network" (as this used to) hides the one fact that identifies it.
+      const code = (error as { code?: unknown }).code;
+      const text = typeof code === 'string' && code ? `${code}: ${(error as Error).message}` : (error as Error).message;
+      console.warn('[pb] Firebase refused the custom token', text);
+      return { ok: false, reason: 'auth-rejected', detail: text };
+    }
+
     exchangedFor = clerkUserId;
     return { ok: true };
-  } catch {
-    return { ok: false, reason: 'network' };
+  } catch (error) {
+    return { ok: false, reason: 'network', detail: (error as Error).message };
   }
 }
 

@@ -17,6 +17,20 @@ const PRECACHE = [SHELL, '/manifest.webmanifest', '/favicon.svg'];
 /* Never cache these: they must always reflect the server. */
 const NEVER_CACHE = ['/sitemap.xml', '/robots.txt', '/sw.js'];
 
+/**
+ * Should the worker keep out of this request altogether?
+ *
+ * `/api/*` — every serverless endpoint — is deliberately in here. Caching an
+ * API answer would be wrong, and *intercepting* one is subtler: when the
+ * network request failed, this worker used to synthesise a bodyless
+ * `504 (Offline)`, which reads as a server fault and sent an afternoon down the
+ * wrong path. Letting API calls go straight to the network gives them the
+ * browser's real error instead.
+ */
+function isUncacheable(url) {
+  return NEVER_CACHE.includes(url.pathname) || url.pathname.startsWith('/api/');
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
@@ -52,7 +66,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (url.origin !== self.location.origin) return;
-  if (NEVER_CACHE.includes(url.pathname)) return;
+  if (isUncacheable(url)) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(

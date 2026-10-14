@@ -62,6 +62,22 @@ Rule this out deliberately, because it looks identical to 2 and 3:
 - An ad blocker or corporate proxy that blocks `clerk.aavrit.dedyn.io` or
   `cdn.protect.clerk.com` produces the same empty round trip.
 
+## Who may become the owner
+
+Ownership is a document — `admins/{uid}` with `role: 'owner'` — but the *first*
+one was impossible to create through the app, because creating it required
+already holding it:
+
+```js
+allow create: if isSiteOwner();   // isSiteOwner() → hasAdminDoc() → exists(admins/{uid})
+```
+
+`firestore.rules` now carries a founder clause: `isFounder()` is true for one
+specific account (the site's own Clerk user id) and `isSiteOwner()` includes it.
+So that account may bootstrap its own document — or simply act as owner without
+one — while nobody else can promote themselves. No need to ever open the
+database again.
+
 ## Checking the API by hand
 
 Both endpoints are APIs, not pages: they accept **POST** only. Open one in a
@@ -81,6 +97,7 @@ Three answers, three meanings:
 | `405 method_not_allowed` | The function is deployed. Only POST is accepted; end-user traffic does this correctly. |
 | `401 missing_session_token` | Deployed **and configured** — everything is present, the request simply had no credentials. |
 | `501 clerk_not_configured` | Deployed but `CLERK_SECRET_KEY` is absent; the message says so. |
+| `501 clerk_sdk_unavailable` | The function is deployed and configured but **could not load its own SDK** — a packaging fault, not a missing variable. See "The literal-specifier rule" below. |
 | `501 firebase_admin_not_configured`, message begins "…is missing, or does not contain…" | Deployed but `FIREBASE_SERVICE_ACCOUNT_JSON` is absent or malformed. Use the `base64:` form. |
 
 The code name `firebase_admin_not_configured` is kept for compatibility, but the
@@ -92,6 +109,33 @@ CommonJS cannot `require()` an ES module every request answered 501 with
 *"Server SDKs failed to load: require() of ES Module …"*. If you ever see that
 message again, it is the dependency, not your variables.
 
+### The literal-specifier rule
+
+A serverless host does not upload `node_modules`; it **traces** the function,
+choosing what to ship from the literal string passed to `import()` / `require()`.
+Load a package through a computed specifier and it is invisible to that trace:
+
+```js
+loadModule<ClerkModule>('@clerk/backend')          // ✗ invisible to the tracer
+  → new Function('specifier', 'return import(specifier)')
+
+await import('@clerk/backend')                     // ✓ traced, shipped
+```
+
+The endpoint answered `501 clerk_sdk_unavailable` on every request for exactly
+this reason, while every local test passed — locally the package is present, so
+nothing looks wrong. Measured with the same tracer the host uses:
+
+| How it is loaded | Files pulled into the function |
+| --- | --- |
+| `require('@clerk/backend')` literal | 30 |
+| `import('@clerk/backend')` literal | 63 |
+| computed specifier | **1** — i.e. nothing |
+
+`npm run check:api` (`scripts/check-api-trace.mjs`) now fails the build if any
+package an endpoint names would not be shipped, so this cannot recur silently.
+It is part of `npm run verify`.
+
 ### Why there is no Admin SDK
 
 Minting a Firebase custom token is one RS256 JWT signed with the service
@@ -102,6 +146,17 @@ only) through `jwks-rsa`; depending on it made the endpoint's health a function
 of the host's module loader. `package.json` also pins
 `"engines": { "node": "22.x" }`, so the runtime matches what the remaining
 dependencies expect.
+
+## Deploying the rules
+
+`firebase.json` and `.firebaserc` are in the repository, so from a clone:
+
+```bash
+npm run deploy:rules          # firebase deploy --only firestore:rules
+```
+
+(First time: `npm install -g firebase-tools` and `firebase login`.) The project
+is `reflectioncapturedthoughts`, set in `.firebaserc`.
 
 To reproduce the site's own call from a terminal:
 

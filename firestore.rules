@@ -79,8 +79,27 @@ service cloud.firestore {
       return hasAdminDoc() && adminDoc().role in ['admin', 'owner'];
     }
 
+    // ------------------------------------------------------------------
+    // Ownership — and how the FIRST owner is made
+    // ------------------------------------------------------------------
+    // Ownership is a document: `admins/{uid}` with role 'owner'. But the first
+    // one could never be created through the app: writing that document
+    // required already holding it —
+    //
+    //     allow create: if isSiteOwner();
+    //     isSiteOwner()  →  hasAdminDoc()  →  exists(admins/$(request.auth.uid))
+    //
+    // — so bootstrapping meant opening the whole database to the world, which
+    // is what happened once, and must never be needed again.
+    //
+    // `isFounder()` closes that loop for exactly one account: the site's own.
+    // Everywhere else stays closed; no visitor can promote themselves.
+    function isFounder() {
+      return isSignedIn() && request.auth.uid == 'user_3KfkGVOxE2fw9y6fZbl8TgCCyR8';
+    }
+
     function isSiteOwner() {
-      return hasAdminDoc() && adminDoc().role == 'owner';
+      return isFounder() || (hasAdminDoc() && adminDoc().role == 'owner');
     }
 
     // ------------------------------------------------------------------
