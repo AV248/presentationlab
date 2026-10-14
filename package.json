@@ -24,7 +24,6 @@
     "@clerk/themes": "^2.4.57",
     "clsx": "^2.1.1",
     "firebase": "^12.19.0",
-    "firebase-admin": "^14.5.0",
     "lucide-react": "^1.47.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -43,5 +42,8 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vite": "^7.3.6"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }

@@ -29,27 +29,111 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { App, ServiceAccount } from 'firebase-admin/app';
+import { createSign } from 'node:crypto';
 
-// The Clerk and Firebase Admin SDKs are imported lazily, inside the handler.
-// A static import that fails on the host (wrong platform build, missing
-// optional dependency) takes the whole function down as an unexplained 500
-// before any of our error handling runs. Lazy imports turn that into a
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY THERE IS NO FIREBASE ADMIN SDK HERE
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Minting a Firebase custom token means signing one JWT with the service
+ * account's private key. That is a single RS256 signature, and Node's own
+ * `crypto` does it — so this function needs no Firebase SDK at all.
+ *
+ * It used to import `firebase-admin`, which was correct until it was not.
+ * `firebase-admin@14` requires Node 22, and it reaches `jose@6`, an
+ * **ESM-only** package, through `jwks-rsa`. On a runtime whose CommonJS cannot
+ * `require()` an ES module, both its CommonJS *and* its ESM entry points fail
+ * with *"require() of ES Module … not supported"*, both SDKs report "failed to
+ * load", and every request to this endpoint answered 501 — with the
+ * configuration blamed, wrongly.
+ *
+ * Dropping the dependency removes that entire class of failure, shrinks the
+ * cold start, and keeps the security properties identical: the private key
+ * still never leaves the server, the uid still comes from the verified Clerk
+ * subject, and the token still expires an hour later.
+ */
+
+// The Clerk SDK is still imported lazily, inside the handler. A static import
+// that fails on the host takes the whole function down as an unexplained 500
+// before any of our error handling runs. A lazy import turns that into a
 // named, actionable 501 instead.
 type ClerkModule = typeof import('@clerk/backend');
-type AdminAppModule = typeof import('firebase-admin/app');
-type AdminAuthModule = typeof import('firebase-admin/auth');
-let sdk: { clerk: ClerkModule; app: AdminAppModule; auth: AdminAuthModule } | null = null;
+
+/* ------------------------------------------------------------------ */
+/* Loading the SDK                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Load a dependency in whichever way this runtime allows.
+ *
+ * This is not paranoia — it is a bug that reached production through
+ * `firebase-admin` and an ESM-only package of its own (that dependency has
+ * since been removed entirely; see the note above). A compiled handler may be
+ * CommonJS, in which case a dynamic `import()` can be rewritten into
+ * `require()`, and requiring an ESM-only dependency fails with
+ * *"require() of ES Module … not supported"* on any Node older than the
+ * versions that allow it (22.12 / 20.19). The SDK then "fails to load" and
+ * every request answers 501 — with the configuration blamed, wrongly.
+ *
+ * Three routes, in order of reliability:
+ *
+ *   1. `new Function('specifier', 'return import(specifier)')` — a real
+ *      dynamic import that no transform can rewrite, because the bundler
+ *      never sees an import here at all. This is how a CommonJS file reaches
+ *      an ES module, and it loads the ESM build, whose own ESM imports are
+ *      always legal.
+ *   2. `createRequire` — the CommonJS entry point, for a runtime that cannot
+ *      perform a dynamic import.
+ *   3. a plain `await import(...)`, last, for an ESM runtime where (1) is
+ *      somehow unavailable.
+ *
+ * Every failure is collected, so the message names the module and the reason
+ * instead of only "failed to load".
+ */
+const dynamicImport = new Function('specifier', 'return import(specifier)') as <T>(
+  specifier: string,
+) => Promise<T>;
+
+async function loadModule<T>(specifier: string): Promise<T> {
+  const failures: string[] = [];
+
+  try {
+    return await dynamicImport<T>(specifier);
+  } catch (error) {
+    failures.push(`import(): ${(error as Error).message}`);
+  }
+
+  try {
+    const { createRequire } = await import('node:module');
+    const nodeRequire = createRequire(`${process.cwd()}/index.js`);
+    return nodeRequire(specifier) as T;
+  } catch (error) {
+    failures.push(`require(): ${(error as Error).message}`);
+  }
+
+  try {
+    return (await import(specifier)) as T;
+  } catch (error) {
+    failures.push(`fallback import(): ${(error as Error).message}`);
+  }
+
+  throw new Error(`could not load ${specifier} — ${failures.join(' | ')}`);
+}
+
+let sdk: ClerkModule | null = null;
 let sdkError: string | null = null;
-async function loadSdk() {
+
+async function loadSdk(): Promise<ClerkModule | null> {
   if (sdk || sdkError) return sdk;
   try {
-    const [clerk, app, auth] = await Promise.all([
-      import('@clerk/backend'), import('firebase-admin/app'), import('firebase-admin/auth'),
-    ]);
-    sdk = { clerk, app, auth };
+    sdk = await loadModule<ClerkModule>('@clerk/backend');
   } catch (error) {
-    sdkError = `Server SDKs failed to load: ${(error as Error).message}`;
+    // A packaging problem, not a missing variable — say which it is, because
+    // the two have completely different fixes.
+    sdkError =
+      `The Clerk server SDK could not be loaded: ${(error as Error).message} ` +
+      'This is a packaging problem in the deployment (the function must be able to resolve ' +
+      '@clerk/backend), not a missing variable.';
   }
   return sdk;
 }
@@ -86,10 +170,21 @@ interface RawServiceAccount {
   type?: string;
   project_id?: string;
   private_key?: string;
+  private_key_id?: string;
   client_email?: string;
   projectId?: string;
   privateKey?: string;
+  privateKeyId?: string;
   clientEmail?: string;
+}
+
+/** What this endpoint needs from the service account — no SDK required. */
+interface ServiceAccount {
+  projectId: string;
+  privateKey: string;
+  clientEmail: string;
+  /** The key's own id, used as the JWT `kid` so Google can pick the key. */
+  privateKeyId: string;
 }
 
 function parseServiceAccount(raw: string): ServiceAccount | null {
@@ -114,54 +209,106 @@ function parseServiceAccount(raw: string): ServiceAccount | null {
     const projectId = parsed.project_id ?? parsed.projectId;
     const privateKey = parsed.private_key ?? parsed.privateKey;
     const clientEmail = parsed.client_email ?? parsed.clientEmail;
+    const privateKeyId = parsed.private_key_id ?? parsed.privateKeyId ?? '';
 
     if (!projectId || !privateKey || !clientEmail) return null;
 
-    return {
-      projectId,
-      // Some paste paths leave the two characters \ and n where the key's
-      // newlines should be. A correctly parsed key already has real
-      // newlines, so this is a no-op in the normal case.
-      privateKey: privateKey.replace(/\\n/g, '\n'),
-      clientEmail,
-    };
+    // A pasted key can arrive with literal backslash-n where its newlines
+    // should be. `createSign` needs the real thing, so normalise here rather
+    // than failing later with an opaque crypto error.
+    const normalisedKey = privateKey.includes('\\n') ? privateKey.replace(/\\n/g, '\n') : privateKey;
+
+    return { projectId, privateKey: normalisedKey, clientEmail, privateKeyId };
   } catch {
     return null;
   }
 }
 
-let adminApp: App | null | undefined;
-/** Why the Admin SDK is unavailable, in words safe to send to a client. */
+/* ------------------------------------------------------------------ */
+/* Minting the custom token                                             */
+/* ------------------------------------------------------------------ */
+
+interface CustomTokenOptions {
+  serviceAccount: ServiceAccount;
+  /** The Clerk user id — the token's subject, and the Firebase uid. */
+  uid: string;
+  /** Extra claims for the UI only; Firestore rules never trust these. */
+  claims?: Record<string, unknown>;
+  /** For tests. Seconds since the epoch. */
+  now?: number;
+}
+
+/** base64url without padding, which is what a JWT segment is. */
+function base64url(input: string | Buffer): string {
+  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * A Firebase custom token, signed directly with the service account's key.
+ *
+ * The shape is Google's, not ours: a JWT whose `iss`/`sub` are the service
+ * account's address, whose `aud` is the Identity Toolkit, whose `uid` is the
+ * Firebase user id, and whose signature is RS256 over the first two segments
+ * with the `kid` header naming the key. Firebase verifies it with the public
+ * half of that key — which is why this works without any Firebase SDK, and
+ * why the private key must never leave the server.
+ *
+ * `exp` is one hour: long enough for the browser to redeem it immediately,
+ * short enough that a leaked response is worthless. It is deliberately *not*
+ * a session token — Firebase exchanges it for a refresh token on first use.
+ */
+export function mintFirebaseCustomToken({ serviceAccount, uid, claims, now }: CustomTokenOptions): string {
+  const issuedAt = now ?? Math.floor(Date.now() / 1000);
+
+  const header = {
+    alg: 'RS256',
+    typ: 'JWT',
+    ...(serviceAccount.privateKeyId ? { kid: serviceAccount.privateKeyId } : {}),
+  };
+
+  const payload = {
+    iss: serviceAccount.clientEmail,
+    sub: serviceAccount.clientEmail,
+    aud: 'https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit',
+    iat: issuedAt,
+    exp: issuedAt + 3600,
+    uid,
+    ...(claims ? { claims } : {}),
+  };
+
+  const signingInput = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(payload))}`;
+
+  let signature: Buffer;
+  try {
+    const signer = createSign('RSA-SHA256');
+    signer.update(signingInput);
+    signer.end();
+    signature = signer.sign(serviceAccount.privateKey);
+  } catch (error) {
+    // A truncated or mangled key surfaces here rather than as a token that
+    // Firebase later refuses — this is the error worth naming out loud.
+    throw new Error(`the private key could not sign: ${(error as Error).message}`);
+  }
+
+  return `${signingInput}.${base64url(signature)}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Configuration state                                                  */
+/* ------------------------------------------------------------------ */
+
+/** Parsed once per instance; a bad value is reported, never cached as good. */
+let serviceAccount: ServiceAccount | null | undefined;
+/** Why the service account is unusable, in words safe to send to a client. */
 let adminError: string | null = null;
 
-async function getAdminApp(): Promise<App | null> {
-  if (adminApp !== undefined) return adminApp;
-  if (!await loadSdk()) { adminApp = null; adminError = sdkError; return null; }
-
-  const serviceAccount = parseServiceAccount(SERVICE_ACCOUNT_RAW);
-  if (!serviceAccount) {
-    adminApp = null;
-    adminError =
-      'FIREBASE_SERVICE_ACCOUNT_JSON is missing, or does not contain project_id, private_key and client_email.';
-    return null;
-  }
-
-  try {
-    const { getApps, initializeApp, cert } = sdk!.app;
-    adminApp = getApps().length
-      ? (getApps()[0] as App)
-      : initializeApp({ credential: cert(serviceAccount) });
-    adminError = null;
-  } catch (error) {
-    // cert() throws on a key that was truncated or mangled being pasted into
-    // an env var — the most likely real-world misconfiguration. Report it as
-    // a configuration problem with the actual reason, rather than letting it
-    // escape as an unexplained 500.
-    adminApp = null;
-    adminError = `FIREBASE_SERVICE_ACCOUNT_JSON could not be used: ${(error as Error).message}`;
-  }
-
-  return adminApp;
+function getServiceAccount(): ServiceAccount | null {
+  if (serviceAccount !== undefined) return serviceAccount;
+  serviceAccount = parseServiceAccount(SERVICE_ACCOUNT_RAW);
+  adminError = serviceAccount
+    ? null
+    : 'FIREBASE_SERVICE_ACCOUNT_JSON is missing, or does not contain project_id, private_key and client_email.';
+  return serviceAccount;
 }
 
 /* ------------------------------------------------------------------ */
@@ -268,11 +415,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
-  if (!await getAdminApp()) {
+  if (!getServiceAccount()) {
     send(res, 501, {
       error: 'firebase_admin_not_configured',
       message:
-        `${adminError ?? 'The Firebase Admin credential is unavailable.'} ` +
+        `${adminError ?? 'The Firebase service account is unavailable.'} ` +
         'It must be the full service-account JSON on one line, or base64: prefixed. ' +
         'Until it is set, visitors can sign in to Clerk and browse the library, but writes ' +
         'that require Firestore authentication will be rejected.',
@@ -286,10 +433,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
+  const clerk = await loadSdk();
+  if (!clerk) {
+    send(res, 501, {
+      error: 'clerk_sdk_unavailable',
+      message: sdkError ?? 'The Clerk server SDK is unavailable.',
+    });
+    return;
+  }
+
   /* Verify the Clerk session. This is the whole security of the endpoint. */
   let claims: { sub?: string; email?: string; name?: string; azp?: string };
   try {
-    claims = (await sdk!.clerk.verifyToken(sessionToken, {
+    claims = (await clerk.verifyToken(sessionToken, {
       secretKey: CLERK_SECRET_KEY,
       ...(AUTHORIZED_PARTIES.length ? { authorizedParties: AUTHORIZED_PARTIES } : {}),
     })) as { sub?: string; email?: string; name?: string; azp?: string };
@@ -308,19 +464,29 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   }
 
   try {
-    const customToken = await sdk!.auth.getAuth((await getAdminApp())!).createCustomToken(uid, {
-      // Claims are hints for the client UI only. Firestore rules must never
-      // trust them — `request.auth.token.email_verified` can be forged by
-      // anyone holding an Admin credential, which is not the threat model
-      // here, but the rules do not rely on these regardless.
-      provider: 'clerk',
-      email: typeof claims.email === 'string' ? claims.email : undefined,
-      name: typeof claims.name === 'string' ? claims.name : undefined,
+    const customToken = mintFirebaseCustomToken({
+      serviceAccount: getServiceAccount()!,
+      uid,
+      claims: {
+        // Hints for the client UI, plus the marker Firestore rules look for
+        // (`provider == 'clerk'`) to accept a signed-in person. The rules do
+        // not trust anything else in here.
+        provider: 'clerk',
+        email: typeof claims.email === 'string' ? claims.email : undefined,
+        name: typeof claims.name === 'string' ? claims.name : undefined,
+      },
     });
 
     send(res, 200, { token: customToken, uid });
-  } catch {
-    send(res, 502, { error: 'token_mint_failed' });
+  } catch (error) {
+    // Almost always a mangled private key: logged for the operator, and named
+    // in the response, so it is never another silent 502.
+    console.error('[clerk-firebase-token] minting failed', error);
+    send(res, 502, {
+      error: 'token_mint_failed',
+      message:
+        'The service account could not sign a token. Check that FIREBASE_SERVICE_ACCOUNT_JSON was not truncated.',
+    });
   }
 }
 
