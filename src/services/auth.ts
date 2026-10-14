@@ -167,6 +167,7 @@ export type ExchangeFailure =
   | 'no-session'
   | 'endpoint-missing'
   | 'server-misconfigured'
+  | 'method-rejected'
   | 'unauthorized'
   | 'server-error'
   | 'network';
@@ -214,6 +215,11 @@ export async function exchangeClerkSessionForFirebase(
     if (response.status === 404) return { ok: false, reason: 'endpoint-missing' };
     if (response.status === 401 || response.status === 403) return { ok: false, reason: 'unauthorized' };
     if (response.status === 501) return { ok: false, reason: 'server-misconfigured' };
+    // 405 means the function is alive but refused the method — almost always
+    // something rewriting the request (a redirect that turns POST into GET,
+    // or a proxy in front of it) rather than anything in this app, which
+    // only ever sends POST.
+    if (response.status === 405) return { ok: false, reason: 'method-rejected' };
     if (!response.ok) return { ok: false, reason: 'server-error' };
 
     const payload = (await response.json()) as { token?: unknown; error?: unknown };

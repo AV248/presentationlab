@@ -266,9 +266,18 @@ export async function probeServerEnv(): Promise<ServerProbe> {
       };
     }
 
-    if (response.status === 405 && code === 'method_not_allowed') {
-      // Only reachable if something in front of the function rejects POSTs.
-      return { reachable: true, ok: false, label: 'Rejected the probe', detail: 'The endpoint refused a POST request.', missing: [] };
+    if (response.status === 405) {
+      // Reachable only if something in front of the function turns POSTs into
+      // GETs — the app itself never sends anything else.
+      return {
+        reachable: true,
+        ok: false,
+        label: 'Rejected the method',
+        detail:
+          payload.message ??
+          'The endpoint refused a POST. Something in front of the function is rewriting the request.',
+        missing: [],
+      };
     }
 
     if (!response.ok && !payload.error) {
