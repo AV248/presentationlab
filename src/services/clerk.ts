@@ -187,6 +187,8 @@ interface ClerkHandlers {
   updateUsername?: (username: string) => Promise<void>;
   /** The current Clerk session token, for calls to our own API. */
   getSessionToken?: () => Promise<string | null>;
+  /** Attempt the Clerk → Firebase token exchange again. */
+  retryExchange?: () => Promise<boolean>;
 }
 
 let handlers: ClerkHandlers | null = null;
@@ -214,6 +216,16 @@ export async function clerkUpdateUsername(username: string): Promise<boolean> {
   if (!handlers?.updateUsername) return false;
   await handlers.updateUsername(username);
   return true;
+}
+
+/** Ask for another Clerk → Firebase token exchange. False if not mounted. */
+export async function retryCloudSession(): Promise<boolean> {
+  if (!handlers?.retryExchange) return false;
+  try {
+    return await handlers.retryExchange();
+  } catch {
+    return false;
+  }
 }
 
 /** The Clerk session token, or null when signed out / Clerk not mounted. */

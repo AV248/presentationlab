@@ -45,6 +45,34 @@ interface ClerkUserLike {
   primaryEmailAddress: { emailAddress: string } | null;
 }
 
+/**
+ * Record the handle a person already has in Clerk as theirs on the site.
+ *
+ * A username set in Clerk's Manage Account is not yet an address here: the
+ * site's address book is `handles/{username}`. Doing this automatically means
+ * the sidebar shows @name — instead of asking for what they just gave — and
+ * that their page exists the moment they sign in. Silent by design: if the
+ * handle belongs to somebody else, or the cloud is not reachable, the Claim
+ * page explains it.
+ */
+async function claimClerkHandle(authUser: AuthUser) {
+  const clerkUsername = authUser.username;
+  if (!clerkUsername) return;
+  if (useProfile.getState().username) return;
+  try {
+    const { autoClaimUsername } = await import('../services/profiles');
+    const result = await autoClaimUsername(authUser.uid, clerkUsername, authUser.displayName ?? undefined);
+    if (!result.ok) return;
+    const current = useProfile.getState();
+    useProfile.setState({
+      username: result.username,
+      displayName: current.displayName || authUser.displayName || result.username,
+    });
+  } catch {
+    /* a claim is a convenience; /claim remains the explicit path */
+  }
+}
+
 function mapClerkUser(user: ClerkUserLike): AuthUser {
   return {
     uid: user.id,
@@ -107,14 +135,17 @@ function ClerkAuthBridge() {
   // a token each time.
   const latest = useRef({ user, getToken });
   const warned = useRef(false);
+  const retryExchange = useRef<(() => Promise<boolean>) | null>(null);
   useEffect(() => {
     latest.current = { user, getToken };
   }, [user, getToken]);
 
-  // Give the store a way to sign out from outside React (sidebar, palette).
+  // Give the store a way to sign out from outside React (sidebar, palette),
+  // and the pages a way to ask for another token exchange.
   useEffect(() => {
     registerClerkHandlers({
       signOut: () => clerk.signOut(),
+      retryExchange: () => retryExchange.current?.() ?? Promise.resolve(false),
       // Needed by /claim: our server sets the username with the secret key,
       // which is the only path that works while Clerk restricts changes.
       getSessionToken: () => latest.current.getToken(),
@@ -220,11 +251,20 @@ function ClerkAuthBridge() {
       } catch { /* steering is a courtesy, never a blocker */ }
     }
 
-    void exchangeClerkSessionForFirebase(clerkUser.id, () => latest.current.getToken()).then(
-      (outcome) => {
+    const runExchange = () =>
+      exchangeClerkSessionForFirebase(clerkUser.id, () => latest.current.getToken()).then((outcome) => {
         useAuth.getState().setBridge(outcome);
-      },
-    );
+        // Only now can Firestore be written to, so only now can the handle
+        // the person already owns in Clerk be recorded as theirs here.
+        if (outcome.ok) void claimClerkHandle(authUser);
+        return outcome.ok;
+      });
+
+    void runExchange();
+
+    // The UI may ask for another attempt (a claim that failed earlier, a
+    // session that was established after the page loaded).
+    retryExchange.current = runExchange;
   }, [isLoaded, isSignedIn, userId]);
 
   return null;

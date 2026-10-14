@@ -24,6 +24,7 @@ import { useUi } from '../store/ui';
 import { useSettings } from '../store/settings';
 import { festivalById } from '../data/festivals';
 import { useProfile } from '../store/profile';
+import { normalizeUsername } from '../lib/identity';
 import { fetchSiteFestival, SUPPORT_EMAIL, SUPPORT_URL } from '../services/profiles';
 import { useCloud } from '../store/cloud';
 import { useAuth } from '../store/auth';
@@ -361,7 +362,24 @@ function HandleLink() {
   const username = useProfile((s) => s.username);
   const user = useAuth((s) => s.user);
   if (!user) return null;
-  return username
-    ? <NavLink className="pb-navlink" to={`/${username}`}><span className="pb-navlink-label">@{username} — your page</span></NavLink>
-    : <NavLink className="pb-navlink" to="/claim"><span className="pb-navlink-label">Claim your @username</span></NavLink>;
+
+  // Claimed: the person's own page.
+  if (username) {
+    return (
+      <NavLink className="pb-navlink" to={`/${username}`}>
+        <span className="pb-navlink-label">@{username} — your page</span>
+      </NavLink>
+    );
+  }
+
+  // A username set in Clerk but not yet recorded here is a step *in
+  // progress*, not a missing one — the label says which it is.
+  const pending = normalizeUsername(user.username ?? '');
+  return (
+    <NavLink className="pb-navlink" to="/claim">
+      <span className="pb-navlink-label">
+        {pending ? `Finish claiming @${pending}` : 'Claim your @username'}
+      </span>
+    </NavLink>
+  );
 }

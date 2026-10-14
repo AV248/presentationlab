@@ -29,7 +29,33 @@ app is built to make changing it impossible rather than merely discouraged.
    the stored `uid`), and `claimUsername()` refuses a second, different
    username for the same account.
 
-## How claiming works
+## A username set in Clerk is claimed automatically
+
+Setting a username in Clerk's Manage Account is not the same as owning the
+address here: the site's address book is `handles/{username}`. So on every
+sign-in, once the cloud session is up, the app records the Clerk username as
+the person's handle — creating `handles/{username}` if it is free and
+mirroring the display name into `users/{uid}`. The sidebar then reads
+**@username — your page** instead of asking for something they already gave.
+
+It is deliberately quiet and safe:
+
+- **never steals** — a handle held by somebody else is reported, not taken
+  (the Claim page explains and keeps the tab);
+- **create-only** — an existing document of the person's own is left alone,
+  because the rules refuse an *update* by anyone but the owner, and that
+  refusal used to look like "Missing or insufficient permissions" on a retry;
+- **never blanks a profile** — display name is merged, never replacing a bio
+  or links somebody has already written;
+- **only when the cloud is reachable** — without a Firebase session there is
+  nothing to write, and the Claim page says which part of the environment is
+  missing rather than failing silently.
+
+If Clerk holds a name that is already taken on the site, the Claim page shows
+it pre-filled, marks it taken, and asks for a different name — Clerk keeps
+whatever is confirmed there.
+
+## The manual path, start to finish
 
 1. Someone signs in. If Clerk already holds a username (set in Manage Account,
    or by an administrator), `/claim` opens with the field **pre-filled**; the

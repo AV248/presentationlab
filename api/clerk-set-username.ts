@@ -46,12 +46,18 @@ const AUTHORIZED_PARTIES = (env.CLERK_AUTHORIZED_PARTIES ?? '')
   .filter(Boolean);
 
 /**
- * Username shape, mirroring src/lib/identity.ts: 3–30 characters, lowercase
- * letters, digits, hyphen and underscore, starting and ending with a letter
- * or digit. Kept in sync deliberately — if the client rule changes, change
- * this too, or a name the form accepts will be rejected here.
+ * Username shape, mirroring src/lib/identity.ts **and** the `handles` rule in
+ * firestore.rules: 3–24 characters, lowercase letters, digits and underscores,
+ * with no leading, trailing or doubled underscore. Kept in sync by hand — the
+ * three must agree or a name one layer accepts is refused by another.
  */
-const USERNAME_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{1,28}[a-z0-9])$/;
+function usernameProblem(raw: string): string | null {
+  if (raw.length < 3) return 'At least 3 characters.';
+  if (raw.length > 24) return 'At most 24 characters.';
+  if (!/^[a-z0-9_]+$/.test(raw)) return 'Letters, numbers and underscores only.';
+  if (/^_|_$/.test(raw) || raw.includes('__')) return 'Underscores cannot lead, trail or double up.';
+  return null;
+}
 
 /* ------------------------------------------------------------------ */
 /* SDK, loaded lazily                                                  */
@@ -204,11 +210,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     });
     return;
   }
-  if (!USERNAME_PATTERN.test(raw)) {
+  const shapeProblem = usernameProblem(raw);
+  if (shapeProblem) {
     send(res, 400, {
       error: 'username_invalid',
-      message:
-        'Usernames are 3–30 characters: lowercase letters, digits, hyphens and underscores, starting and ending with a letter or digit.',
+      message: `${shapeProblem} Usernames are 3–24 characters: lowercase letters, numbers and single underscores.`,
     });
     return;
   }
@@ -288,7 +294,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (codes.some((code) => code.includes('format') || code.includes('param_nil') || code.includes('invalid'))) {
       send(res, 400, {
         error: 'username_invalid',
-        message: 'Clerk rejected that username as invalid. Use 3–30 letters, digits, hyphens or underscores.',
+        message: 'Clerk rejected that username as invalid. Use 3–24 letters, numbers or single underscores.',
       });
       return;
     }
