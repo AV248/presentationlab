@@ -80,7 +80,28 @@ Three answers, three meanings:
 | --- | --- |
 | `405 method_not_allowed` | The function is deployed. Only POST is accepted; end-user traffic does this correctly. |
 | `401 missing_session_token` | Deployed **and configured** — everything is present, the request simply had no credentials. |
-| `501 clerk_not_configured` / `firebase_admin_not_configured` | Deployed but missing a server variable; the message names which one. |
+| `501 clerk_not_configured` | Deployed but `CLERK_SECRET_KEY` is absent; the message says so. |
+| `501 firebase_admin_not_configured`, message begins "…is missing, or does not contain…" | Deployed but `FIREBASE_SERVICE_ACCOUNT_JSON` is absent or malformed. Use the `base64:` form. |
+
+The code name `firebase_admin_not_configured` is kept for compatibility, but the
+endpoint no longer uses any Firebase SDK — it signs the custom token directly
+with Node's `crypto` (see "Why there is no Admin SDK" below). That removed a
+failure which looked exactly like a configuration problem: the old
+`firebase-admin` dependency reached an ESM-only package, and on a runtime whose
+CommonJS cannot `require()` an ES module every request answered 501 with
+*"Server SDKs failed to load: require() of ES Module …"*. If you ever see that
+message again, it is the dependency, not your variables.
+
+### Why there is no Admin SDK
+
+Minting a Firebase custom token is one RS256 JWT signed with the service
+account's private key. Node's own `crypto` does that, so
+`/api/clerk-firebase-token` needs no Firebase SDK — which is why it cannot be
+broken by one. `firebase-admin@14` requires Node 22 and pulls `jose@6` (ESM
+only) through `jwks-rsa`; depending on it made the endpoint's health a function
+of the host's module loader. `package.json` also pins
+`"engines": { "node": "22.x" }`, so the runtime matches what the remaining
+dependencies expect.
 
 To reproduce the site's own call from a terminal:
 

@@ -149,7 +149,7 @@ Notes:
 | `VITE_SITE_URL` | Canonical/OG/sitemap URLs point at the wrong origin |
 | `servingads` collection absent or empty | House ads only — no error, by design |
 | `CLERK_SECRET_KEY` | Sign-in works (Clerk is client-side) but `request.auth.uid` never exists, so Firestore refuses all writes |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | Same as above, plus `/api/clerk-firebase-token` answers `501 firebase_admin_not_configured` |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Same as above, plus `/api/clerk-firebase-token` answers `501 firebase_admin_not_configured` ("…is missing, or does not contain project_id, private_key and client_email"). A 501 whose message begins "The server SDKs could not be loaded" is a *packaging* problem, never a missing variable. |
 | `CLERK_AUTHORIZED_PARTIES` | The token endpoint refuses the exchange for origins it was not told about (401) |
 
 ## Deleting secrets does not delete data

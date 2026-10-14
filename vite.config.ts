@@ -91,7 +91,7 @@ function serverlessApi(root: string): Plugin {
             format: 'esm',
             platform: 'node',
             target: 'node20',
-            packages: 'external', // resolve firebase-admin / @clerk/backend at runtime
+            packages: 'external', // resolve @clerk/backend at runtime
             outfile,
             logLevel: 'error',
           });
