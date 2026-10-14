@@ -461,6 +461,15 @@ export function buildPages(): PageMeta[] {
     });
   }
 
+  /* /claim — prerendered so static hosts serve it instead of 404ing;
+     a workspace page, never indexed and never in the sitemap. */
+  pages.push({
+    path: '/claim',
+    title: `Claim your username · ${SITE_NAME}`,
+    description: 'Claim your unique Presentation Buddy username and set up your public page.',
+    type: 'website', priority: 0, changefreq: 'monthly', card: null, group: 'claim', jsonLd: [],
+  });
+
   /* 404 — prerendered so unknown paths still boot the app, never indexed */
   pages.push({
     path: '/404',
@@ -498,7 +507,7 @@ export function pageMetaFor(path: string): PageMeta | undefined {
 /** Sitemap excludes the 404 page only. */
 export function buildSitemapUrls(): { loc: string; priority: number; changefreq: string }[] {
   return buildPages()
-    .filter((page) => page.group !== '404')
+    .filter((page) => page.group !== '404' && page.group !== 'claim')
     .map((page) => ({
       loc: absoluteUrl(page.path),
       priority: page.priority,

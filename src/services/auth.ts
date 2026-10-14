@@ -8,6 +8,8 @@ export interface AuthUser {
   displayName: string | null;
   photoURL: string | null;
   providerId: string | null;
+  /** Clerk username, when the person has set one. The one source of truth. */
+  username?: string | null;
 }
 
 function toAuthUser(raw: Record<string, unknown> | null): AuthUser | null {
