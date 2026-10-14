@@ -1,11 +1,13 @@
 # How data is organised in Firestore (2.6.2)
 
-Two projects, on purpose: **data** (`reflectioncapturedthoughts`) holds
-people and their work; **ads** (`a-a-v-r-i-t`) holds only `servingads`
-(see docs/ADS.md). Deploy `firestore.rules` to the data project and
-`firestore.ads.rules` to the ads project.
+One project — `reflectioncapturedthoughts` — holds everything: people,
+their work, and the ads. Deploy `firestore.rules` to it and you are done.
 
-## Data project collections
+(Until 2.6.2 there was a second project for `servingads`. The separation it
+provided is now enforced by the rule on that collection instead: public read,
+role-holder write, and the web app holds no write path at all.)
+
+## Collections
 
 | Collection / doc | Holds | Written by |
 | --- | --- | --- |
@@ -18,6 +20,7 @@ people and their work; **ads** (`a-a-v-r-i-t`) holds only `servingads`
 | `bloggerblogs/{id}` | Open-mic notes | Signed-in posters |
 | `feedback/{id}` | **Central feedback**: `{ rating (1–5 int), text, uid|null, path, createdAt }`. Anyone may create; only admins may read | The feedback dialog (queued locally first, flushed when the cloud is reachable) |
 | `siteSettings/theme` | `{ festivalId, updatedAt }` — the owner-only festival layer | Owner, from Admin → Site theme |
+| `servingads/{id}` | Ad documents: `Title`, `Content`, `ImageURL`, `DescriptionPreview`, `RedirectURL`, `CTA`, `weight`, `active`. Read by everyone; written only by role-holders (in practice: the Firebase console) | Owner/admin |
 | `admins/{uid}` | Roles: `{ role: 'owner' | 'admin' }` | Owner only |
 | `sponsors/{id}` | Optional sponsor slots | Admins |
 | `admin/{id}` | Legacy v1 e-mail allow-list, read-only | Nobody (kept for compatibility) |

@@ -66,10 +66,93 @@ export const CLERK_ENABLED = Boolean(CLERK_PUBLISHABLE_KEY);
 export const CLERK_IS_LIVE = CLERK_PUBLISHABLE_KEY.startsWith('pk_live_');
 
 /**
+ * The Frontend API host this build actually talks to, decoded from the
+ * publishable key itself.
+ *
+ * A Clerk publishable key is the literal text `pk_test_` or `pk_live_`
+ * followed by the base64 of "<frontend-api-host>$". Decoding it here is the
+ * single fastest way to answer the question every "signed in but signed out"
+ * report comes down to: *which Clerk instance is this page really using?*
+ * A live site still holding a `pk_test_` key is talking to a development
+ * instance, whose session cookies live on a third-party domain — and browsers
+ * that block those make a completed sign-in evaporate. Printing the decoded
+ * host makes that visible instead of mysterious.
+ */
+export const CLERK_FRONTEND_API = (() => {
+  if (!CLERK_PUBLISHABLE_KEY) return '';
+  try {
+    if (typeof atob !== 'function') return '';
+    const body = CLERK_PUBLISHABLE_KEY.replace(/^pk_(test|live)_/, '');
+    const b64 = body.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    return atob(padded).replace(/\$$/, '');
+  } catch {
+    return '';
+  }
+})();
+
+/** Human label for the instance type, for diagnostics. */
+export const CLERK_INSTANCE = CLERK_IS_LIVE ? 'production (pk_live_)' : 'development (pk_test_)';
+
+/**
+ * Set just before leaving for a provider, cleared when a session arrives.
+ * If it is still there when Clerk says "signed out", the round trip came
+ * back empty — and the sign-in sheet says so in words instead of leaving
+ * the visitor wondering.
+ */
+export const SIGNIN_PENDING_KEY = 'pb.signin.pending';
+
+/**
  * Where Clerk sends people after they sign out. Relative, so it works on
  * preview deployments and the production domain alike.
  */
 export const CLERK_AFTER_SIGN_OUT_URL = '/';
+
+/**
+ * Where Clerk returns people when a redirect-based sign-in finishes.
+ * Prerendered (see src/data/routes.ts) so no static host can 404 the
+ * handshake, and never indexed.
+ */
+export const CLERK_SSO_CALLBACK_PATH = '/sso-callback';
+
+/** Clerk's error shapes vary by version; read whichever one arrived. */
+interface ClerkishError {
+  code?: string;
+  message?: string;
+  longMessage?: string;
+  errors?: { code?: string; message?: string; longMessage?: string }[];
+}
+
+/** Codes we can explain better than Clerk can, in this app's own words. */
+const AUTH_HINTS: Record<string, string> = {
+  oauth_not_enabled: 'That sign-in method is not switched on yet — use Continue instead.',
+  strategy_for_user_invalid: 'That sign-in method is not available for this account — use Continue instead.',
+  external_account_not_found: 'No account here uses that provider yet — create one first.',
+  oauth_account_not_found: 'That provider is not linked to an account here yet — create one first.',
+  session_exists: 'You are already signed in.',
+  form_identifier_not_found: 'No account matches that address — create one instead.',
+  form_password_incorrect: 'That password does not match. If you signed up with Google or Microsoft, use that button instead.',
+  verification_expired: 'That code expired — request a fresh one.',
+};
+
+/**
+ * One sentence a person can act on. Clerk's `longMessage` is good when it is
+ * ours to show; for the handful of codes whose text assumes a developer, we
+ * say something friendlier.
+ */
+export function clerkAuthMessage(error: unknown): string {
+  const detail = error as ClerkishError | null;
+  const first = detail?.errors?.[0];
+  const code = first?.code ?? detail?.code ?? '';
+  if (code && AUTH_HINTS[code]) return AUTH_HINTS[code];
+  return (
+    first?.longMessage ??
+    first?.message ??
+    detail?.longMessage ??
+    detail?.message ??
+    'Sign-in did not start. Please try again — or use Continue instead.'
+  );
+}
 
 /** How long to wait for the token exchange before giving up on it. */
 export const TOKEN_EXCHANGE_TIMEOUT_MS = 15_000;

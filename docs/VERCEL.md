@@ -76,13 +76,6 @@ here is genuinely public by design.
 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | `331335730832` | |
 | `VITE_FIREBASE_APP_ID` | `1:331335730832:web:731df65bd40f9646adfa15` | |
 | `VITE_FIREBASE_MEASUREMENT_ID` | `G-7NXNZDNDRE` | |
-| `VITE_ADS_FIREBASE_API_KEY` | `AIza…` | Ads project (`a-a-v-r-i-t`). |
-| `VITE_ADS_FIREBASE_AUTH_DOMAIN` | `a-a-v-r-i-t.firebaseapp.com` | |
-| `VITE_ADS_FIREBASE_PROJECT_ID` | `a-a-v-r-i-t` | |
-| `VITE_ADS_FIREBASE_STORAGE_BUCKET` | `a-a-v-r-i-t.firebasestorage.app` | |
-| `VITE_ADS_FIREBASE_MESSAGING_SENDER_ID` | `633500686388` | |
-| `VITE_ADS_FIREBASE_APP_ID` | `1:633500686388:web:61424b21a66487ac1d9261` | |
-| `VITE_ADS_FIREBASE_MEASUREMENT_ID` | `G-KW4GG09TBQ` | |
 
 > **Firebase web config values are not secrets.** They identify the project in
 > the browser; they cannot read data on their own. What actually protects your
@@ -177,27 +170,21 @@ sign-in is a very common way to accidentally give the internet write access.
 **The catch-all at the bottom denies everything unnamed**, which is what makes
 a typo in a collection name fail closed rather than open.
 
-### Ads project — `a-a-v-r-i-t`
+### `servingads` — ad documents
 
-File: `firestore.ads.rules`
-
-```bash
-firebase use a-a-v-r-i-t
-firebase deploy --only firestore:rules
-```
+No separate deploy: the rule lives in `firestore.rules`, which you already
+push to the data project.
 
 ```
 match /servingads/{adId} {
   allow read: if true;                        // every visitor sees the ads
-  allow create, update, delete: if false;     // no writes from the web, ever
-}
-match /{document=**} {
-  allow read, write: if false;                // default closed
+  allow write: if isAdmin();                  // never the web app
 }
 ```
 
-That is the whole file. This app holds **no write credential** for this
-project, so a bug or a compromised key in the main app cannot alter ad
+The web app performs no write to this collection at all — ads are managed in
+the Firebase console, which bypasses rules by design. So a bug or a
+compromised key in the main app cannot alter ad
 content, and an ad operator's mistake cannot reach presentations or profiles.
 
 ### The `servingads` document shape

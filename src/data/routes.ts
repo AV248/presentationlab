@@ -470,6 +470,15 @@ export function buildPages(): PageMeta[] {
     type: 'website', priority: 0, changefreq: 'monthly', card: null, group: 'claim', jsonLd: [],
   });
 
+  /* /sso-callback — Clerk returns here mid-sign-in. Prerendered so no
+     static host can 404 the handshake, and never indexed. */
+  pages.push({
+    path: '/sso-callback',
+    title: `Finishing sign-in · ${SITE_NAME}`,
+    description: 'Completing sign-in with Clerk.',
+    type: 'website', priority: 0, changefreq: 'monthly', card: null, group: 'auth', jsonLd: [],
+  });
+
   /* 404 — prerendered so unknown paths still boot the app, never indexed */
   pages.push({
     path: '/404',
@@ -487,6 +496,9 @@ export function buildPages(): PageMeta[] {
 }
 
 /** Pages that receive a share card should equal 32 (checked by the build). */
+/** Groups that exist as pages but must never appear in the sitemap. */
+const HIDDEN_FROM_SITEMAP = new Set(['404', 'claim', 'auth']);
+
 export function buildCardPages(): { path: string; card: string; title: string; description: string; group: string }[] {
   return buildPages()
     .filter((page) => page.card !== null)
@@ -507,7 +519,7 @@ export function pageMetaFor(path: string): PageMeta | undefined {
 /** Sitemap excludes the 404 page only. */
 export function buildSitemapUrls(): { loc: string; priority: number; changefreq: string }[] {
   return buildPages()
-    .filter((page) => page.group !== '404' && page.group !== 'claim')
+    .filter((page) => !HIDDEN_FROM_SITEMAP.has(page.group))
     .map((page) => ({
       loc: absoluteUrl(page.path),
       priority: page.priority,
