@@ -94,29 +94,51 @@ function HandleWork({ username, work }: { username: string; work: { id: string; 
 }
 function NotFoundHandle({ username, what }: { username: string; what?: string }) { return (<div className="pb-panel" style={{ padding:36, textAlign:'center' }}><h2 style={{ marginBottom:8 }}>{what ? 'That speech is not here' : 'No one holds this handle yet'}</h2><p className="pb-muted" style={{ marginBottom:16 }}>@{username} {what ? 'has not published it at this address.' : 'is free. If it is yours, claim it before someone else climbs with it.'}</p><Link to="/claim" className="pb-btn pb-btn-primary">Claim a username</Link></div>); }
 
-/** /claim — choose a unique username, add bio & signature. Login required;
- *  username optional in Clerk, so it is claimed here, anytime. */
+/** /claim — the username lives in Clerk; this page claims it for the site.
+ *  • Username set in Clerk's Manage Account → arrives here pre-filled.
+ *  • Username typed here → written back into Clerk (Manage Account shows it).
+ *  • One username per user, forever: once claimed it can never be changed,
+ *    here, in Clerk sync, or in Firestore (claimUsername enforces it). */
 export function ClaimPage() {
   usePageMeta('Your username', { robots: 'noindex, follow' });
   const user = useAuth((s) => s.user); const gate = useGate(); const toast = useUi((s) => s.toast);
   const me = useProfile(); const set = useProfile((s) => s.set); const navigate = useNavigate();
-  const [form, setForm] = useState({ username: me.username, displayName: me.displayName, bio: me.bio, location: me.location, website: me.website, signature: me.signature });
+  const clerkUsername = normalizeUsername(user?.username ?? '');
+  const claimed = me.username || '';
+  // What the field starts with: the claimed name, else Clerk's, else blank.
+  const [form, setForm] = useState({ username: claimed || clerkUsername || me.username, displayName: me.displayName, bio: me.bio, location: me.location, website: me.website, signature: me.signature });
   const [state, setState] = useState<'idle'|'checking'|'free'|'taken'|'invalid'>('idle'); const [busy, setBusy] = useState(false);
   const v = validateUsername(form.username || '___');
-  useEffect(() => { if (!form.username) { setState('idle'); return undefined; } const vv = validateUsername(form.username); if (!vv.ok) { setState('invalid'); return undefined; } setState('checking'); const t = window.setTimeout(() => { void isUsernameAvailable(form.username, user?.uid).then((ok) => setState(ok ? 'free' : 'taken')); }, 400); return () => window.clearTimeout(t); }, [form.username, user?.uid]);
+  // Clerk username appearing after mount (set in Manage Account) fills the field.
+  useEffect(() => { if (!claimed && clerkUsername) setForm((f) => ({ ...f, username: f.username || clerkUsername })); }, [claimed, clerkUsername]);
+  useEffect(() => { if (claimed || !form.username) { setState('idle'); return undefined; } const vv = validateUsername(form.username); if (!vv.ok) { setState('invalid'); return undefined; } setState('checking'); const tm = window.setTimeout(() => { void isUsernameAvailable(form.username, user?.uid).then((ok) => setState(ok ? 'free' : 'taken')); }, 400); return () => window.clearTimeout(tm); }, [form.username, user?.uid, claimed]);
   const save = () => gate(async () => {
     setBusy(true);
-    try { const username = await claimUsername(user!.uid, form.username, form); set({ ...form, username }); toast(`@${username} is yours — ${shortUrl(`/${username}`)}`, 'success'); navigate(`/${username}`); }
+    try {
+      const username = normalizeUsername(claimed || form.username);
+      // 1) Clerk first — it is the username's home. No-ops if already set there
+      //    (and refuses, in the bridge, to ever change an existing one).
+      if (user?.providerId === 'clerk' && !clerkUsername) {
+        const { clerkUpdateUsername } = await import('../services/clerk');
+        await clerkUpdateUsername(username);
+      }
+      // 2) Firestore claim: handles/{username} lock + users/{uid} profile.
+      const finalName = await claimUsername(user!.uid, username, form);
+      set({ ...form, username: finalName });
+      toast(`@${finalName} is yours — ${shortUrl(`/${finalName}`)}`, 'success');
+      navigate(`/${finalName}`);
+    }
     catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
   }, 'Sign in first — a username has to belong to someone.');
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'var(--l-rhythm)', maxInlineSize:720 }}>
       <section className="pb-panel anim-enter" style={{ padding:'clamp(20px,4vw,32px)' }}>
         <span className="pb-eyebrow"><ShieldCheck size={12} /> Your handle</span>
-        <h1 style={{ fontSize:'clamp(1.6rem,3.5vw,2.2rem)', margin:'8px 0' }}>Claim your corner of the stage</h1>
-        <p className="pb-soft" style={{ lineHeight:1.65 }}>One unique username. Everything you publish lives under it: <strong className="pb-mono">{shortUrl(`/${normalizeUsername(form.username || 'you')}/your-speech`)}</strong>. The path after your name is yours alone, shaped only by your own work.</p>
+        <h1 style={{ fontSize:'clamp(1.6rem,3.5vw,2.2rem)', margin:'8px 0' }}>{claimed ? `@${claimed} is yours` : 'Claim your corner of the stage'}</h1>
+        <p className="pb-soft" style={{ lineHeight:1.65 }}>One unique username per person — and it can never be changed, so choose the name you want to be introduced by. Everything you publish lives under it: <strong className="pb-mono">{shortUrl(`/${normalizeUsername(claimed || form.username || 'you')}/your-speech`)}</strong>. The path after your name is yours alone, shaped only by your own work.</p>
         <div style={{ display:'grid', gap:12, marginTop:18 }}>
-          <div><label className="pb-label" htmlFor="claim-username">Username *</label><div style={{display:'flex',alignItems:'center',gap:8}}><span className="pb-muted">pb.devs.surf/</span><input id="claim-username" className="pb-input" value={form.username} onChange={(e)=>setForm({...form,username:normalizeUsername(e.target.value)})} placeholder="yourname" autoComplete="off" /></div><p className="pb-muted" style={{fontSize:'0.78rem',marginTop:5}}>{state==='checking'&&'Checking…'} {state==='free'&&'✓ Available'} {state==='taken'&&'✗ Already taken'} {state==='invalid'&& (form.username ? v.error : '')}</p></div>
+          <div><label className="pb-label" htmlFor="claim-username">Username *</label><div style={{display:'flex',alignItems:'center',gap:8}}><span className="pb-muted">pb.devs.surf/</span><input id="claim-username" className="pb-input" value={claimed || form.username} disabled={Boolean(claimed)} readOnly={Boolean(claimed)} onChange={(e)=>setForm({...form,username:normalizeUsername(e.target.value)})} placeholder="yourname" autoComplete="off" /></div>
+          <p className="pb-muted" style={{fontSize:'0.78rem',marginTop:5}}>{claimed ? 'Locked forever — usernames cannot be changed. The details below can be edited any time.' : clerkUsername && normalizeUsername(form.username) === clerkUsername ? '✓ Set in your Clerk account — confirm it here and it becomes your address.' : state==='checking' ? 'Checking…' : state==='free' ? '✓ Available — claiming also sets it in your Clerk account.' : state==='taken' ? '✗ Already taken' : state==='invalid' && form.username ? v.error : 'Claiming sets this same username in Clerk (Manage Account).'}</p></div>
           <div><label className="pb-label" htmlFor="claim-name">Display name</label><input id="claim-name" className="pb-input" value={form.displayName} onChange={(e)=>setForm({...form,displayName:e.target.value})} placeholder="What the room should call you" /></div>
           <div><label className="pb-label" htmlFor="claim-bio">Bio</label><textarea id="claim-bio" className="pb-textarea" rows={3} value={form.bio} onChange={(e)=>setForm({...form,bio:e.target.value})} placeholder="What you speak about, and why it matters to you…" /></div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:12}}>
@@ -124,7 +146,7 @@ export function ClaimPage() {
             <div><label className="pb-label" htmlFor="claim-web">Website</label><input id="claim-web" className="pb-input" value={form.website} onChange={(e)=>setForm({...form,website:e.target.value})} placeholder="yoursite.com" /></div>
           </div>
           <div><label className="pb-label" htmlFor="claim-sig">Signature</label><input id="claim-sig" className="pb-input" value={form.signature} onChange={(e)=>setForm({...form,signature:e.target.value})} placeholder="The line you sign your speeches with" /></div>
-          <div><button type="button" className="pb-btn pb-btn-primary pb-btn-lg" disabled={busy || state==='taken' || state==='invalid' || !form.username} onClick={save}><Feather size={16} /> {me.username ? 'Save profile' : 'Claim my username'}</button></div>
+          <div><button type="button" className="pb-btn pb-btn-primary pb-btn-lg" disabled={busy || state==='taken' || state==='invalid' || !(claimed || form.username)} onClick={save}><Feather size={16} /> {claimed ? 'Save the details I share' : clerkUsername ? 'Confirm & claim my username' : 'Claim my username'}</button></div>
         </div>
       </section>
     </div>

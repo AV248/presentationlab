@@ -158,6 +158,7 @@ const safeImageUrl = safeUrl;
 /* ------------------------------------------------------------------ */
 
 function mapAd(id: string, data: Record<string, unknown>): Ad | null {
+  if (data.active === false || data.Active === false) return null;
   // The collection is capitalised; the lowercase spellings are accepted so
   // that a document written by some other tool still renders.
   const title = str(data.Title ?? data.title);

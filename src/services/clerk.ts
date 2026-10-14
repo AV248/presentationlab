@@ -100,6 +100,8 @@ export const CLERK_LOAD_TIMEOUT_MS = 10_000;
  */
 interface ClerkHandlers {
   signOut: () => Promise<void>;
+  /** Sets the Clerk username — Clerk is where the username lives. */
+  updateUsername?: (username: string) => Promise<void>;
 }
 
 let handlers: ClerkHandlers | null = null;
@@ -121,3 +123,10 @@ export async function clerkSignOut(): Promise<void> {
 }
 
 export const clerkIsMounted = () => handlers !== null;
+
+/** Set the username in Clerk (Manage Account shows the same value). */
+export async function clerkUpdateUsername(username: string): Promise<boolean> {
+  if (!handlers?.updateUsername) return false;
+  await handlers.updateUsername(username);
+  return true;
+}

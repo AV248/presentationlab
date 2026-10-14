@@ -29,9 +29,30 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { verifyToken } from '@clerk/backend';
-import { cert, getApps, initializeApp, type App, type ServiceAccount } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
+import type { App, ServiceAccount } from 'firebase-admin/app';
+
+// The Clerk and Firebase Admin SDKs are imported lazily, inside the handler.
+// A static import that fails on the host (wrong platform build, missing
+// optional dependency) takes the whole function down as an unexplained 500
+// before any of our error handling runs. Lazy imports turn that into a
+// named, actionable 501 instead.
+type ClerkModule = typeof import('@clerk/backend');
+type AdminAppModule = typeof import('firebase-admin/app');
+type AdminAuthModule = typeof import('firebase-admin/auth');
+let sdk: { clerk: ClerkModule; app: AdminAppModule; auth: AdminAuthModule } | null = null;
+let sdkError: string | null = null;
+async function loadSdk() {
+  if (sdk || sdkError) return sdk;
+  try {
+    const [clerk, app, auth] = await Promise.all([
+      import('@clerk/backend'), import('firebase-admin/app'), import('firebase-admin/auth'),
+    ]);
+    sdk = { clerk, app, auth };
+  } catch (error) {
+    sdkError = `Server SDKs failed to load: ${(error as Error).message}`;
+  }
+  return sdk;
+}
 
 /* ------------------------------------------------------------------ */
 /* Configuration                                                        */
@@ -113,8 +134,9 @@ let adminApp: App | null | undefined;
 /** Why the Admin SDK is unavailable, in words safe to send to a client. */
 let adminError: string | null = null;
 
-function getAdminApp(): App | null {
+async function getAdminApp(): Promise<App | null> {
   if (adminApp !== undefined) return adminApp;
+  if (!await loadSdk()) { adminApp = null; adminError = sdkError; return null; }
 
   const serviceAccount = parseServiceAccount(SERVICE_ACCOUNT_RAW);
   if (!serviceAccount) {
@@ -125,6 +147,7 @@ function getAdminApp(): App | null {
   }
 
   try {
+    const { getApps, initializeApp, cert } = sdk!.app;
     adminApp = getApps().length
       ? (getApps()[0] as App)
       : initializeApp({ credential: cert(serviceAccount) });
@@ -239,7 +262,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
-  if (!getAdminApp()) {
+  if (!await getAdminApp()) {
     send(res, 501, {
       error: 'firebase_admin_not_configured',
       message:
@@ -260,7 +283,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   /* Verify the Clerk session. This is the whole security of the endpoint. */
   let claims: { sub?: string; email?: string; name?: string; azp?: string };
   try {
-    claims = (await verifyToken(sessionToken, {
+    claims = (await sdk!.clerk.verifyToken(sessionToken, {
       secretKey: CLERK_SECRET_KEY,
       ...(AUTHORIZED_PARTIES.length ? { authorizedParties: AUTHORIZED_PARTIES } : {}),
     })) as { sub?: string; email?: string; name?: string; azp?: string };
@@ -279,7 +302,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   }
 
   try {
-    const customToken = await getAuth(getAdminApp()!).createCustomToken(uid, {
+    const customToken = await sdk!.auth.getAuth((await getAdminApp())!).createCustomToken(uid, {
       // Claims are hints for the client UI only. Firestore rules must never
       // trust them — `request.auth.token.email_verified` can be forged by
       // anyone holding an Admin credential, which is not the threat model

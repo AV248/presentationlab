@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Star, X } from 'lucide-react';
 import { useAuth } from '../store/auth';
 import { useUi } from '../store/ui';
-import { submitFeedback } from '../services/profiles';
+import { submitFeedback, flushFeedbackQueue } from '../services/profiles';
 const KEY = 'pb.feedback.last';
 /** Central feedback (2.6): appears at a random, unhurried moment — never in
  * the first minutes, never more than once a fortnight, never mid-rehearsal.
@@ -13,6 +13,7 @@ export function FeedbackDialog() {
   const [rating, setRating] = useState(0); const [hover, setHover] = useState(0);
   const [text, setText] = useState(''); const [sent, setSent] = useState(false);
   const user = useAuth((s) => s.user); const toast = useUi((s) => s.toast);
+  useEffect(() => { void flushFeedbackQueue(); }, []);
   useEffect(() => {
     let last = 0; try { last = Number(localStorage.getItem(KEY) ?? 0); } catch { /* ignore */ }
     if (Date.now() - last < 14 * 24 * 3600_000) return undefined;

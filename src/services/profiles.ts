@@ -12,6 +12,11 @@ export async function claimUsername(uid: string, raw: string, profile: Partial<P
   if (!FIREBASE_ENABLED) return v.username;
   const b = await fs(); if (!b) return v.username;
   const { fs: f, db } = b;
+  // One username per user, and it can never be changed.
+  const own = await fetchOwnProfile(uid);
+  if (own?.username && own.username !== v.username) {
+    throw new Error(`Your username is @${own.username} — usernames cannot be changed.`);
+  }
   const ref = f.doc(db, 'handles', v.username);
   const existing = await f.getDoc(ref);
   if (existing.exists() && str((existing.data() ?? {}).uid) !== uid) throw new Error('That username is already taken. Try another.');
@@ -32,6 +37,17 @@ export async function fetchProfile(username: string): Promise<PublicProfile | nu
     return { username, uid, displayName: str(d.displayName, username), bio: str(d.bio), location: str(d.location), website: str(d.website), signature: str(d.signature), createdAt: str(d.createdAt) };
   } catch { return null; }
 }
+export async function fetchOwnProfile(uid: string): Promise<PublicProfile | null> {
+  if (!FIREBASE_ENABLED) return null;
+  const b = await fs(); if (!b) return null;
+  try {
+    const u = await b.fs.getDoc(b.fs.doc(b.db, 'users', uid));
+    if (!u.exists()) return null;
+    const d = u.data() ?? {};
+    if (!str(d.username)) return null;
+    return { username: str(d.username), uid, displayName: str(d.displayName), bio: str(d.bio), location: str(d.location), website: str(d.website), signature: str(d.signature), createdAt: str(d.createdAt) };
+  } catch { return null; }
+}
 export async function isUsernameAvailable(raw: string, myUid?: string): Promise<boolean> {
   const v = validateUsername(raw); if (!v.ok) return false;
   if (!FIREBASE_ENABLED) return true;
@@ -46,6 +62,23 @@ export async function submitFeedback(uid: string | null, rating: number, text: s
   if (!FIREBASE_ENABLED) return 'local';
   const b = await fs(); if (!b) return 'local';
   try { await b.fs.addDoc(b.fs.collection(b.db, 'feedback'), { ...payload, createdAt: b.fs.serverTimestamp() }); return 'cloud'; } catch { return 'local'; }
+}
+let flushing = false;
+/** Deliver any feedback queued while offline/unconfigured. Called on app
+ * start and whenever the dialog opens, so nothing a user wrote is stranded. */
+export async function flushFeedbackQueue(): Promise<void> {
+  if (flushing || !FIREBASE_ENABLED) return;
+  let queue: Record<string, unknown>[] = [];
+  try { queue = JSON.parse(localStorage.getItem('pb.feedback.queue') ?? '[]') as Record<string, unknown>[]; } catch { return; }
+  if (!queue.length) return;
+  const b = await fs(); if (!b) return;
+  flushing = true;
+  try {
+    for (const item of queue) {
+      await b.fs.addDoc(b.fs.collection(b.db, 'feedback'), { rating: item.rating, text: item.text ?? '', uid: item.uid ?? null, path: item.path ?? '', clientAt: item.createdAt ?? null, createdAt: b.fs.serverTimestamp() });
+    }
+    localStorage.removeItem('pb.feedback.queue');
+  } catch { /* keep the queue for the next visit */ } finally { flushing = false; }
 }
 export async function fetchSiteFestival(): Promise<string | null> {
   if (!FIREBASE_ENABLED) return null;

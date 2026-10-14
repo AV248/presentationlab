@@ -22,6 +22,7 @@ import {
   type AuthUser,
 } from '../services/auth';
 import { useAuth } from '../store/auth';
+import { useProfile } from '../store/profile';
 
 /**
  * Authentication provider.
@@ -48,6 +49,7 @@ function mapClerkUser(user: ClerkUserLike): AuthUser {
     displayName: user.fullName ?? user.username ?? null,
     photoURL: user.imageUrl || null,
     providerId: 'clerk',
+    username: user.username ?? null,
   };
 }
 
@@ -107,7 +109,18 @@ function ClerkAuthBridge() {
 
   // Give the store a way to sign out from outside React (sidebar, palette).
   useEffect(() => {
-    registerClerkHandlers({ signOut: () => clerk.signOut() });
+    registerClerkHandlers({
+      signOut: () => clerk.signOut(),
+      updateUsername: async (username: string) => {
+        const current = latest.current.user;
+        if (!current) throw new Error('Clerk is still loading — try again in a moment.');
+        // One username per person, for life: never overwrite an existing one.
+        if (current.username && current.username.toLowerCase() !== username.toLowerCase()) {
+          throw new Error(`Your username is @${current.username} and cannot be changed.`);
+        }
+        if (!current.username) await current.update({ username });
+      },
+    });
     return () => registerClerkHandlers(null);
   }, [clerk]);
 
@@ -148,6 +161,39 @@ function ClerkAuthBridge() {
     store.setSession(authUser);
     // Mirror the profile so the leaderboard has a name to show. Best effort.
     ensureProfile(authUser);
+
+    // Restore an already-claimed handle from Firestore (users/{uid}) so the
+    // sidebar shows @username — not "Claim" — on every device.
+    void import('../services/profiles').then(({ fetchOwnProfile }) =>
+      fetchOwnProfile(authUser.uid).then((own) => {
+        if (!own?.username) return;
+        const current = useProfile.getState();
+        if (!current.username) {
+          useProfile.setState({
+            username: own.username,
+            displayName: own.displayName || current.displayName,
+            bio: own.bio || current.bio,
+            location: own.location || current.location,
+            website: own.website || current.website,
+            signature: own.signature || current.signature,
+          });
+        }
+      }),
+    ).catch(() => { /* local profile still applies */ });
+
+    // Username created in Clerk's Manage Account but not yet claimed here?
+    // Send them to /claim once per session, username already filled in.
+    if (authUser.username) {
+      try {
+        const claimed = useProfile.getState().username;
+        if (claimed.toLowerCase() !== authUser.username.toLowerCase()
+          && !sessionStorage.getItem('pb.clerk-username-steered')
+          && !window.location.pathname.startsWith('/claim')) {
+          sessionStorage.setItem('pb.clerk-username-steered', '1');
+          window.location.assign('/claim');
+        }
+      } catch { /* steering is a courtesy, never a blocker */ }
+    }
 
     void exchangeClerkSessionForFirebase(clerkUser.id, () => latest.current.getToken()).then(
       (outcome) => {
