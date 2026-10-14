@@ -3,9 +3,10 @@ import { loadAdsFirebase, ADS_ENABLED, ADS_COLLECTION } from './firebaseAds';
 /**
  * Sponsored slots.
  *
- * Ads are documents in the `servingads` collection of a SECOND Firebase
- * project (`a-a-v-r-i-t`), kept deliberately separate from the project that
- * holds presentations and user data. See src/services/firebaseAds.ts for why.
+ * Ads are documents in the `servingads` collection of the site's own Firebase
+ * project, readable by everyone and writable only by a role-holder (see
+ * firestore.rules). See src/services/firebaseAds.ts for why they are no longer
+ * in a project of their own.
  *
  * Document shape (capitalised, as the collection is written by another app):
  *
@@ -29,7 +30,7 @@ import { loadAdsFirebase, ADS_ENABLED, ADS_COLLECTION } from './firebaseAds';
  * dropped and the ad is skipped entirely. Titles and copy are rendered as
  * React text, never as HTML.
  *
- * The ads project is read-only from here. No write of any kind is attempted:
+ * This collection is read-only from here. No write of any kind is attempted:
  * not to record impressions, not to count clicks. Advertiser analytics belong
  * to the RedirectURL they control.
  *

@@ -19,6 +19,10 @@ from a second, separate Firebase project this app cannot write to**. Structured 
 widened — breadcrumbs on every page, `Article` on every speech, a `HowTo` on the rehearsal
 room — so the site can appear as more than a line of text in search results.
 
+> Sign-in trouble? **[docs/SIGNIN.md](docs/SIGNIN.md)** walks the four causes of
+> "it redirects back and I am not signed in". Usernames — who owns them, why
+> they cannot change — are in **[docs/USERNAMES.md](docs/USERNAMES.md)**.
+>
 > Deploying? **[docs/VERCEL.md](docs/VERCEL.md)** has every environment variable, the
 > Firestore rules for both projects, and the order to do things in.
 > If you are on nginx or Caddy instead, see **[docs/DEPLOY.md](docs/DEPLOY.md)**.
@@ -177,22 +181,22 @@ The app runs completely without Firebase. To switch on the shared library and co
 | `admins/{uid}` | Role documents: `owner` or `admin` |
 | `admin` | Legacy e-mail allow-list from v1 — read only, never written, no passwords |
 | `sponsors` | Optional sponsor slots shown before sponsor-supported speeches |
-| `servingads` | **Not in this project.** Ad documents — `Title`, `Content`, `ImageURL`, `DescriptionPreview`, `RedirectURL` — live in the separate ads project. See below. |
+| `servingads` | Ad documents — `Title`, `Content`, `ImageURL`, `DescriptionPreview`, `RedirectURL`. Public to read, role-holder to write. See `docs/ADS.md`. |
 
 Points follow the original rule and are computed from real counters:
 `points = likesReceived − floor(dislikesReceived / 3)`.
 
-### Two Firebase projects, on purpose
+### One Firebase project, one rules file
 
-| Project | Holds | This app can |
-| --- | --- | --- |
-| **Data** (`reflectioncapturedthoughts`) | presentations, profiles, reactions, roles | read and write, under `firestore.rules` |
-| **Ads** (`a-a-v-r-i-t`) | the `servingads` collection | **read only** — no write credential exists |
+Everything lives in `reflectioncapturedthoughts`: presentations, profiles, reactions, roles —
+and ads, in `servingads`. Public read, role-holder write, and the web app has no write path to
+them at all.
 
-Keeping ad content in its own project means a bug or a leaked credential in the main app
-cannot alter or spam the ads, and an ad operator's mistake cannot reach presentations or
-profiles. The ads project's rules are four lines: public read of `servingads`, everything else
-denied.
+Until 2.6.2 ads lived in a second project (`a-a-v-r-i-t`) so that a bug in the main app could
+not touch ad content. That isolation is now expressed as a rule rather than as an entire second
+project: it bought a smaller blast radius at the cost of seven more environment variables, a
+second rules file and a second console to get wrong — more machinery than one read-only
+collection justifies.
 
 Because `servingads` is world-readable and edited outside this codebase, every field is treated
 as untrusted input. `src/services/ads.ts` parses `ImageURL` and `RedirectURL` and requires

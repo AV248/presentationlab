@@ -3,8 +3,10 @@ rules_version = '2';
 // Presentation Buddy — Firestore security rules.
 //
 // THIS FILE IS FOR THE DATA PROJECT: `reflectioncapturedthoughts`
-// The ads project (`a-a-v-r-i-t`) has its own, much smaller file:
-// firestore.ads.rules.
+// It is the only project the site uses. Ad documents live here too, in
+// `servingads` — see the rule further down. (There used to be a second,
+// separate ads project; the separation that mattered is enforced by rules,
+// and one project means one rules file and one set of variables.)
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // HOW SIGN-IN REACHES THESE RULES
@@ -249,12 +251,26 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------------------
+    // Sponsored ads: one document per ad, read by every visitor (the slot is
+    // part of the public page), written only by a role-holder. In practice
+    // ads are managed from the Firebase console, which bypasses these rules;
+    // this rule is what guarantees the *web app* can never write one.
+    //
+    // Merged in from the former separate ads project: that project bought a
+    // smaller blast radius at the cost of a second rules file, a second set
+    // of environment variables and a second thing to misconfigure. Default
+    // deny plus this rule gives the same protection in one place.
+    // ------------------------------------------------------------------
+    match /servingads/{adId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------
     // Legacy local ad collection — NO LONGER USED.
     //
-    // Ads moved to the `servingads` collection in the separate ads project
-    // (see firestore.ads.rules). Nothing in the app reads or writes this
-    // one any more, so it is closed: allowing writes to a collection no
-    // code uses is pure attack surface.
+    // Nothing in the app reads or writes this one any more, so it is closed:
+    // allowing writes to a collection no code uses is pure attack surface.
     // ------------------------------------------------------------------
     match /ads/{adId} {
       allow read: if isAdmin();

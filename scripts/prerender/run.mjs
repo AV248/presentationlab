@@ -113,7 +113,7 @@ function buildHead(page) {
     ? `https://presentationbuddy.aavrit.dedyn.io/cards/${page.card}.png`
     : 'https://presentationbuddy.aavrit.dedyn.io/cards/presentation-buddy.png';
   const robots =
-    page.group === '404' || page.group === 'claim' ? 'noindex, follow' : 'index, follow, max-image-preview:large';
+    page.group === '404' || page.group === 'claim' || page.group === 'auth' ? 'noindex, follow' : 'index, follow, max-image-preview:large';
 
   let html = template;
   html = html.replace(/<title>[^<]*<\/title>/, `<title>${esc(page.title)}</title>`);

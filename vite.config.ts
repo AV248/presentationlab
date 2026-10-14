@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { build as esbuild } from 'esbuild';
@@ -54,6 +54,10 @@ function loadServerEnv(root: string) {
  * In production Vercel compiles these files into real serverless functions.
  * Running the identical handler locally is the difference between finding a
  * broken token exchange now versus after a deploy.
+ *
+ * Every file in api/ is served at /api/<name>, so adding an endpoint needs no
+ * change here — a request for an endpoint that does not exist falls through
+ * to the normal 404 handling.
  */
 function serverlessApi(root: string): Plugin {
   return {
@@ -63,18 +67,26 @@ function serverlessApi(root: string): Plugin {
       loadServerEnv(root);
 
       const outDir = resolve(root, 'node_modules/.pb-api');
-      const outfile = resolve(outDir, 'clerk-firebase-token.mjs');
 
       server.middlewares.use(async (req, res, next) => {
-        if (!req.url?.startsWith('/api/clerk-firebase-token')) {
+        const path = (req.url ?? '').split('?')[0] ?? '';
+        const match = /^\/api\/([a-z0-9-]+)\/?$/.exec(path);
+        if (!match) {
+          next();
+          return;
+        }
+
+        const entry = resolve(root, 'api', `${match[1]}.ts`);
+        if (!existsSync(entry)) {
           next();
           return;
         }
 
         try {
           await mkdir(outDir, { recursive: true });
+          const outfile = resolve(outDir, `${match[1]}.mjs`);
           await esbuild({
-            entryPoints: [resolve(root, 'api/clerk-firebase-token.ts')],
+            entryPoints: [entry],
             bundle: true,
             format: 'esm',
             platform: 'node',
@@ -84,12 +96,12 @@ function serverlessApi(root: string): Plugin {
             logLevel: 'error',
           });
 
-          // Cache-bust so edits to the handler are picked up on reload.
+          // Cache-bust so edits to a handler are picked up on reload.
           const mod = await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
           await mod.default(req, res);
         } catch (error) {
           server.config.logger.error(
-            `[api] clerk-firebase-token failed: ${(error as Error).message}`,
+            `[api] ${match[1]} failed: ${(error as Error).message}`,
           );
           if (!res.headersSent) {
             res.statusCode = 500;

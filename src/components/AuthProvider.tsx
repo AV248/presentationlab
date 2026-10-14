@@ -13,6 +13,9 @@ import {
   CLERK_AFTER_SIGN_OUT_URL,
   CLERK_ENABLED,
   CLERK_LOAD_TIMEOUT_MS,
+  CLERK_FRONTEND_API,
+  CLERK_INSTANCE,
+  SIGNIN_PENDING_KEY,
   registerClerkHandlers,
 } from '../services/clerk';
 import {
@@ -103,6 +106,7 @@ function ClerkAuthBridge() {
   // change — without it, the effect would re-run on every render and re-mint
   // a token each time.
   const latest = useRef({ user, getToken });
+  const warned = useRef(false);
   useEffect(() => {
     latest.current = { user, getToken };
   }, [user, getToken]);
@@ -111,6 +115,9 @@ function ClerkAuthBridge() {
   useEffect(() => {
     registerClerkHandlers({
       signOut: () => clerk.signOut(),
+      // Needed by /claim: our server sets the username with the secret key,
+      // which is the only path that works while Clerk restricts changes.
+      getSessionToken: () => latest.current.getToken(),
       updateUsername: async (username: string) => {
         const current = latest.current.user;
         if (!current) throw new Error('Clerk is still loading — try again in a moment.');
@@ -147,6 +154,21 @@ function ClerkAuthBridge() {
     const store = useAuth.getState();
 
     if (!isSignedIn || !userId) {
+      // A fresh pending marker plus "signed out" means the provider round
+      // trip came back without a session. The sign-in sheet reads the marker
+      // and explains; here we only leave a breadcrumb in the console, once.
+      try {
+        const at = Number(sessionStorage.getItem(SIGNIN_PENDING_KEY) ?? 0);
+        if (at && Date.now() - at < 15 * 60 * 1000 && !warned.current) {
+          warned.current = true;
+          console.warn('[pb] sign-in returned without a session', {
+            clerkInstance: CLERK_INSTANCE,
+            frontendApi: CLERK_FRONTEND_API || '(unknown)',
+            origin: window.location.origin,
+            elapsedMs: Date.now() - at,
+          });
+        }
+      } catch { /* private mode */ }
       store.setSession(null);
       // A Clerk sign-out must not leave a live Firebase session behind, or
       // Firestore would still accept writes from the previous person.
@@ -156,6 +178,9 @@ function ClerkAuthBridge() {
 
     const clerkUser = latest.current.user;
     if (!clerkUser) return;
+
+    // A session arrived: the pending marker has done its job.
+    try { sessionStorage.removeItem(SIGNIN_PENDING_KEY); } catch { /* private mode */ }
 
     const authUser = mapClerkUser(clerkUser);
     store.setSession(authUser);
@@ -240,6 +265,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <ClerkProvider
       publishableKey={CLERK_PUBLISHABLE_KEY}
       afterSignOutUrl={CLERK_AFTER_SIGN_OUT_URL}
+      // Deterministic landings: whatever a flow finishes with, people come
+      // back to the app root — never to a stale URL or a callback path.
+      signInFallbackRedirectUrl="/"
+      signUpFallbackRedirectUrl="/"
       appearance={appearance}
     >
       <ClerkAuthBridge />

@@ -18,6 +18,7 @@ import { fetchAllAds, type Ad } from '../services/ads';
 import { FESTIVALS } from '../data/festivals';
 import { fetchSiteFestival, setSiteFestival } from '../services/profiles';
 import { FIREBASE_ENABLED } from '../services/firebase';
+import { EnvCheckPanel } from '../components/EnvCheckPanel';
 import { ADS_ENABLED } from '../services/firebaseAds';
 import { formatCount } from '../lib/text';
 
@@ -28,7 +29,7 @@ import { formatCount } from '../lib/text';
  * already holds the 'admin' or 'owner' role in the admins collection.
  */
 
-type Tab = 'overview' | 'ads' | 'people' | 'content' | 'site';
+type Tab = 'overview' | 'ads' | 'people' | 'content' | 'site' | 'setup';
 
 
 export function AdminPage() {
@@ -184,6 +185,7 @@ export function AdminPage() {
             ['people', isOwner ? 'People & roles' : 'People'],
             ['content', 'Published content'],
             ['site', 'Site theme'],
+            ['setup', 'Setup & environment'],
           ] as [Tab, string][]
         ).map(([id, label]) => (
           <button
@@ -227,10 +229,9 @@ export function AdminPage() {
             </h2>
             <p className="pb-muted" style={{ fontSize: '0.8rem', lineHeight: 1.7, marginBottom: 10 }}>
               Sponsored cards are served from the <span className="pb-mono">servingads</span>{' '}
-              collection of a <strong>separate</strong> Firebase project (
-              <span className="pb-mono">a-a-v-r-i-t</span>). This app deliberately holds no write
-              credential for it, so this list is read-only — add, edit or pause ads in that
-              project's own Firebase console.
+              collection of this site's own Firebase project. This desk is read-only by design —
+              add, edit, pause or re-weight ads in the Firebase console, where a change appears
+              within ten minutes (the browser caches the list).
             </p>
             <p className="pb-muted" style={{ fontSize: '0.78rem', lineHeight: 1.7 }}>
               Every document needs <span className="pb-mono">Title</span>,{' '}
@@ -242,9 +243,9 @@ export function AdminPage() {
             </p>
             {!ADS_ENABLED && (
               <p className="pb-muted" style={{ fontSize: '0.8rem', marginTop: 10 }}>
-                The ads project is not configured on this installation (
-                <span className="pb-mono">VITE_ADS_FIREBASE_*</span>), so the site is showing its
-                own house promos.
+                No Firebase project is configured on this installation, so the site is showing
+                its own house promos instead of reading{' '}
+                <span className="pb-mono">servingads</span>.
               </p>
             )}
           </div>
@@ -307,6 +308,10 @@ export function AdminPage() {
       )}
 
       {tab === 'site' && <SiteThemeTab isOwner={isOwner} />}
+
+      {tab === 'setup' && (
+        <EnvCheckPanel />
+      )}
 
       {tab === 'people' && (
         <section>

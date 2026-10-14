@@ -71,7 +71,7 @@ await build({
     'import.meta.env.PROD': 'false',
     'import.meta.env.DEV': 'true',
     'import.meta.env.BASE_URL': JSON.stringify('/'),
-    // Firebase, Clerk and the ads project are deliberately left unset: the
+    // Firebase and Clerk are deliberately left unset: the
     // smoke test exercises the fully-local app, which is the configuration
     // most likely to be somebody's first run and the one that must never
     // break. Clerk in particular needs a real browser and a real network.
