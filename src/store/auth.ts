@@ -17,14 +17,14 @@ interface AuthState {
   error: string | null;
   configured: boolean;
   /** Outcome of the last Clerk → Firebase token exchange, for diagnostics. */
-  bridge: { ok: boolean; reason?: ExchangeFailure } | null;
+  bridge: { ok: boolean; reason?: ExchangeFailure; detail?: string } | null;
 
   init: () => void;
   signInWith: (provider: SignInProvider) => Promise<void>;
   signOut: () => Promise<void>;
   /** Push an identity resolved elsewhere (Clerk) into the store. */
   setSession: (user: AuthUser | null) => void;
-  setBridge: (bridge: { ok: boolean; reason?: ExchangeFailure } | null) => void;
+  setBridge: (bridge: { ok: boolean; reason?: ExchangeFailure; detail?: string } | null) => void;
   loadReactions: () => Promise<void>;
   setReactionLocal: (speechId: string, kind: ReactionKind | null) => void;
   refreshRole: () => Promise<void>;

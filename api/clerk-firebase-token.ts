@@ -64,69 +64,40 @@ type ClerkModule = typeof import('@clerk/backend');
 /* ------------------------------------------------------------------ */
 
 /**
- * Load a dependency in whichever way this runtime allows.
+ * Load the Clerk SDK with a **literal** specifier, on purpose.
  *
- * This is not paranoia — it is a bug that reached production through
- * `firebase-admin` and an ESM-only package of its own (that dependency has
- * since been removed entirely; see the note above). A compiled handler may be
- * CommonJS, in which case a dynamic `import()` can be rewritten into
- * `require()`, and requiring an ESM-only dependency fails with
- * *"require() of ES Module … not supported"* on any Node older than the
- * versions that allow it (22.12 / 20.19). The SDK then "fails to load" and
- * every request answers 501 — with the configuration blamed, wrongly.
+ * This is the one thing not to get clever about. A serverless host does not
+ * upload `node_modules` wholesale: it traces the function, deciding what to
+ * include from the literal string passed to `import()` / `require()`. A
+ * computed specifier is invisible to that trace — the package is simply left
+ * out of the deployment, and the endpoint fails at runtime with a load error
+ * while every local test passes, because locally the package is right there.
  *
- * Three routes, in order of reliability:
+ * That is not hypothetical: this file previously loaded the SDK through
  *
- *   1. `new Function('specifier', 'return import(specifier)')` — a real
- *      dynamic import that no transform can rewrite, because the bundler
- *      never sees an import here at all. This is how a CommonJS file reaches
- *      an ES module, and it loads the ESM build, whose own ESM imports are
- *      always legal.
- *   2. `createRequire` — the CommonJS entry point, for a runtime that cannot
- *      perform a dynamic import.
- *   3. a plain `await import(...)`, last, for an ESM runtime where (1) is
- *      somehow unavailable.
+ *     loadModule<ClerkModule>('@clerk/backend')
+ *     // → new Function('specifier', 'return import(specifier)')
  *
- * Every failure is collected, so the message names the module and the reason
- * instead of only "failed to load".
+ * and the deployed function answered `501 clerk_sdk_unavailable` on every
+ * request. Measured with the same tracer the host uses (`npm run check:api`):
+ * a literal `import('@clerk/backend')` pulls in 63 files, while the computed
+ * form pulls in none.
+ *
+ * The clever version existed to dodge an ESM-only dependency inside
+ * `firebase-admin` — a dependency this endpoint no longer has, because it signs
+ * the Firebase token with `node:crypto` instead (see the note at the top of the
+ * file). With that gone, the plain literal import is both correct and
+ * traceable. `scripts/check-api-trace.mjs` now fails the build if a computed
+ * specifier ever creeps back in.
+ *
+ * It stays a *dynamic* import, inside the handler: a static import that fails
+ * on the host takes the whole function down as an unexplained 500, whereas this
+ * becomes a named, actionable 501.
  */
-const dynamicImport = new Function('specifier', 'return import(specifier)') as <T>(
-  specifier: string,
-) => Promise<T>;
-
-async function loadModule<T>(specifier: string): Promise<T> {
-  const failures: string[] = [];
-
-  try {
-    return await dynamicImport<T>(specifier);
-  } catch (error) {
-    failures.push(`import(): ${(error as Error).message}`);
-  }
-
-  try {
-    const { createRequire } = await import('node:module');
-    const nodeRequire = createRequire(`${process.cwd()}/index.js`);
-    return nodeRequire(specifier) as T;
-  } catch (error) {
-    failures.push(`require(): ${(error as Error).message}`);
-  }
-
-  try {
-    return (await import(specifier)) as T;
-  } catch (error) {
-    failures.push(`fallback import(): ${(error as Error).message}`);
-  }
-
-  throw new Error(`could not load ${specifier} — ${failures.join(' | ')}`);
-}
-
-let sdk: ClerkModule | null = null;
-let sdkError: string | null = null;
-
 async function loadSdk(): Promise<ClerkModule | null> {
   if (sdk || sdkError) return sdk;
   try {
-    sdk = await loadModule<ClerkModule>('@clerk/backend');
+    sdk = await import('@clerk/backend');
   } catch (error) {
     // A packaging problem, not a missing variable — say which it is, because
     // the two have completely different fixes.
@@ -137,6 +108,9 @@ async function loadSdk(): Promise<ClerkModule | null> {
   }
   return sdk;
 }
+
+let sdk: ClerkModule | null = null;
+let sdkError: string | null = null;
 
 /* ------------------------------------------------------------------ */
 /* Configuration                                                        */

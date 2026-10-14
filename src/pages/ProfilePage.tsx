@@ -138,6 +138,10 @@ const CLOUD_PROBLEM: Record<string, string> = {
   'endpoint-missing': 'The API half of the deployment is missing: /api/clerk-firebase-token answered 404.',
   'server-misconfigured':
     'The token endpoint is deployed but not configured — it answered 501, and its message names the variable (CLERK_SECRET_KEY or FIREBASE_SERVICE_ACCOUNT_JSON).',
+  'sdk-unavailable':
+    'The token endpoint is deployed but its Clerk dependency was not packaged with the function (501 clerk_sdk_unavailable). That is a build problem on our side, not a missing setting — nothing in Vercel needs changing.',
+  'auth-rejected':
+    'The token endpoint answered, but Firebase Auth refused the token it minted. That happens when FIREBASE_SERVICE_ACCOUNT_JSON is a key from a different Firebase project than VITE_FIREBASE_PROJECT_ID — Firebase verifies the token against its own project. The technical line below names the error.',
   'method-rejected':
     'The API refused the request method (405): something in front of the function is turning the POST into a GET. Check for a redirect rule on /api/* in vercel.json or a proxy in front of the deployment.',
   unauthorized: 'The token endpoint refused the request (401) — check that CLERK_AUTHORIZED_PARTIES lists this exact origin.',
@@ -163,6 +167,10 @@ export function ClaimPage() {
   const [retrying, setRetrying] = useState(false);
   const cloudDown = Boolean(bridge && !bridge.ok);
   const cloudReason = bridge?.reason ? CLOUD_PROBLEM[bridge.reason] : null;
+  // The specific words behind the failure (the server's message, or Firebase's
+  // auth/... code). Without this a rejected token reads as "network" and sends
+  // everyone looking at the wrong thing.
+  const cloudDetail = bridge?.detail ?? null;
   const v = validateUsername(form.username || '___');
   // Clerk username appearing after mount (set in Manage Account) fills the field.
   useEffect(() => { if (!claimed && clerkUsername) setForm((f) => ({ ...f, username: f.username || clerkUsername })); }, [claimed, clerkUsername]);
@@ -190,10 +198,11 @@ export function ClaimPage() {
         const ok = await retryCloudSession();
         if (!ok) {
           const reason = useAuth.getState().bridge?.reason;
+          const detail = useAuth.getState().bridge?.detail;
           throw new Error(
             `The site could not open a cloud session, so @${username} cannot be recorded yet. ${
               reason ? CLOUD_PROBLEM[reason] : ''
-            } The sign-in sheet's environment check names what is missing.`,
+            }${detail ? ` (${detail})` : ''} The sign-in sheet's environment check names what is missing.`,
           );
         }
       }
@@ -226,6 +235,11 @@ export function ClaimPage() {
             <p className="pb-muted" style={{ fontSize:'0.8rem', lineHeight:1.6 }}>
               {cloudReason ?? 'The site has no cloud session, so it cannot write your handle down yet.'}
             </p>
+            {cloudDetail && (
+              <p className="pb-mono pb-muted" style={{ fontSize:'0.72rem', lineHeight:1.6, wordBreak:'break-word', margin:0 }}>
+                {cloudDetail}
+              </p>
+            )}
             <div>
               <button
                 type="button"
