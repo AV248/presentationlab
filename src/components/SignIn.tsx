@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 import { Check, Heart, PencilLine, Share2, X } from 'lucide-react';
-import { ClerkAuthButtons } from './ClerkAuthButtons';
 import { EnvCheckPanel } from './EnvCheckPanel';
 import { GoogleMark, MicrosoftMark } from './AuthMarks';
 import { useUi } from '../store/ui';
+import { SignIn } from '@clerk/clerk-react';
 import { useAuth, isSignInAvailable } from '../store/auth';
 import { CLERK_ENABLED } from '../services/clerk';
 import type { SignInProvider } from '../services/auth';
@@ -81,9 +81,13 @@ export function SignInSheet() {
             <EnvCheckPanel compact />
           </div>
                 ) : CLERK_ENABLED ? (
-          /* Clerk owns the flow; these buttons name the providers people
-             arrive with instead of hiding them behind a generic Continue. */
-          <ClerkAuthButtons />
+          /* Clerk's own form, shown directly — no wall of our own buttons in
+             front of it. Whatever is enabled in the Clerk dashboard appears
+             here, and nothing that is not. `routing="hash"` keeps the flow
+             inside this sheet instead of navigating away from the page. */
+          <div className="pb-clerk-panel">
+            <SignIn routing="hash" />
+          </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {PROVIDERS.map((provider) => (

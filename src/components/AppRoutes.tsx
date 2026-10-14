@@ -86,6 +86,8 @@ export function AppRoutes() {
 
         {/* 2.6 handles: /:username and /:username/:slug (own content only) */}
         <Route path="/:username" element={<HandlePage />} />
+        {/* One folder level is allowed: /user1/my-day and /user1/2026/my-day. */}
+        <Route path="/:username/:folder/:slug" element={<HandlePage />} />
         <Route path="/:username/:slug" element={<HandlePage />} />
 
         {/* 2.3 paths, kept alive forever */}

@@ -12,6 +12,9 @@ export interface StoredSpeech extends Speech {
   updatedAt: string;
   /** Set once the draft has been pushed to Firestore. */
   cloudId?: string;
+  /** The address it lives at: /you/<folder>/<slug> (one folder at most). */
+  folder?: string;
+  slug?: string;
   ad?: boolean;
 }
 
@@ -63,7 +66,7 @@ export interface LibraryState {
   milestones: Record<MilestoneId, string | null>;
 
   createSpeech: (partial?: Partial<Speech>) => string;
-  updateSpeech: (id: string, patch: Partial<Speech & { status: SpeechStatus; cloudId?: string; ad?: boolean }>) => void;
+  updateSpeech: (id: string, patch: Partial<Speech & { status: SpeechStatus; cloudId?: string; ad?: boolean; folder?: string; slug?: string }>) => void;
   deleteSpeech: (id: string) => void;
   duplicateSpeech: (id: string, source?: Speech) => string | null;
   setStatus: (id: string, status: SpeechStatus) => void;

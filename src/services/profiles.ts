@@ -35,7 +35,12 @@ export interface AutoClaimResult { ok: boolean; username: string; reason?: 'take
  *   • only mirrors displayName into `users/{uid}` when we have one, merged, so
  *     nothing a person has already written is blanked
  */
-export async function autoClaimUsername(uid: string, raw: string, displayName?: string): Promise<AutoClaimResult> {
+export async function autoClaimUsername(
+  uid: string,
+  raw: string,
+  displayName?: string,
+  email?: string,
+): Promise<AutoClaimResult> {
   const v = validateUsername(raw);
   if (!v.ok) return { ok: false, username: v.username, reason: 'invalid' };
   if (!FIREBASE_ENABLED) return { ok: false, username: v.username, reason: 'unavailable' };
@@ -48,13 +53,28 @@ export async function autoClaimUsername(uid: string, raw: string, displayName?: 
 
     const ref = f.doc(db, 'handles', v.username);
     const existing = await f.getDoc(ref);
-    const holder = existing.exists() ? str((existing.data() ?? {}).uid) : '';
-    if (holder && holder !== uid) return { ok: false, username: v.username, reason: 'taken' };
+    const held = existing.exists() ? (existing.data() ?? {}) : {};
+    const holder = str(held.uid);
+    const reservedForMe = held.reserved === true
+      && (holder === uid
+        || (!!email && str(held.reservedForEmail).toLowerCase() === email.toLowerCase()));
+    if (holder && holder !== uid && !reservedForMe) {
+      return { ok: false, username: v.username, reason: 'taken' };
+    }
 
-    // Create-only: when the document already exists with our own uid, the
-    // write is skipped (rules forbid updates, and there is nothing to change).
-    if (!holder) {
+    // Three cases: a free name (create), a name the admin reserved for this
+    // person (claim it), or a name already ours (nothing to write — creating
+    // is refused because the document exists, updating would be a no-op).
+    if (!existing.exists()) {
       await f.setDoc(ref, { uid, username: v.username, updatedAt: f.serverTimestamp() });
+    } else if (reservedForMe && holder !== uid) {
+      await f.setDoc(ref, {
+        uid,
+        username: v.username,
+        reserved: false,
+        reservedForEmail: '',
+        updatedAt: f.serverTimestamp(),
+      }, { merge: true });
     }
     await f.setDoc(
       f.doc(db, 'users', uid),
@@ -117,6 +137,28 @@ export async function fetchOwnProfile(uid: string): Promise<PublicProfile | null
     return { username: str(d.username), uid, displayName: str(d.displayName), bio: str(d.bio), location: str(d.location), website: str(d.website), signature: str(d.signature), createdAt: str(d.createdAt) };
   } catch { return null; }
 }
+/** Is this name reserved (and, if so, is it reserved for me)? */
+export async function fetchReservation(
+  username: string,
+  me: { uid?: string; email?: string | null } = {},
+): Promise<'free' | 'mine' | 'reserved' | 'taken' | 'unknown'> {
+  if (!FIREBASE_ENABLED) return 'unknown';
+  const b = await fs(); if (!b) return 'unknown';
+  try {
+    const snap = await b.fs.getDoc(b.fs.doc(b.db, 'handles', username));
+    if (!snap.exists()) return 'free';
+    const data = snap.data() ?? {};
+    const uid = str(data.uid);
+    if (uid && uid === me.uid) return 'mine';
+    if (data.reserved === true) {
+      const email = str(data.reservedForEmail).toLowerCase();
+      const mine = (!!me.uid && uid === me.uid) || (!!email && !!me.email && email === me.email.toLowerCase());
+      return mine ? 'mine' : 'reserved';
+    }
+    return uid ? 'taken' : 'free';
+  } catch { return 'unknown'; }
+}
+
 export async function isUsernameAvailable(raw: string, myUid?: string): Promise<boolean> {
   const v = validateUsername(raw); if (!v.ok) return false;
   if (!FIREBASE_ENABLED) return true;

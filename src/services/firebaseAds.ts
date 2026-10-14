@@ -34,6 +34,8 @@ export const ADS_COLLECTION = 'servingads';
 export interface FirestoreLike {
   collection: (db: unknown, path: string) => unknown;
   getDocs: (query: unknown) => Promise<{ docs: { id: string; data: () => Record<string, unknown> }[] }>;
+  /** Present in the browser SDK; bypasses any local cache when reading. */
+  getDocsFromServer?: (query: unknown) => Promise<{ docs: { id: string; data: () => Record<string, unknown> }[] }>;
   query: (col: unknown, ...constraints: unknown[]) => unknown;
   where: (field: string, op: string, value: unknown) => unknown;
   orderBy: (field: string, dir?: 'asc' | 'desc') => unknown;
@@ -59,6 +61,8 @@ export async function loadAdsFirebase(): Promise<AdsBundle | null> {
     fs: {
       collection: bundle.fs.collection as FirestoreLike['collection'],
       getDocs: bundle.fs.getDocs as unknown as FirestoreLike['getDocs'],
+      getDocsFromServer: (bundle.fs as unknown as { getDocsFromServer?: unknown })
+        .getDocsFromServer as unknown as FirestoreLike['getDocsFromServer'],
       query: bundle.fs.query as FirestoreLike['query'],
       where: bundle.fs.where as FirestoreLike['where'],
       orderBy: bundle.fs.orderBy as FirestoreLike['orderBy'],

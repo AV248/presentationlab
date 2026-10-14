@@ -109,3 +109,29 @@ canonical URLs already point at the old address.
 - **No admin "release" button.** Changing a handle means touching Clerk and
   two Firestore documents in the right order — a job for the console, not for
   a button that could be pressed by accident.
+
+## Reserved handles, and giving one to somebody (2.7)
+
+`/admin` → **People** → *Handles*:
+
+* **Reserve** a username so nobody can claim it — stored with `reserved: true`
+  and an empty `uid`, which the public claim path treats as taken.
+* **Give** a handle to somebody already signed up (pick them from the list): the
+  document is re-pointed at their account and their profile is updated in the
+  same breath, so their page exists immediately.
+* **Release** a handle to put it back in circulation.
+
+A name reserved *for* a person can be claimed by that person alone — the rules
+allow the claim when the document names their uid, or their verified e-mail.
+
+## Custom addresses (2.7)
+
+A published piece lives at `/<username>/<link>`, or `/<username>/<folder>/<link>`
+— **one** folder level, never two. The writer chooses both in the publish
+wizard's final step (*Where it lives*) and may change them later by editing the
+speech. The only rule: the address must not match another of *their own* links
+(two writers may both have `/their-name/my-day`).
+
+* Lower-case letters, digits and single hyphens; 60 characters at most.
+* The site's own page names (`admin`, `write`, `themes`, …) are refused.
+* `/<username>/<folder>` lists what is filed in that folder.

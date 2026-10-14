@@ -209,3 +209,29 @@ points at the environment check in the sign-in sheet.
 - `signInFallbackRedirectUrl` / `signUpFallbackRedirectUrl` are pinned to `/`
   so a flow can never land on a stale or callback URL.
 - The CSP allows Clerk's bootstrap and Microsoft's identity hosts.
+
+## The sign-in sheet shows Clerk's own form (2.7)
+
+Clicking *Sign in* renders Clerk's `<SignIn />` component directly
+(`routing="hash"`, so it never navigates away from the page). Whatever the Clerk
+dashboard enables is exactly what people see; nothing of ours stands in front of
+it. The diagnostics panel below it is unchanged.
+
+## Stopping people from *linking* Google or Microsoft (2.7)
+
+Turning a provider off in **Social connections** stops it being offered at
+sign-in. It can still appear as a *connected account* inside the profile, because
+"can sign in with" and "can link" are separate switches in Clerk:
+
+1. Clerk Dashboard → **User & authentication** → **Social connections**: leave
+   Google and Microsoft off for sign-up/sign-in.
+2. Clerk Dashboard → **User & authentication** → **User model** →
+   **User permissions** → turn **Restrict changes** ON. Restricted users may
+   still *view* their identifiers but cannot add, remove or modify them — which
+   is what stops a new Google/Microsoft account being attached.
+3. The app also hides the *Connected accounts* section in the profile menu
+   (`src/components/AuthProvider.tsx`), so the option is not put in front of
+   anyone even if a dashboard toggle is missed.
+
+An account that is already linked can be removed in the Clerk dashboard
+(Users → the person → Connected accounts).
