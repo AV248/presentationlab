@@ -138,6 +138,8 @@ const CLOUD_PROBLEM: Record<string, string> = {
   'endpoint-missing': 'The API half of the deployment is missing: /api/clerk-firebase-token answered 404.',
   'server-misconfigured':
     'The token endpoint is deployed but not configured — it answered 501, and its message names the variable (CLERK_SECRET_KEY or FIREBASE_SERVICE_ACCOUNT_JSON).',
+  'method-rejected':
+    'The API refused the request method (405): something in front of the function is turning the POST into a GET. Check for a redirect rule on /api/* in vercel.json or a proxy in front of the deployment.',
   unauthorized: 'The token endpoint refused the request (401) — check that CLERK_AUTHORIZED_PARTIES lists this exact origin.',
   'server-error': 'The token endpoint answered with an error. The deployment logs will have the detail.',
   network: 'The request to the token endpoint did not complete — offline, or something is blocking /api.',

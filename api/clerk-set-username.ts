@@ -170,7 +170,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   }
 
   if (req.method !== 'POST') {
-    send(res, 405, { error: 'method_not_allowed' });
+    res.setHeader('Allow', 'POST, OPTIONS');
+    send(res, 405, {
+      error: 'method_not_allowed',
+      method: req.method,
+      message:
+        'This endpoint only accepts POST. It is an API, not a page: the site calls it with a POST and a bearer token. Opening this URL in a browser sends a GET, so seeing this message that way is expected — and it does prove the function is deployed.',
+    });
     return;
   }
 

@@ -62,6 +62,42 @@ Rule this out deliberately, because it looks identical to 2 and 3:
 - An ad blocker or corporate proxy that blocks `clerk.aavrit.dedyn.io` or
   `cdn.protect.clerk.com` produces the same empty round trip.
 
+## Checking the API by hand
+
+Both endpoints are APIs, not pages: they accept **POST** only. Open one in a
+browser (a GET) and you get a deliberate, self-describing answer —
+
+```json
+{ "error": "method_not_allowed",
+  "method": "GET",
+  "message": "This endpoint only accepts POST. ..." }
+```
+
+— which is still useful news: it proves the function is deployed and running.
+Three answers, three meanings:
+
+| Answer | Means |
+| --- | --- |
+| `405 method_not_allowed` | The function is deployed. Only POST is accepted; end-user traffic does this correctly. |
+| `401 missing_session_token` | Deployed **and configured** — everything is present, the request simply had no credentials. |
+| `501 clerk_not_configured` / `firebase_admin_not_configured` | Deployed but missing a server variable; the message names which one. |
+
+To reproduce the site's own call from a terminal:
+
+```bash
+curl -s -X POST https://presentationbuddy.aavrit.dedyn.io/api/clerk-firebase-token \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+`{"error":"missing_session_token"}` (401) is the healthy answer. The in-app
+check — sign-in sheet → **Server-only variables → Check now**, or
+**/admin → Setup & environment** — does exactly this and translates the result.
+
+A `405` in response to the app's own POST is a different matter: something in
+front of the function is turning the request into a GET (a redirect rule on
+`/api/*`, or a proxy). The Claim page and the environment panel both say so,
+because the exchange reports `method-rejected` rather than a generic error.
+
 ## 5. Proof, whichever way it went
 
 After an attempt, open DevTools → **Application → Cookies →
