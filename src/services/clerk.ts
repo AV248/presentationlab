@@ -185,6 +185,8 @@ interface ClerkHandlers {
   signOut: () => Promise<void>;
   /** Sets the Clerk username — Clerk is where the username lives. */
   updateUsername?: (username: string) => Promise<void>;
+  /** The current Clerk session token, for calls to our own API. */
+  getSessionToken?: () => Promise<string | null>;
 }
 
 let handlers: ClerkHandlers | null = null;
@@ -207,9 +209,105 @@ export async function clerkSignOut(): Promise<void> {
 
 export const clerkIsMounted = () => handlers !== null;
 
-/** Set the username in Clerk (Manage Account shows the same value). */
+/** Set the username with the client SDK (Manage Account shows the same value). */
 export async function clerkUpdateUsername(username: string): Promise<boolean> {
   if (!handlers?.updateUsername) return false;
   await handlers.updateUsername(username);
   return true;
+}
+
+/** The Clerk session token, or null when signed out / Clerk not mounted. */
+export async function clerkSessionToken(): Promise<string | null> {
+  if (!handlers?.getSessionToken) return null;
+  try {
+    return await handlers.getSessionToken();
+  } catch {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Setting the username                                                */
+/* ------------------------------------------------------------------ */
+
+export interface UsernameOutcome {
+  ok: boolean;
+  /** Which path did it: the server (secret key) or the browser SDK. */
+  via?: 'server' | 'client';
+  code?: string;
+  message?: string;
+}
+
+/** Clerk's own words for the one error everybody meets here. */
+const IMMUTABLE_CODES = ['immutable_attribute_modification_not_allowed'];
+
+function usernameError(error: unknown): UsernameOutcome {
+  const detail = error as { code?: string; errors?: { code?: string; message?: string; longMessage?: string }[] } | null;
+  const first = detail?.errors?.[0];
+  const code = first?.code ?? detail?.code ?? 'client_update_failed';
+  if (IMMUTABLE_CODES.includes(code)) {
+    return {
+      ok: false,
+      code,
+      message:
+        'Clerk has this username locked. The owner can set it in the Clerk dashboard (Users → the person → Username), or the app can set it once the server is deployed.',
+    };
+  }
+  return {
+    ok: false,
+    code,
+    message:
+      first?.longMessage ??
+      first?.message ??
+      'Clerk did not accept that username. Please try again.',
+  };
+}
+
+/**
+ * Set the username in Clerk, once, forever.
+ *
+ * The server goes first: it uses the secret key, which keeps working even when
+ * the instance's **Restrict changes** toggle is on — and that toggle is
+ * precisely the immutability guarantee this app wants, because with it on
+ * Clerk refuses every end-user write, including the first one
+ * (`immutable_attribute_modification_not_allowed`). Falling back to the
+ * browser SDK keeps local development and the no-API deployment working.
+ *
+ * Never overwrites: the server refuses a second name, the bridge refuses a
+ * second name, and this returns that refusal as a plain message.
+ */
+export async function setClerkUsername(username: string): Promise<UsernameOutcome> {
+  const token = await clerkSessionToken();
+
+  if (token) {
+    try {
+      const response = await fetch('/api/clerk-set-username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ username }),
+      });
+
+      // 404 = the function is not deployed here; 501 = the server has no
+      // secret key. Both mean "try the browser", not "fail".
+      if (response.ok) {
+        const payload = (await response.json().catch(() => null)) as { username?: string } | null;
+        return { ok: true, via: 'server', code: payload?.username };
+      }
+      if (response.status !== 404 && response.status !== 501 && response.status !== 405) {
+        const payload = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
+        if (payload?.error) {
+          return { ok: false, code: payload.error, message: payload.message ?? 'Clerk did not accept that username.' };
+        }
+      }
+    } catch {
+      /* offline or blocked: fall through to the browser SDK */
+    }
+  }
+
+  try {
+    await clerkUpdateUsername(username);
+    return { ok: true, via: 'client' };
+  } catch (error) {
+    return usernameError(error);
+  }
 }

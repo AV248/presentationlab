@@ -116,11 +116,14 @@ export function ClaimPage() {
     setBusy(true);
     try {
       const username = normalizeUsername(claimed || form.username);
-      // 1) Clerk first — it is the username's home. No-ops if already set there
-      //    (and refuses, in the bridge, to ever change an existing one).
+      // 1) Clerk first — it is the username's home. Our server does the write
+      //    with the secret key, so it still works when Clerk's "Restrict
+      //    changes" toggle is on (which is what makes the name immutable).
+      //    No-ops when Clerk already holds this exact name.
       if (user?.providerId === 'clerk' && !clerkUsername) {
-        const { clerkUpdateUsername } = await import('../services/clerk');
-        await clerkUpdateUsername(username);
+        const { setClerkUsername } = await import('../services/clerk');
+        const outcome = await setClerkUsername(username);
+        if (!outcome.ok) throw new Error(outcome.message ?? 'Clerk did not accept that username.');
       }
       // 2) Firestore claim: handles/{username} lock + users/{uid} profile.
       const finalName = await claimUsername(user!.uid, username, form);
@@ -128,7 +131,17 @@ export function ClaimPage() {
       toast(`@${finalName} is yours — ${shortUrl(`/${finalName}`)}`, 'success');
       navigate(`/${finalName}`);
     }
-    catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
+    catch (e) {
+      const message = (e as Error).message;
+      // The rare race worth naming: Clerk took the name, Firestore refused it
+      // because somebody claimed it a moment earlier. Say exactly that.
+      toast(
+        /already (taken|claimed)/i.test(message)
+          ? `${message} If Clerk already set it on your account, contact amaavrit@yahoo.com so it can be released.`
+          : message,
+        'error',
+      );
+    } finally { setBusy(false); }
   }, 'Sign in first — a username has to belong to someone.');
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'var(--l-rhythm)', maxInlineSize:720 }}>
@@ -138,7 +151,7 @@ export function ClaimPage() {
         <p className="pb-soft" style={{ lineHeight:1.65 }}>One unique username per person — and it can never be changed, so choose the name you want to be introduced by. Everything you publish lives under it: <strong className="pb-mono">{shortUrl(`/${normalizeUsername(claimed || form.username || 'you')}/your-speech`)}</strong>. The path after your name is yours alone, shaped only by your own work.</p>
         <div style={{ display:'grid', gap:12, marginTop:18 }}>
           <div><label className="pb-label" htmlFor="claim-username">Username *</label><div style={{display:'flex',alignItems:'center',gap:8}}><span className="pb-muted">pb.devs.surf/</span><input id="claim-username" className="pb-input" value={claimed || form.username} disabled={Boolean(claimed)} readOnly={Boolean(claimed)} onChange={(e)=>setForm({...form,username:normalizeUsername(e.target.value)})} placeholder="yourname" autoComplete="off" /></div>
-          <p className="pb-muted" style={{fontSize:'0.78rem',marginTop:5}}>{claimed ? 'Locked forever — usernames cannot be changed. The details below can be edited any time.' : clerkUsername && normalizeUsername(form.username) === clerkUsername ? '✓ Set in your Clerk account — confirm it here and it becomes your address.' : state==='checking' ? 'Checking…' : state==='free' ? '✓ Available — claiming also sets it in your Clerk account.' : state==='taken' ? '✗ Already taken' : state==='invalid' && form.username ? v.error : 'Claiming sets this same username in Clerk (Manage Account).'}</p></div>
+          <p className="pb-muted" style={{fontSize:'0.78rem',marginTop:5}}>{claimed ? 'Locked forever — Clerk itself refuses changes to it. The details below can be edited any time.' : clerkUsername && normalizeUsername(form.username) === clerkUsername ? '✓ Set in your Clerk account — confirm it here and it becomes your address.' : state==='checking' ? 'Checking…' : state==='free' ? '✓ Available — claiming also sets it in your Clerk account.' : state==='taken' ? '✗ Already taken' : state==='invalid' && form.username ? v.error : 'Claiming sets this same username in Clerk (Manage Account).'}</p></div>
           <div><label className="pb-label" htmlFor="claim-name">Display name</label><input id="claim-name" className="pb-input" value={form.displayName} onChange={(e)=>setForm({...form,displayName:e.target.value})} placeholder="What the room should call you" /></div>
           <div><label className="pb-label" htmlFor="claim-bio">Bio</label><textarea id="claim-bio" className="pb-textarea" rows={3} value={form.bio} onChange={(e)=>setForm({...form,bio:e.target.value})} placeholder="What you speak about, and why it matters to you…" /></div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:12}}>

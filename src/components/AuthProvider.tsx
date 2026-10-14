@@ -115,6 +115,9 @@ function ClerkAuthBridge() {
   useEffect(() => {
     registerClerkHandlers({
       signOut: () => clerk.signOut(),
+      // Needed by /claim: our server sets the username with the secret key,
+      // which is the only path that works while Clerk restricts changes.
+      getSessionToken: () => latest.current.getToken(),
       updateUsername: async (username: string) => {
         const current = latest.current.user;
         if (!current) throw new Error('Clerk is still loading — try again in a moment.');

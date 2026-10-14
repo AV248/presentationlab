@@ -19,6 +19,10 @@ from a second, separate Firebase project this app cannot write to**. Structured 
 widened — breadcrumbs on every page, `Article` on every speech, a `HowTo` on the rehearsal
 room — so the site can appear as more than a line of text in search results.
 
+> Sign-in trouble? **[docs/SIGNIN.md](docs/SIGNIN.md)** walks the four causes of
+> "it redirects back and I am not signed in". Usernames — who owns them, why
+> they cannot change — are in **[docs/USERNAMES.md](docs/USERNAMES.md)**.
+>
 > Deploying? **[docs/VERCEL.md](docs/VERCEL.md)** has every environment variable, the
 > Firestore rules for both projects, and the order to do things in.
 > If you are on nginx or Caddy instead, see **[docs/DEPLOY.md](docs/DEPLOY.md)**.

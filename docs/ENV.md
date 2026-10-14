@@ -101,8 +101,11 @@ ads and is completely healthy.
 
 ### 5. Server-only (no `VITE_` prefix)
 
-Read by `api/clerk-firebase-token.ts` and nothing else. They never reach the
-browser.
+Read by two serverless endpoints and nothing else — `api/clerk-firebase-token.ts`
+(the Clerk session → Firebase token exchange) and `api/clerk-set-username.ts`
+(the one-time username write, which needs the secret key because Clerk's
+*Restrict changes* setting blocks the browser from doing it). They never reach
+the browser.
 
 | Variable | Value | Where |
 | --- | --- | --- |
