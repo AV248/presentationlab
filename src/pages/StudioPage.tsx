@@ -25,9 +25,10 @@ import { useLibrary, TEMPLATE_BODY } from '../store/library';
 import { useUi } from '../store/ui';
 import { useAuth } from '../store/auth';
 import { useCloud } from '../store/cloud';
-import { publishSpeech } from '../services/data';
+import { pathTaken, publishSpeech } from '../services/data';
 import { useProfile } from '../store/profile';
 import { checkOriginality, contentSlug, COPYRIGHT_THRESHOLD } from '../lib/identity';
+import { slugifySegment, workPath } from '../lib/paths';
 import { LIBRARY as LIB } from '../data/speeches';
 import { shortUrl } from '../lib/share';
 import { FIRST_LINES, pick } from '../lib/heart';
@@ -258,7 +259,11 @@ function Editor({
   const [publishing, setPublishing] = useState(false);
   const [wizard, setWizard] = useState(false);
 
-  const [draft, setDraft] = useState({
+  const [draft, setDraft] = useState<{
+    title: string; author: string; category: string; occasion: string; level: typeof initial.level;
+    tags: string; preview: string; content: string; credits: string; signature: string;
+    allowCopy: boolean; slug?: string; folder?: string;
+  }>({
     title: initial.title,
     author: initial.author ?? 'You',
     category: initial.category,
@@ -270,6 +275,8 @@ function Editor({
     credits: initial.credits ?? '',
     signature: initial.signature ?? '',
     allowCopy: initial.allowCopy !== false,
+    slug: (initial as { slug?: string }).slug,
+    folder: (initial as { folder?: string }).folder,
   });
   const [view, setView] = useState<ViewMode>('split');
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -287,7 +294,10 @@ function Editor({
     timer.current = window.setTimeout(() => {
       updateSpeech(initial.id, {
         title: draft.title,
-        slug: contentSlug(draft.title),
+        // A link the writer chose is never overwritten by the title-derived
+        // one while they type.
+        slug: draft.slug || contentSlug(draft.title),
+        folder: draft.folder ?? '',
         credits: draft.credits,
         signature: draft.signature,
         allowCopy: draft.allowCopy,
@@ -365,8 +375,18 @@ function Editor({
         const hit = checkOriginality(draft.content, LIB.filter(i=>i.id!==initial.id));
         if (hit && hit.score >= COPYRIGHT_THRESHOLD) { toast(`This looks too close to “${hit.title}” (${Math.round(hit.score*100)}% overlap). Rewrite in your own words before publishing.`, 'error'); return; }
         setPublishing(true);
-        publishSpeech({ title: draft.title, content: draft.content, preview: draft.preview, category: draft.category, occasion: draft.occasion, tags: draft.tags.split(',').map((x)=>x.trim()).filter(Boolean), ad: false, username: profile.username, slug: contentSlug(draft.title), credits: draft.credits, signature: draft.signature || profile.signature, allowCopy: draft.allowCopy }, user!.uid, user!.displayName ?? user!.email ?? 'Anonymous')
-          .then(({ id: cloudId }) => { updateSpeech(initial.id, { cloudId, status: 'published', username: profile.username, slug: contentSlug(draft.title), credits: draft.credits, signature: draft.signature || profile.signature, allowCopy: draft.allowCopy }); toast(`Published — ${shortUrl(`/${profile.username}/${contentSlug(draft.title)}`)}`, 'success'); setWizard(false); void connect(true); })
+        (async () => {
+          const finalSlug = draft.slug || contentSlug(draft.title);
+          const finalFolder = draft.folder ?? '';
+          if (profile.username && await pathTaken(profile.username, finalFolder, finalSlug, (initial as { cloudId?: string }).cloudId)) {
+            throw new Error(`/@${profile.username}${finalFolder ? `/${finalFolder}` : ''}/${finalSlug} is already one of your links — change the link or the folder.`);
+          }
+          const { id: cloudId } = await publishSpeech({ title: draft.title, content: draft.content, preview: draft.preview, category: draft.category, occasion: draft.occasion, tags: draft.tags.split(',').map((x)=>x.trim()).filter(Boolean), ad: false, username: profile.username, slug: finalSlug, folder: finalFolder, credits: draft.credits, signature: draft.signature || profile.signature, allowCopy: draft.allowCopy }, user!.uid, user!.displayName ?? user!.email ?? 'Anonymous');
+          updateSpeech(initial.id, { cloudId, status: 'published', username: profile.username, slug: finalSlug, folder: finalFolder, credits: draft.credits, signature: draft.signature || profile.signature, allowCopy: draft.allowCopy });
+          toast(`Published — ${shortUrl(workPath(profile.username, finalSlug, finalFolder))}`, 'success');
+          setWizard(false);
+          void connect(true);
+        })()
           .catch((e: unknown) => toast((e as Error)?.message ?? 'Publish failed', 'error'))
           .finally(() => setPublishing(false));
       }} />}
@@ -808,7 +828,7 @@ interface SpeechRecognitionLike {
 /* Publish in easy steps (2.6): Title → Preview → Tags → Credits → Content → Signature → Category.
    Only Title and Content are mandatory. Content step runs the originality screen. */
 const WIZARD_STEPS = ['Title','Preview','Tags','Credits','Content','Signature','Category'] as const;
-function PublishWizard({ draft, patch, publishing, onClose, onPublish }: { draft: { title: string; preview: string; tags: string; credits: string; content: string; signature: string; category: string; occasion: string; allowCopy: boolean }; patch: (k: never, v: never) => void; publishing: boolean; onClose: () => void; onPublish: () => void }) {
+function PublishWizard({ draft, patch, publishing, onClose, onPublish }: { draft: { title: string; preview: string; tags: string; credits: string; content: string; signature: string; category: string; occasion: string; allowCopy: boolean; slug?: string; folder?: string }; patch: (k: never, v: never) => void; publishing: boolean; onClose: () => void; onPublish: () => void }) {
   const [step, setStep] = useState(0);
   const profile = useProfile();
   const hit = useMemo(() => checkOriginality(draft.content, LIB.map((i) => ({ id: i.id, title: i.title, content: i.content }))), [draft.content]);
@@ -827,7 +847,31 @@ function PublishWizard({ draft, patch, publishing, onClose, onPublish }: { draft
         {name === 'Credits' && <><label className="pb-label">Credits</label><input className="pb-input" value={draft.credits} onChange={(e) => set('credits', e.target.value)} placeholder="Who helped, inspired or is quoted — credit them here" /><label style={{display:'flex',gap:8,alignItems:'flex-start',marginTop:14,fontSize:'.86rem',lineHeight:1.5}}><input type="checkbox" checked={!draft.allowCopy} onChange={(e) => set('allowCopy', !e.target.checked)} style={{marginTop:3}} /> <span><strong>Protect my copyright.</strong> Readers can read and rehearse here, but cannot copy, download or print this speech.</span></label></>}
         {name === 'Content' && <><label className="pb-label">Content *</label><textarea className="pb-textarea" rows={8} value={draft.content} onChange={(e) => set('content', e.target.value)} />{hit ? <p style={{fontSize:'.82rem',lineHeight:1.6,marginTop:8,color: blocked ? 'var(--c-bad)' : 'var(--c-warn)'}}>{blocked ? `⛔ Too close to “${hit.title}” (${Math.round(hit.score*100)}% overlapping passages${hit.sharedPhrase ? ` — e.g. “${hit.sharedPhrase}…”` : ''}). Publishing is paused until this is in your own words.` : `Note: a passage resembles “${hit.title}”. If you quoted it, credit it in the Credits step.`}</p> : <p className="pb-muted" style={{fontSize:'.82rem',marginTop:8}}>✓ No matching content found in the library. Your words read as your own.</p>}</>}
         {name === 'Signature' && <><label className="pb-label">Signature</label><input className="pb-input" value={draft.signature} onChange={(e) => set('signature', e.target.value)} placeholder={profile.signature || 'The line you sign with'} /></>}
-        {name === 'Category' && <><label className="pb-label">Category</label><input className="pb-input" value={draft.category} onChange={(e) => set('category', e.target.value)} placeholder="Manifestation" /><label className="pb-label" style={{marginTop:12}}>Occasion</label><input className="pb-input" value={draft.occasion} onChange={(e) => set('occasion', e.target.value)} placeholder="Morning gathering" />{!profile.username && <p style={{fontSize:'.84rem',marginTop:10}}>You will claim your username next — your speech will live at <span className="pb-mono">{shortUrl(`/you/${contentSlug(draft.title || 'your-speech')}`)}</span></p>}</>}
+        {name === 'Category' && (
+          <>
+            <label className="pb-label">Category</label>
+            <input className="pb-input" value={draft.category} onChange={(e) => set('category', e.target.value)} placeholder="Manifestation" />
+            <label className="pb-label" style={{marginTop:12}}>Occasion</label>
+            <input className="pb-input" value={draft.occasion} onChange={(e) => set('occasion', e.target.value)} placeholder="Morning gathering" />
+
+            {/* The address is the writer's to shape: /you/<folder>/<link>,
+                one folder at most, never the same address twice. */}
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--c-line)' }}>
+              <span className="pb-label" style={{ display: 'block', marginBottom: 6 }}>Where it lives</span>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.4fr)', gap: 10 }}>
+                <input className="pb-input" value={draft.folder ?? ''} onChange={(e) => set('folder', slugifySegment(e.target.value))} placeholder="folder (optional)" aria-label="Folder" />
+                <input className="pb-input" value={draft.slug ?? ''} onChange={(e) => set('slug', slugifySegment(e.target.value))} placeholder={contentSlug(draft.title || 'your-speech')} aria-label="Link" />
+              </div>
+              <p className="pb-muted" style={{ fontSize: '.78rem', marginTop: 6, lineHeight: 1.6 }}>
+                {profile.username ? (
+                  <>Yours to choose: <span className="pb-mono">{shortUrl(workPath(profile.username, draft.slug || contentSlug(draft.title || 'your-speech'), draft.folder ?? ''))}</span> — one folder allowed, and it must not match another of your own links.</>
+                ) : (
+                  <>You will claim your username next — your speech will live at <span className="pb-mono">{shortUrl(`/you/${contentSlug(draft.title || 'your-speech')}`)}</span></>
+                )}
+              </p>
+            </div>
+          </>
+        )}
         <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
           <button type="button" className="pb-btn pb-btn-ghost" onClick={onClose}>Keep writing</button>
           <div style={{ flex: 1 }} />

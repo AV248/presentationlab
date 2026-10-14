@@ -57,6 +57,8 @@ function isoTimestamp(value: unknown): string {
 
 export interface CloudSpeech extends Speech {
   uid: string;
+  /** One optional sub-folder, so a work can live at /user/folder/slug. */
+  folder?: string;
   views: number;
   likes: number;
   dislikes: number;
@@ -88,6 +90,7 @@ function mapSpeech(id: string, data: Record<string, unknown>): CloudSpeech {
     uid: str(data.uid ?? data.authorUid),
     username: str(data.username) || undefined,
     slug: str(data.slug) || undefined,
+    folder: str(data.folder) || undefined,
     credits: str(data.Credits ?? data.credits) || undefined,
     signature: str(data.Signature ?? data.signature) || undefined,
     allowCopy: data.allowCopy === false ? false : true,
@@ -171,6 +174,8 @@ export interface PublishInput {
   ad?: boolean;
   username?: string;
   slug?: string;
+  /** One optional sub-folder: `/user/folder/slug`. Never more than one. */
+  folder?: string;
   credits?: string;
   signature?: string;
   allowCopy?: boolean;
@@ -196,6 +201,7 @@ export async function publishSpeech(
     uid,
     username: input.username ?? '',
     slug: input.slug ?? '',
+    folder: input.folder ?? '',
     Credits: input.credits ?? '',
     Signature: input.signature ?? '',
     allowCopy: input.allowCopy !== false,
@@ -227,6 +233,9 @@ export async function updateSpeechDoc(id: string, patch: Partial<PublishInput>):
   if (patch.credits !== undefined) payload.Credits = patch.credits;
   if (patch.signature !== undefined) payload.Signature = patch.signature;
   if (patch.allowCopy !== undefined) payload.allowCopy = patch.allowCopy !== false;
+  if (patch.folder !== undefined) payload.folder = patch.folder;
+  if (patch.slug !== undefined) payload.slug = patch.slug;
+  if (patch.username !== undefined) payload.username = patch.username;
   await f.updateDoc(f.doc(db, 'presentations', id), payload);
 }
 
@@ -604,6 +613,44 @@ export function describeError(error: unknown): string {
 }
 
 /** All published speeches belonging to one /username handle. */
+/**
+ * Is this address already taken by another of the author's works?
+ *
+ * The address belongs to one person, so the check is scoped to their own
+ * writing: two authors may both have `/their-name/my-day`. Uniqueness is
+ * enforced here for a clear error message, and again by the write itself —
+ * the rules do not allow a second work at the same address.
+ *
+ * `exceptId` is the work being renamed, which is allowed to keep its address.
+ */
+export async function pathTaken(
+  username: string,
+  folder: string,
+  slug: string,
+  exceptId?: string,
+): Promise<boolean> {
+  const works = await fetchSpeechesByUsername(username);
+  return works.some(
+    (work) =>
+      work.id !== exceptId
+      && (work.slug ?? '') === slug
+      && (work.folder ?? '') === folder,
+  );
+}
+
+/** Move a work to a new address (`/user/folder/slug`). */
+export async function moveSpeech(
+  id: string,
+  username: string,
+  folder: string,
+  slug: string,
+): Promise<void> {
+  if (await pathTaken(username, folder, slug, id)) {
+    throw new Error(`/@${username}/${[folder, slug].filter(Boolean).join('/')} is already one of your links.`);
+  }
+  await updateSpeechDoc(id, { username, folder, slug });
+}
+
 export async function fetchSpeechesByUsername(username: string): Promise<CloudSpeech[]> {
   if (!FIREBASE_ENABLED) return [];
   const bundle = await fs(); if (!bundle) return [];

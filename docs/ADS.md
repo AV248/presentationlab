@@ -93,3 +93,15 @@ active:             true
 - Changes take up to **ten minutes** to appear for a returning visitor — the
   browser caches the list, and that cache is what keeps ads from costing
   every page load. The admin **Ad desk** shows whatever the browser has.
+
+## Editing ads from the site (2.7)
+
+The workspace's **Ads** tab is no longer read-only. Create, edit and delete
+documents in `servingads` from `/admin` → *Ads*: title, one-line teaser, body,
+image URL, destination and weight. Only the title is required; both URLs must be
+`https://` if set (validated before the write, and again before the render).
+
+Two things used to make an ad edit look like it never saved: the browser cached
+the list for **ten minutes** (now one minute, and a save clears it outright),
+and the read could be served from a local cache (now `getDocsFromServer`, so a
+change shows on the next page view).

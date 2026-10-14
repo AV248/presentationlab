@@ -57,7 +57,15 @@ export interface Ad {
 }
 
 const CACHE_KEY = 'pb.servingads.v1';
-const CACHE_TTL = 10 * 60 * 1000;
+/**
+ * A minute, not ten.
+ *
+ * Ten minutes was long enough that an ad edited in the console looked like it
+ * had not been saved at all — the single most confusing thing about this
+ * collection. The cache still exists (it keeps a page from re-reading on every
+ * render), but it now expires quickly, and an admin save clears it outright.
+ */
+const CACHE_TTL = 60 * 1000;
 const MAX_ADS = 40;
 
 export const HOUSE_ADS: Ad[] = [
@@ -255,9 +263,12 @@ export async function fetchActiveAds(options: { fresh?: boolean } = {}): Promise
       if (!bundle) return [];
 
       const { fs, db } = bundle;
-      const snap = await fs.getDocs(
-        fs.query(fs.collection(db, ADS_COLLECTION), fs.limit(MAX_ADS)),
-      );
+      const target = fs.query(fs.collection(db, ADS_COLLECTION), fs.limit(MAX_ADS));
+      // Ask the server, not a local cache: this collection is edited by hand
+      // and a stale read is indistinguishable from "my change did not save".
+      const snap = fs.getDocsFromServer
+        ? await fs.getDocsFromServer(target).catch(() => fs.getDocs(target))
+        : await fs.getDocs(target);
 
       const ads = snap.docs
         .map((doc) => mapAd(doc.id, doc.data()))

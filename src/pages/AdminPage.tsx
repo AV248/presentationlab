@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Crown, KeyRound, Megaphone, RefreshCw, Shield, Users, FileText } from 'lucide-react';
+import { Crown, KeyRound, Lock, Megaphone, Plus, RefreshCw, Save, Shield, Trash2, Users, FileText } from 'lucide-react';
 import { useAuth } from '../store/auth';
 import { useUi } from '../store/ui';
 import { usePageMeta } from '../lib/seo';
@@ -14,7 +14,25 @@ import {
   type CloudSpeech,
   type Post,
 } from '../services/data';
-import { fetchAllAds, type Ad } from '../services/ads';
+import { fetchAllAds, clearAdCache, type Ad } from '../services/ads';
+import {
+  assignHandle,
+  clearAdminPassword,
+  deleteAd,
+  fetchGateState,
+  isAdminUnlocked,
+  listHandles,
+  lockAdmin,
+  markAdminUnlocked,
+  releaseHandle,
+  reserveHandle,
+  saveAd,
+  setAdminPassword,
+  verifyAdminPassword,
+  type AdDraft,
+  type HandleRow,
+} from '../services/admin';
+import { validateUsername } from '../lib/identity';
 import { FESTIVALS } from '../data/festivals';
 import { fetchSiteFestival, setSiteFestival } from '../services/profiles';
 import { FIREBASE_ENABLED } from '../services/firebase';
@@ -53,6 +71,9 @@ export function AdminPage() {
   const [users, setUsers] = useState<Awaited<ReturnType<typeof fetchUsers>>>([]);
   const [ads, setAds] = useState<Ad[]>([]);
   const [adsError, setAdsError] = useState<string | null>(null);
+  const [unlocked, setUnlocked] = useState(isAdminUnlocked);
+  const [gate, setGate] = useState<{ configured: boolean } | null>(null);
+  const [handles, setHandles] = useState<HandleRow[]>([]);
 
   const isAdmin = role === 'admin' || role === 'owner';
   const isOwner = role === 'owner';
@@ -81,6 +102,12 @@ export function AdminPage() {
     if (isAdmin) void load();
   }, [isAdmin, load]);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    void fetchGateState().then(setGate);
+    void listHandles().then(setHandles).catch(() => setHandles([]));
+  }, [isAdmin]);
+
   /* ------------------------------------------------------------ */
   /* gates                                                          */
   /* ------------------------------------------------------------ */
@@ -91,6 +118,36 @@ export function AdminPage() {
         <p className="pb-muted">Checking your sign-in…</p>
       </div>
     );
+  }
+
+  // Anyone without a role is told nothing. The workspace is not advertised,
+  // linked, indexed or — now — reachable: a role-holder's door, and a blank
+  // wall for everybody else.
+  if (!isAdmin) {
+    return (
+      <div className="pb-page pb-narrow" style={{ textAlign: 'center' }}>
+        <h1 className="pb-page-title">Nothing here</h1>
+        <p className="pb-muted" style={{ lineHeight: 1.7 }}>
+          This page does not exist. If you were looking for your own corner of the site, it is at{' '}
+          <span className="pb-mono">/your-username</span>.
+        </p>
+      </div>
+    );
+  }
+
+  // The second lock. A password the role-holder set, asked once per browser
+  // session. It is not the security boundary — Firestore rules are, and they
+  // refuse writes from anyone without the role — it is a lock on the door for
+  // the borrowed-laptop case.
+  if (unlocked === false && gate?.configured !== false) {
+    if (gate === null) {
+      return (
+        <div className="pb-page pb-narrow">
+          <p className="pb-muted">Opening the workspace…</p>
+        </div>
+      );
+    }
+    return <AdminGate onUnlocked={() => setUnlocked(true)} />;
   }
 
   if (!FIREBASE_ENABLED || !user) {
@@ -223,6 +280,7 @@ export function AdminPage() {
 
       {tab === 'ads' && (
         <section>
+          <AdsEditor ads={ads} onChanged={() => { clearAdCache(); void load(); }} />
           <div className="pb-panel" style={{ padding: '16px 18px', marginBottom: 14 }}>
             <h2 style={{ fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
               <Megaphone size={16} /> Live inventory
@@ -310,11 +368,19 @@ export function AdminPage() {
       {tab === 'site' && <SiteThemeTab isOwner={isOwner} />}
 
       {tab === 'setup' && (
+        <PasswordPanel onLock={() => { lockAdmin(); setUnlocked(false); }} />)}
+
+      {tab === 'setup' && (
         <EnvCheckPanel />
       )}
 
       {tab === 'people' && (
         <section>
+          <HandlesPanel
+            handles={handles}
+            users={users}
+            onChanged={() => { void listHandles().then(setHandles).catch(() => undefined); }}
+          />
           <p className="pb-muted" style={{ fontSize: '0.84rem', marginBottom: 12, lineHeight: 1.7 }}>
             {isOwner
               ? 'Grant or withdraw the admin role. People keep their library and drafts either way — a role only opens this workspace.'
@@ -453,6 +519,392 @@ function SiteThemeTab({ isOwner }: { isOwner: boolean }) {
         {FESTIVALS.map((f) => (
           <button key={f.id} type="button" disabled={!isOwner} className={`pb-chip ${current === f.id ? 'pb-chip-accent' : ''}`} onClick={() => { void setSiteFestival(f.id).then(() => { setCurrent(f.id); toast(`Site theme: ${f.name}`, 'success'); }).catch((e: Error) => toast(e.message, 'error')); }}>{f.emoji} {f.name}</button>
         ))}
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* The password prompt                                                  */
+/* ------------------------------------------------------------------ */
+
+function AdminGate({ onUnlocked }: { onUnlocked: () => void }) {
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const ok = await verifyAdminPassword(value);
+      if (!ok) {
+        setError('That is not the password.');
+        return;
+      }
+      markAdminUnlocked();
+      onUnlocked();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="pb-page pb-narrow">
+      <form className="pb-panel" style={{ padding: '22px 24px' }} onSubmit={submit}>
+        <h1 className="pb-page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Lock size={18} /> The workspace is locked
+        </h1>
+        <p className="pb-muted" style={{ fontSize: '0.85rem', lineHeight: 1.7, marginBottom: 14 }}>
+          Your account has the role. The password is the second lock you set for this page.
+        </p>
+        <label className="pb-label" htmlFor="admin-password">Password</label>
+        <input
+          id="admin-password"
+          className="pb-input"
+          type="password"
+          autoFocus
+          autoComplete="current-password"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+        />
+        {error && (
+          <p className="pb-muted" style={{ color: 'var(--c-bad, #c0392b)', fontSize: '0.8rem', marginTop: 8 }}>
+            {error}
+          </p>
+        )}
+        <div style={{ marginTop: 14 }}>
+          <button className="pb-btn" type="submit" disabled={busy || !value}>
+            {busy ? 'Checking…' : 'Unlock'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Ads: create, edit, delete                                            */
+/* ------------------------------------------------------------------ */
+
+const EMPTY_AD: AdDraft = {
+  Title: '', DescriptionPreview: '', Content: '', ImageURL: '', RedirectURL: '', weight: 1,
+};
+
+function AdsEditor({ ads, onChanged }: { ads: Ad[]; onChanged: () => void }) {
+  const toast = useUi((s) => s.toast);
+  const [draft, setDraft] = useState<AdDraft>(EMPTY_AD);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const field = (key: keyof AdDraft) => ({
+    value: String(draft[key]),
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setDraft({ ...draft, [key]: key === 'weight' ? Number(e.target.value) : e.target.value }),
+  });
+
+  const beginEdit = (ad: Ad) => {
+    setEditingId(ad.id);
+    setDraft({
+      Title: ad.title,
+      DescriptionPreview: ad.body ?? '',
+      Content: ad.content ?? '',
+      ImageURL: ad.imageUrl ?? '',
+      RedirectURL: ad.url ?? '',
+      weight: ad.weight ?? 1,
+    });
+  };
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await saveAd(editingId, draft);
+      toast(editingId ? 'Ad updated — it is live now.' : 'Ad created — it is live now.', 'success');
+      setDraft(EMPTY_AD);
+      setEditingId(null);
+      onChanged();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (ad: Ad) => {
+    if (!window.confirm(`Delete the ad "${ad.title}"? This cannot be undone.`)) return;
+    setBusy(true);
+    try {
+      await deleteAd(ad.id);
+      toast('Ad deleted.', 'success');
+      onChanged();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="pb-panel" style={{ padding: '18px 20px', marginBottom: 14 }}>
+      <h2 style={{ fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <Plus size={16} /> {editingId ? 'Edit this ad' : 'Create an ad'}
+      </h2>
+      <p className="pb-muted" style={{ fontSize: '0.8rem', lineHeight: 1.7, marginBottom: 12 }}>
+        Saved straight to <span className="pb-mono">servingads</span> and live on the next page view —
+        the browser cache is cleared for you. Only <span className="pb-mono">Title</span> is required;
+        image and destination are optional, and both must be{' '}
+        <span className="pb-mono">https://</span> if set.
+      </p>
+      <form onSubmit={save} style={{ display: 'grid', gap: 12 }}>
+        <div>
+          <label className="pb-label" htmlFor="ad-title">Title *</label>
+          <input id="ad-title" className="pb-input" {...field('Title')} placeholder="What the card says" />
+        </div>
+        <div>
+          <label className="pb-label" htmlFor="ad-preview">One-line teaser</label>
+          <input id="ad-preview" className="pb-input" {...field('DescriptionPreview')} placeholder="Shown under the title" />
+        </div>
+        <div>
+          <label className="pb-label" htmlFor="ad-body">Body</label>
+          <textarea id="ad-body" className="pb-textarea" rows={3} {...field('Content')} placeholder="The full copy, for the larger card" />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+          <div>
+            <label className="pb-label" htmlFor="ad-image">Image URL</label>
+            <input id="ad-image" className="pb-input" {...field('ImageURL')} placeholder="https://…" />
+          </div>
+          <div>
+            <label className="pb-label" htmlFor="ad-url">Redirect link</label>
+            <input id="ad-url" className="pb-input" {...field('RedirectURL')} placeholder="https://…" />
+          </div>
+          <div>
+            <label className="pb-label" htmlFor="ad-weight">Weight (1–10)</label>
+            <input id="ad-weight" className="pb-input" type="number" min={1} max={10} value={draft.weight} onChange={(e) => setDraft({ ...draft, weight: Number(e.target.value) })} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="pb-btn" type="submit" disabled={busy || !draft.Title.trim()}>
+            <Save size={14} /> {editingId ? 'Save changes' : 'Create ad'}
+          </button>
+          {editingId && (
+            <button className="pb-btn pb-btn-ghost" type="button" onClick={() => { setEditingId(null); setDraft(EMPTY_AD); }}>
+              Cancel
+            </button>
+          )}
+        </div>
+      </form>
+
+      {ads.length > 0 && (
+        <div style={{ marginTop: 16, display: 'grid', gap: 8 }}>
+          <strong style={{ fontSize: '0.82rem' }}>Edit or delete</strong>
+          {ads.map((ad) => (
+            <div key={ad.id} className="pb-panel-flat" style={{ padding: '10px 12px', display: 'flex', gap: 10, alignItems: 'center' }}>
+              <span style={{ flex: 1, minWidth: 0, fontSize: '0.85rem' }}>{ad.title}</span>
+              <button className="pb-btn pb-btn-sm pb-btn-ghost" type="button" onClick={() => beginEdit(ad)} disabled={busy}>Edit</button>
+              <button className="pb-btn pb-btn-sm pb-btn-ghost" type="button" onClick={() => void remove(ad)} disabled={busy} aria-label={`Delete ${ad.title}`}>
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Handles: reserve, give, take back                                    */
+/* ------------------------------------------------------------------ */
+
+function HandlesPanel({
+  handles,
+  users,
+  onChanged,
+}: {
+  handles: HandleRow[];
+  users: Awaited<ReturnType<typeof fetchUsers>>;
+  onChanged: () => void;
+}) {
+  const toast = useUi((s) => s.toast);
+  const [name, setName] = useState('');
+  const [note, setNote] = useState('');
+  const [forUid, setForUid] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const valid = validateUsername(name);
+
+  const act = async (work: () => Promise<unknown>, done: string) => {
+    setBusy(true);
+    try {
+      await work();
+      toast(done, 'success');
+      onChanged();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="pb-panel" style={{ padding: '18px 20px', marginBottom: 14 }}>
+      <h2 style={{ fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <Crown size={16} /> Handles
+      </h2>
+      <p className="pb-muted" style={{ fontSize: '0.8rem', lineHeight: 1.7, marginBottom: 12 }}>
+        Reserve a username so nobody else can take it, or hand one to somebody who is already
+        signed up — it becomes theirs, and their profile says so immediately. A reserved name is
+        claimable only by the person it was reserved for.
+      </p>
+
+      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+        <div>
+          <label className="pb-label" htmlFor="handle-name">Username</label>
+          <input id="handle-name" className="pb-input" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} placeholder="reserved_name" autoComplete="off" />
+          {name && !valid.ok && (
+            <p className="pb-muted" style={{ fontSize: '0.74rem', marginTop: 4 }}>{valid.error}</p>
+          )}
+        </div>
+        <div>
+          <label className="pb-label" htmlFor="handle-note">Note (optional)</label>
+          <input id="handle-note" className="pb-input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why it is held" />
+        </div>
+        <div>
+          <label className="pb-label" htmlFor="handle-person">Give to</label>
+          <select id="handle-person" className="pb-input" value={forUid} onChange={(e) => setForUid(e.target.value)}>
+            <option value="">— nobody yet (just reserve) —</option>
+            {users.map((person) => (
+              <option key={person.uid} value={person.uid}>
+                {person.displayName || person.email || person.uid}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+        <button
+          className="pb-btn"
+          type="button"
+          disabled={busy || !valid.ok}
+          onClick={() => {
+            const person = users.find((u) => u.uid === forUid);
+            void act(
+              () => (person
+                ? assignHandle(valid.username, { uid: person.uid, email: person.email ?? '', displayName: person.displayName ?? '' })
+                : reserveHandle(valid.username, { note })),
+              person ? `@${valid.username} is now ${person.displayName || person.email}'s.` : `@${valid.username} reserved.`,
+            ).then(() => { setName(''); setNote(''); setForUid(''); });
+          }}
+        >
+          {forUid ? 'Give this handle' : 'Reserve this handle'}
+        </button>
+      </div>
+
+      {handles.length > 0 && (
+        <div style={{ marginTop: 16, display: 'grid', gap: 6 }}>
+          <strong style={{ fontSize: '0.82rem' }}>All handles ({handles.length})</strong>
+          {handles.map((row) => (
+            <div key={row.username} className="pb-panel-flat" style={{ padding: '8px 10px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span className="pb-mono" style={{ fontSize: '0.82rem' }}>@{row.username}</span>
+              <span className="pb-muted" style={{ fontSize: '0.76rem', flex: 1, minWidth: 120 }}>
+                {row.uid ? `held by ${row.uid}` : row.reserved ? `reserved${row.email ? ` for ${row.email}` : ''}${row.note ? ` — ${row.note}` : ''}` : 'unassigned'}
+              </span>
+              <button
+                className="pb-btn pb-btn-sm pb-btn-ghost"
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  if (!window.confirm(`Release @${row.username}? The name becomes available to anybody.`)) return;
+                  void act(() => releaseHandle(row.username), `@${row.username} released.`);
+                }}
+              >
+                Release
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* The password itself                                                  */
+/* ------------------------------------------------------------------ */
+
+function PasswordPanel({ onLock }: { onLock: () => void }) {
+  const toast = useUi((s) => s.toast);
+  const [state, setState] = useState<{ configured: boolean } | null>(null);
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void fetchGateState().then(setState);
+  }, []);
+
+  return (
+    <section className="pb-panel" style={{ padding: '18px 20px', marginBottom: 14 }}>
+      <h2 style={{ fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <KeyRound size={16} /> The password on this page
+      </h2>
+      <p className="pb-muted" style={{ fontSize: '0.8rem', lineHeight: 1.7, marginBottom: 12 }}>
+        {state?.configured
+          ? 'A password is required every time this page is opened in a new browser session. It is stored as a PBKDF2 hash, never as text.'
+          : 'No password is set. Set one and this page will ask for it before showing anything.'}
+        {' '}Your role is still what protects the data — the rules refuse writes without it.
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div style={{ flex: '1 1 220px' }}>
+          <label className="pb-label" htmlFor="new-admin-password">
+            {state?.configured ? 'New password' : 'Set a password'}
+          </label>
+          <input
+            id="new-admin-password"
+            className="pb-input"
+            type="password"
+            autoComplete="new-password"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="At least 8 characters"
+          />
+        </div>
+        <button
+          className="pb-btn"
+          type="button"
+          disabled={busy || value.length < 8}
+          onClick={() => {
+            setBusy(true);
+            void setAdminPassword(value)
+              .then(() => { setValue(''); setState({ configured: true }); toast('Password set.', 'success'); })
+              .catch((e) => toast((e as Error).message, 'error'))
+              .finally(() => setBusy(false));
+          }}
+        >
+          Save password
+        </button>
+        <button className="pb-btn pb-btn-ghost" type="button" onClick={onLock}>Lock now</button>
+        {state?.configured && (
+          <button
+            className="pb-btn pb-btn-ghost"
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              if (!window.confirm('Remove the password? The page will open for your account without asking.')) return;
+              setBusy(true);
+              void clearAdminPassword()
+                .then(() => { setState({ configured: false }); toast('Password removed.', 'success'); })
+                .catch((e) => toast((e as Error).message, 'error'))
+                .finally(() => setBusy(false));
+            }}
+          >
+            Remove
+          </button>
+        )}
       </div>
     </section>
   );

@@ -273,7 +273,20 @@ function ClerkAuthBridge() {
 /** Clerk's own account menu: manage profile, switch account, sign out. */
 export function AccountMenu() {
   if (!CLERK_ENABLED) return null;
-  return <UserButton afterSignOutUrl="/" showName={false} />;
+  return (
+    <UserButton
+      afterSignOutUrl="/"
+      showName={false}
+      /* Connected accounts are switched off for this site: sign-in is
+         e-mail plus whatever the dashboard enables, and a social account
+         linked here would be a second way in that nobody asked for. The
+         dashboard toggle in docs/SIGNIN.md closes it at the source; this
+         keeps the section out of the menu as well. */
+      userProfileProps={{
+        appearance: { elements: { profileSection__connectedAccounts: { display: 'none' } } },
+      }}
+    />
+  );
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

@@ -8,6 +8,7 @@ import { useUi } from '../store/ui';
 import { useGate } from '../components/SignIn';
 import { validateUsername, normalizeUsername, RESERVED_HANDLES } from '../lib/identity';
 import { claimUsername, fetchHandleState, fetchProfile, isUsernameAvailable, type PublicProfile } from '../services/profiles';
+import { workPath } from '../lib/paths';
 import { fetchSpeechesByUsername, type CloudSpeech } from '../services/data';
 import { shortUrl } from '../lib/share';
 import { copyText } from '../lib/platform';
@@ -17,7 +18,7 @@ import { Markdown } from '../components/Markdown';
 /** /:username — everything about a person and their work.
  *  /:username/:slug — one of their creations, at their own address. */
 export function HandlePage() {
-  const { username: raw, slug } = useParams<{ username: string; slug?: string }>();
+  const { username: raw, slug, folder } = useParams<{ username: string; slug?: string; folder?: string }>();
   const username = normalizeUsername(raw ?? '');
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [works, setWorks] = useState<CloudSpeech[]>([]);
@@ -36,10 +37,23 @@ export function HandlePage() {
   const localWorks = useMemo(() => isMine ? mine.filter((m) => m.status === 'published') : [], [isMine, mine]);
   if (RESERVED_HANDLES.has(username)) return <NotFoundHandle username={username} />;
   if (slug) {
-    const work = works.find((w) => (w.slug || '') === slug || w.id === slug)
-      ?? localWorks.find((w) => (w.slug || '') === slug || w.id === slug);
+    // The address a writer chose: /user1/speech, or /user1/folder/speech with
+    // exactly one folder. Resolution order matters — an exact match on both
+    // segments, then a match on the speech alone (a link made before folders
+    // existed, or a work moved into a folder afterwards), then a folder's own
+    // listing.
+    const bySegments = <T extends PathListItem>(list: T[]): T | undefined =>
+      list.find((w) => (w.folder ?? '') === (folder ?? '') && ((w.slug ?? '') === slug || w.id === slug));
+    const bySlugOnly = <T extends PathListItem>(list: T[]): T | undefined =>
+      list.find((w) => !folder && ((w.slug ?? '') === slug || w.id === slug));
+    const work = bySegments(works) ?? bySegments(localWorks) ?? bySlugOnly(works) ?? bySlugOnly(localWorks);
     if (work) return <HandleWork username={username} work={work} />;
-    if ((loaded || isMine) && !work) return <NotFoundHandle username={username} what="speech" />;
+
+    if (!folder) {
+      const inFolder = [...works, ...localWorks].filter((w) => (w.folder ?? '') === slug);
+      if (inFolder.length) return <HandleFolder username={username} folder={slug} works={inFolder} />;
+    }
+    if (loaded || isMine) return <NotFoundHandle username={username} what="speech" />;
     return <p className="pb-muted" style={{ padding: 24 }}>Opening @{username}/{slug}…</p>;
   }
   // Nobody holds this address: say so plainly instead of rendering a page
@@ -86,8 +100,8 @@ export function HandlePage() {
         <h2 style={{ fontSize:'1.1rem', marginBottom:12 }}>Their work</h2>
         {[...works, ...localWorks].length === 0 && <div className="pb-panel" style={{ padding:24 }}><p className="pb-muted">{loaded || !isMine ? 'Nothing published here yet.' : 'Publish from the Writing Desk and it will live at this address.'}</p></div>}
         <div style={{ display:'grid', gap:10 }}>
-          {works.map((w) => (<article key={w.id} className="pb-panel" style={{ padding:'16px 18px' }}><Link to={`/${username}/${w.slug || w.id}`} style={{ fontWeight:700, fontSize:'1.05rem' }}>{w.title}</Link><p className="pb-soft" style={{ marginTop:6, lineHeight:1.6 }}>{w.preview}</p><div style={{ display:'flex', gap:8, marginTop:10 }}><Link className="pb-btn pb-btn-sm" to={`/read/${w.id}`}>Read</Link><Link className="pb-btn pb-btn-sm pb-btn-ghost" to={`/rehearse/${w.id}`}><Mic2 size={13}/> Rehearse</Link></div></article>))}
-          {localWorks.map((w) => (<article key={w.id} className="pb-panel" style={{ padding:'16px 18px' }}><Link to={`/${username}/${w.slug || w.id}`} style={{ fontWeight:700, fontSize:'1.05rem' }}>{w.title}</Link><p className="pb-soft" style={{ marginTop:6, lineHeight:1.6 }}>{w.preview}</p></article>))}
+          {works.map((w) => (<article key={w.id} className="pb-panel" style={{ padding:'16px 18px' }}><Link to={workPath(username, w.slug || w.id, w.folder ?? '')} style={{ fontWeight:700, fontSize:'1.05rem' }}>{w.title}</Link><p className="pb-soft" style={{ marginTop:6, lineHeight:1.6 }}>{w.preview}</p><div style={{ display:'flex', gap:8, marginTop:10 }}><Link className="pb-btn pb-btn-sm" to={`/read/${w.id}`}>Read</Link><Link className="pb-btn pb-btn-sm pb-btn-ghost" to={`/rehearse/${w.id}`}><Mic2 size={13}/> Rehearse</Link></div></article>))}
+          {localWorks.map((w) => (<article key={w.id} className="pb-panel" style={{ padding:'16px 18px' }}><Link to={workPath(username, w.slug || w.id, w.folder ?? '')} style={{ fontWeight:700, fontSize:'1.05rem' }}>{w.title}</Link><p className="pb-soft" style={{ marginTop:6, lineHeight:1.6 }}>{w.preview}</p></article>))}
         </div>
       </section>
     </div>
@@ -127,6 +141,42 @@ function NotFoundHandle({ username, what }: { username: string; what?: string })
       </p>
       {!what && <Link to="/claim" className="pb-btn pb-btn-primary">Claim @{username}</Link>}
       {what && <Link to={`/${username}`} className="pb-btn">See @{username}</Link>}
+    </div>
+  );
+}
+
+/** The shape a listing needs — both a cloud speech and a local draft have it. */
+interface PathListItem { id: string; title: string; preview: string; slug?: string; folder?: string }
+
+/** A folder of one writer's work: /user1/<folder>. */
+function HandleFolder({ username, folder, works }: { username: string; folder: string; works: PathListItem[] }) {
+  usePageMeta(`@${username}/${folder}`, {
+    description: `Writing filed under ${folder} by @${username} on Presentation Buddy.`,
+  });
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--l-rhythm)' }}>
+      <section className="pb-panel" style={{ padding: 'clamp(18px,3.5vw,26px)' }}>
+        <span className="pb-eyebrow">Folder</span>
+        <h1 style={{ fontSize: 'clamp(1.4rem,3vw,2rem)', margin: '6px 0' }}>
+          <span className="pb-mono">@{username}/{folder}</span>
+        </h1>
+        <p className="pb-soft" style={{ lineHeight: 1.65 }}>
+          {works.length} {works.length === 1 ? 'piece' : 'pieces'} filed here by @{username}.
+        </p>
+      </section>
+      <div style={{ display: 'grid', gap: 12 }}>
+        {works.map((w) => (
+          <article key={w.id} className="pb-panel" style={{ padding: '16px 18px' }}>
+            <Link to={workPath(username, w.slug || w.id, w.folder ?? '')} style={{ fontWeight: 700, fontSize: '1.05rem' }}>
+              {w.title}
+            </Link>
+            <p className="pb-soft" style={{ marginTop: 6, lineHeight: 1.6 }}>{w.preview}</p>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <Link className="pb-btn pb-btn-sm" to={`/read/${w.id}`}>Read</Link>
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }

@@ -158,3 +158,23 @@ Environment variables are the site's *keys*, not its *contents*. Every speech,
 profile, handle, reaction and piece of feedback lives in the Firestore data
 project and is untouched by clearing Vercel. Re-adding the values restores
 access to exactly the data that was there.
+
+## The workspace has a second lock (2.7)
+
+`/admin` is now three things at once:
+
+1. **Invisible** to anyone without a role — the page answers as if it does not
+   exist (it is already `noindex, nofollow`).
+2. **Password-protected** by a passphrase the role-holder sets in *Setup* →
+   *The password on this page*. Stored in `adminPrivate/gate` as a
+   PBKDF2-SHA256 hash (210,000 iterations, per-install salt), never as text, and
+   readable only by role-holders. Asked once per browser session; *Lock now*
+   ends it.
+3. **Fully powered**: role-holders may edit ads, reserve and hand out handles,
+   set the theme and manage content. `canManage()` in `firestore.rules` is the
+   one place that decides this — the founder account is included by name, so
+   ownership never depends on a document that only an owner could create.
+
+The password is a lock on the door, not the wall: the rules are what refuse
+writes from anyone without the role. Forget the password and you can delete the
+`adminPrivate/gate` document in the Firebase console to clear it.
