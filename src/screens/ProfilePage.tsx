@@ -17,9 +17,18 @@ import { copyText } from '../lib/platform';
 import { usePageMeta } from '../lib/usePageMeta';
 import { Markdown } from '../components/Markdown';
 
+/** What the server already read, handed over so the page can be rendered as
+ *  HTML before the browser runs. Absent on a client-side navigation. */
+export interface HandleSeed {
+  username: string;
+  profile: PublicProfile | null;
+  works: CloudSpeech[];
+  handleState: 'held' | 'free' | 'unknown';
+}
+
 /** /:username — everything about a person and their work.
  *  /:username/:slug — one of their creations, at their own address. */
-export function HandlePage() {
+export function HandlePage({ initial }: { initial?: HandleSeed } = {}) {
   // The route is `/[username]/[[...rest]]`: one piece is the speech, two are
   // folder-then-speech. Reading it here keeps the URL grammar in exactly one
   // place, and every link into this page is still written by `profilePath`.
@@ -27,21 +36,32 @@ export function HandlePage() {
   const pieces = Array.isArray(rest) ? rest : rest ? [rest] : [];
   const folder = pieces.length > 1 ? pieces[0] : undefined;
   const slug = pieces.length ? pieces[pieces.length - 1] : undefined;
-  const username = normalizeUsername(raw ?? '');
-  const [profile, setProfile] = useState<PublicProfile | null>(null);
-  const [works, setWorks] = useState<CloudSpeech[]>([]);
-  const [handleState, setHandleState] = useState<'held' | 'free' | 'unknown' | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const username = normalizeUsername(raw ?? '') || initial?.username || '';
+  // Seeded from the server when there is a server answer: the page is already
+  // HTML, and these are the values that were rendered into it.
+  const [profile, setProfile] = useState<PublicProfile | null>(initial?.profile ?? null);
+  const [works, setWorks] = useState<CloudSpeech[]>(initial?.works ?? []);
+  const [handleState, setHandleState] = useState<'held' | 'free' | 'unknown' | null>(
+    initial?.handleState ?? null,
+  );
+  const [loaded, setLoaded] = useState(Boolean(initial));
   const me = useProfile(); const user = useAuth((s) => s.user);
   const mine = useLibrary((s) => s.mine);
   const isMine = Boolean(username) && me.username === username;
   usePageMeta(profile ? `${profile.displayName} (@${username})` : `@${username}`, { description: profile?.bio || `Speeches and work by @${username} on Presentation Buddy.`, robots: profile || isMine ? undefined : 'noindex, follow' });
-  useEffect(() => { let alive = true; void (async () => {
-    const state = await fetchHandleState(username);
-    const p = await fetchProfile(username);
-    const w = await fetchSpeechesByUsername(username);
-    if (!alive) return; setHandleState(state); setProfile(p); setWorks(w); setLoaded(true);
-  })(); return () => { alive = false; }; }, [username]);
+  useEffect(() => {
+    // The server already answered for this handle; asking again would be a
+    // round trip to render what is on the screen.
+    if (initial) return;
+    let alive = true;
+    void (async () => {
+      const state = await fetchHandleState(username);
+      const p = await fetchProfile(username);
+      const w = await fetchSpeechesByUsername(username);
+      if (!alive) return; setHandleState(state); setProfile(p); setWorks(w); setLoaded(true);
+    })();
+    return () => { alive = false; };
+  }, [username, initial]);
   const localWorks = useMemo(() => isMine ? mine.filter((m) => m.status === 'published') : [], [isMine, mine]);
   if (RESERVED_HANDLES.has(username)) return <NotFoundHandle username={username} />;
   if (slug) {

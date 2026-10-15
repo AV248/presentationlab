@@ -287,24 +287,42 @@ weight and measure.
 
 ```bash
 npm install
-npm run dev       # http://localhost:5173
-npm run build     # type-check + bundle + share cards + 57 prerendered pages + sitemap in dist/
-npm run preview   # serve the production bundle
-npm run verify    # type-check + jsdom smoke test
+npm run dev          # http://localhost:3000
+npm run build        # share cards + next build (66 routes, sitemap, robots)
+npm start            # serve the production build
+npm run verify       # everything that can be checked without a server
+npm run verify:all   # verify + build + ask the running site what it answers
 ```
 
-The smoke test renders all 17 routes, checks every theme axis has more than twenty unique options,
-applies all 26 layout modes, compiles all 13,709,280 theme combinations, checks that every preset
-resolves, confirms sponsored slots degrade gracefully offline, and fails on any React console
-error. `npm run cards`, `npm run prerender` and `npm run sitemap` run each post-build stage
-separately when iterating.
+`npm run verify` is five checks, and each one exists because of a specific way this project was
+broken by something that looked fine:
+
+| command | what it answers |
+| --- | --- |
+| `npm run typecheck` | does the code compile, strictly |
+| `npm run audit:secrets` | is any server-only key about to reach a browser bundle |
+| `npm run check:schema` | is `supabase/schema.sql` complete — tables, RLS, policies, helpers |
+| `npm run check:pg` | does that file *apply* as a pasted schema, and do its functions work |
+| `npm run check:reading` | does the server reader answer correctly from Turso, from Postgres, from neither |
+| `npm run check:library` | do the projection, FTS5 search and `/api/library` agree |
+
+`npm run verify:all` adds `npm run check:routes`, which starts the built site the way the host does
+and asks it the questions a reader, a crawler and a link checker would: 200s with the right titles,
+real 404s, the old paths still redirecting, the endpoints' refusals, the security headers, and —
+with a database behind it — that a writer's name and their work are in the HTML the server sends.
 
 ### Stack
 
-React 19 · TypeScript (strict) · Vite 7 · Tailwind v4 bridged to runtime CSS variables · Zustand ·
-lucide-react · Clerk 5 (sign-in) · Supabase (`@supabase/supabase-js`, lazy-loaded: the data layer
-only downloads when someone signs in or the library asks for cloud speeches) · Convex (presence)
-· `@libsql/client` server-side for the Turso reading room · PWA manifest + service worker.
+React 19 · TypeScript (strict) · **Next.js 16 (App Router)** — server components for the pages
+that must be readable without JavaScript, route handlers for the API · Tailwind v4 bridged to
+runtime CSS variables · Zustand · lucide-react · Clerk (sign-in, JWT) · Supabase
+(`@supabase/supabase-js`: the truth — Postgres, RLS, storage) · Turso (`@libsql/client`): the
+reading room, a read-only projection with FTS5 search · Convex: the live layer · PWA manifest +
+service worker.
+
+The five `VITE_*` environment variables keep their names. `next.config.ts` inlines them at build
+time so the browser code goes on reading exactly what it always read, and the deployment's
+variable list never had to change.
 
 ---
 

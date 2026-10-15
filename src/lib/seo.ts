@@ -63,3 +63,21 @@ export interface PageMetaOptions {
   /** One or more JSON-LD blocks. */
   jsonLd?: Record<string, unknown>[];
 }
+
+/**
+ * The site's own address, for use inside structured data.
+ *
+ * On the server this answers with what the running deployment was told, which
+ * is what structured data should name; in the browser it answers with the
+ * build-time constant, because that is all a bundle can know. Both are the
+ * same value in production — the difference only shows up when the same build
+ * is served from another address, which is exactly when the wrong answer would
+ * be baked into a page.
+ */
+export function siteUrl(): string {
+  if (typeof window === 'undefined') {
+    const fromServer = process.env?.['VITE_SITE_URL'] || process.env?.['SITE_URL'];
+    if (fromServer) return String(fromServer).replace(/\/+$/, '');
+  }
+  return SITE_URL;
+}

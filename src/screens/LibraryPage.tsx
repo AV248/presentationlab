@@ -30,6 +30,7 @@ import { greetingFor } from '../lib/heart';
 import { pageMetaFor } from '../data/routes';
 import { SITE_URL } from '../lib/seo';
 import { usePageMeta } from '../lib/usePageMeta';
+import type { CloudSpeech } from '../lib/speech';
 
 type SortKey = 'newest' | 'viewed' | 'liked' | 'shortest' | 'longest' | 'az' | 'random';
 type Shelf = 'latest' | 'viewed';
@@ -44,7 +45,13 @@ const SORTS: { id: SortKey; label: string }[] = [
   { id: 'random', label: 'Shuffle' },
 ];
 
-export function LibraryPage() {
+/**
+ * `initial` is the newest published work, read on the server. It is what makes
+ * this page arrive as a real list — titles, authors, previews — instead of an
+ * empty shell that fills in a moment later, which matters here more than
+ * anywhere: this is the page a search engine sees first.
+ */
+export function LibraryPage({ initial }: { initial?: CloudSpeech[] } = {}) {
   const navigate = useNavigate();
   const meta = pageMetaFor('/');
   usePageMeta(meta?.title ?? 'Presentation Buddy — Write, rehearse and deliver talks that land', {
@@ -53,7 +60,7 @@ export function LibraryPage() {
     canonical: SITE_URL,
     jsonLd: meta?.jsonLd,
   });
-  const items = useSpeeches();
+  const items = useSpeeches(initial);
   const bookmarks = useLibrary((s) => s.bookmarks);
   const history = useLibrary((s) => s.history);
   const progress = useLibrary((s) => s.progress);

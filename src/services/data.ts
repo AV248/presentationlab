@@ -23,92 +23,20 @@
  * sharing — are single database functions rather than a sequence of writes.
  */
 
-import type { Speech } from '../data/speeches';
 import { loadBackend, BACKEND_ENABLED } from './backend';
+import { mapSpeechRow, str, num, isoTimestamp, type CloudSpeech } from '../lib/speech';
 
 export type CloudStatus = 'off' | 'connecting' | 'online' | 'error';
 export type Role = 'owner' | 'admin' | null;
 
-/* ------------------------------------------------------------------ */
-/* mapping                                                             */
-/* ------------------------------------------------------------------ */
-
-function str(value: unknown, fallback = ''): string {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number') return String(value);
-  return fallback;
-}
-
-function num(value: unknown, fallback = 0): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return fallback;
-}
-
-function isoTimestamp(value: unknown): string {
-  if (!value) return '';
-  try {
-    // Rows carry ISO strings; the shape below is for anything older.
-    const maybe = value as { toDate?: () => Date; seconds?: number };
-    if (typeof maybe.toDate === 'function') return maybe.toDate().toISOString();
-    if (typeof maybe.seconds === 'number') return new Date(maybe.seconds * 1000).toISOString();
-  } catch {
-    /* fall through */
-  }
-  return str(value);
-}
-
-export interface CloudSpeech extends Speech {
-  uid: string;
-  /** One optional sub-folder, so a work can live at /user/folder/slug. */
-  folder?: string;
-  views: number;
-  likes: number;
-  dislikes: number;
-  shares: number;
-  ad: boolean;
-  updatedAt: string;
-  createdMs: number;
-}
-
-function mapSpeech(id: string, data: Record<string, unknown>): CloudSpeech {
-  const content = str(data.Content ?? data.content);
-  const title = str(data.Title ?? data.title, 'Untitled');
-  const created = isoTimestamp(data.createdAt ?? data.Date ?? data.date);
-  return {
-    id,
-    kind: 'speech',
-    title,
-    author: str(data.Author ?? data.author, 'Anonymous'),
-    category: str(data.Category ?? data.category, 'General'),
-    occasion: str(data.Occasion ?? data.occasion, 'Shared speech'),
-    level: 'Standard',
-    tags: str(data.Tags ?? data.tags)
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter(Boolean),
-    preview: str(data.Preview ?? data.preview) || content.replace(/[#>*`]/g, '').slice(0, 180),
-    content: content || 'This speech has no body text yet.',
-    createdAt: created ? created.slice(0, 10) : new Date().toISOString().slice(0, 10),
-    uid: str(data.uid ?? data.authorUid),
-    username: str(data.username) || undefined,
-    slug: str(data.slug) || undefined,
-    folder: str(data.folder) || undefined,
-    credits: str(data.Credits ?? data.credits) || undefined,
-    signature: str(data.Signature ?? data.signature) || undefined,
-    allowCopy: data.allowCopy === false ? false : true,
-    views: num(data.views),
-    likes: num(data.likes),
-    dislikes: num(data.dislikes),
-    shares: num(data.shares),
-    ad: Boolean(data.ad),
-    updatedAt: isoTimestamp(data.updatedAt),
-    createdMs: created ? new Date(created).getTime() : 0,
-  };
-}
+/*
+ * The row → speech mapping used to live here. It moved to `@/lib/speech`
+ * because the server needs it too: server components render these rows into
+ * HTML before the browser runs, and a second copy of the mapping would be a
+ * second answer to "what does this speech look like".
+ */
+export { mapSpeechRow } from '../lib/speech';
+export type { CloudSpeech, SpeechRow } from '../lib/speech';
 
 /* ------------------------------------------------------------------ */
 /* helpers                                                             */
@@ -137,7 +65,7 @@ export async function fetchSpeeches(): Promise<CloudResult> {
     if (!bundle) return { items: [], status: 'off' };
     const { fs: f, db } = bundle;
     const snap = await f.getDocs(f.query(f.collection(db, 'presentations'), f.limit(200)));
-    const items = snap.docs.map((doc) => mapSpeech(doc.id, doc.data()));
+    const items = snap.docs.map((doc) => mapSpeechRow(doc.id, doc.data()));
     return { items, status: 'online' };
   } catch (error) {
     return {
@@ -154,7 +82,7 @@ export async function getSpeech(id: string): Promise<CloudSpeech | null> {
   const { fs: f, db } = bundle;
   const snap = await f.getDoc(f.doc(db, 'presentations', id));
   if (!snap.exists()) return null;
-  return mapSpeech(snap.id, snap.data() ?? {});
+  return mapSpeechRow(snap.id, snap.data() ?? {});
 }
 
 /** A real view: one increment per open. Fails silently if rules forbid it. */
@@ -222,6 +150,49 @@ export async function publishSpeech(
   };
   const ref = await f.addDoc(f.collection(db, 'presentations'), payload);
   return { id: ref.id };
+}
+
+/* ------------------------------------------------------------------ */
+/* The reading room, kept in step with the truth                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Ask the server to rebuild the reading room.
+ *
+ * Publishing writes to Postgres, which is the truth. Turso holds a *copy*, so
+ * something has to carry the new row across — and it has to be the server that
+ * does it, because the Turso token never reaches a browser.
+ *
+ * This is deliberately fire-and-forget from the caller's point of view: the
+ * speech is published the moment Postgres accepts it, and a copy that is a
+ * minute late is not an error anyone needs to see. Failures are returned
+ * rather than thrown so the caller can say "published, and the fast copy will
+ * catch up" instead of pretending the publish failed.
+ */
+export async function refreshReadingRoom(
+  getToken: () => Promise<string | null>,
+): Promise<{ ok: boolean; synced?: number; reason?: string }> {
+  try {
+    const token = await getToken();
+    if (!token) return { ok: false, reason: 'no-session' };
+
+    const response = await fetch('/api/sync-library', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      synced?: number;
+      error?: string;
+      message?: string;
+    };
+    if (!response.ok) {
+      return { ok: false, reason: payload.error ?? `http_${response.status}` };
+    }
+    return { ok: true, synced: payload.synced };
+  } catch (error) {
+    return { ok: false, reason: (error as Error).message };
+  }
 }
 
 export async function updateSpeechDoc(id: string, patch: Partial<PublishInput>): Promise<void> {
@@ -630,6 +601,6 @@ export async function fetchSpeechesByUsername(username: string): Promise<CloudSp
   const { fs: f, db } = bundle;
   try {
     const snap = await f.getDocs(f.query(f.collection(db, 'presentations'), f.where('username', '==', username), f.limit(100)));
-    return snap.docs.map((d) => mapSpeech(d.id, d.data()));
+    return snap.docs.map((d) => mapSpeechRow(d.id, d.data()));
   } catch { return []; }
 }

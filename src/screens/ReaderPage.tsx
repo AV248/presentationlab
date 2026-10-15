@@ -40,12 +40,24 @@ import { useGate } from '../components/SignIn';
 import { pageMetaFor } from '../data/routes';
 import { SITE_URL, absoluteUrl } from '../lib/seo';
 import { usePageMeta } from '../lib/usePageMeta';
+import type { CloudSpeech } from '../lib/speech';
 
-export function ReaderPage() {
+/**
+ * `initial` is the speech, already read on the server.
+ *
+ * Without it the page renders its loading state and the text appears a moment
+ * later, which is exactly what a shared link must not do. With it, the body of
+ * the speech is in the HTML that arrives; the screen still reads from the
+ * collection so that the reader's own notes, bookmarks, progress and reactions
+ * behave as they always did, and so a locally saved draft works without any
+ * network at all.
+ */
+export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const item = useSpeech(id);
-  const items = useSpeeches();
+  const fromCollection = useSpeech(id);
+  const items = useSpeeches(initial ? [initial] : undefined);
+  const item = fromCollection ?? items.find((entry) => entry.id === id);
   const toast = useUi((s) => s.toast);
   const gate = useGate();
 

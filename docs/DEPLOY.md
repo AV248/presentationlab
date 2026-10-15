@@ -115,8 +115,13 @@ reading, Convex carries presence. The full picture and every setting:
    SQL editor and run it. Connect Clerk under **Authentication → Third-party
    auth**. That is the entire setup: tables, indexes, policies and the two
    counter functions arrive together.
-2. **Turso** — create a database, then `npm run db:turso` and
-   `npm run sync:turso`. Optional; without it reads come from Postgres.
+2. **Turso** — create a database and set `TURSO_DATABASE_URL` +
+   `TURSO_AUTH_TOKEN`. Nothing else: the reading room builds its own schema the
+   first time the site publishes something, and fills itself every time
+   afterwards. (The **Rebuild reading room** button in the Control Room, and
+   `npm run db:turso && npm run sync:turso` from a terminal, do the same two
+   steps by hand, which is what you want if you have edited Postgres directly.)
+   Optional; without it every read comes from Postgres.
 3. **Convex** — `npx convex deploy`, add Clerk as a provider, and create the
    JWT template named `convex`. Optional; without it the site is simply quiet.
 4. Copy `.env.example` to `.env` and fill in the values — nine variables, and

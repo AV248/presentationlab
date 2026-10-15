@@ -30,7 +30,8 @@ export default function robots(): MetadataRoute.Robots {
     rules: [
       {
         userAgent: '*',
-        allow: ['/', '/?q=', '/assets/', '/icons/', '/cards/'],
+        // `/_next/static/` needs no rule of its own: it is covered by `Allow: /`.
+      allow: ['/', '/?q=', '/icons/', '/cards/'],
         disallow: [
           '/admin',
           '/admin/',
@@ -41,7 +42,6 @@ export default function robots(): MetadataRoute.Robots {
           '/*?source=',
           '/*?category=',
         ],
-        crawlDelay: 1,
       },
       { userAgent: ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'PerplexityBot', 'ClaudeBot', 'Google-Extended'], allow: '/' },
       { userAgent: 'AhrefsBot', crawlDelay: 10 },

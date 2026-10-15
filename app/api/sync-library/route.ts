@@ -1,4 +1,5 @@
 import { projectLibrary } from '@/server/project';
+import { ensureLibrarySchema } from '@/server/reading';
 
 /**
  * Refresh the reading room.
@@ -95,6 +96,24 @@ export async function POST(request: Request) {
     return send(502, { error: 'identity_check_failed', message: (error as Error).message });
   }
 
+  /**
+   * Make sure the reading room has its tables.
+   *
+   * This is what removes "apply turso/schema.sql first, from a terminal on
+   * your own machine" from the setup. The file is the project's own schema,
+   * every statement in it is `if not exists`, and it creates empty tables —
+   * there is nothing here that can overwrite data or reveal any. It runs only
+   * on this path, which already required a signed-in caller, and at most once
+   * per process.
+   */
+  const schema = await ensureLibrarySchema();
+  if (!schema.ok) {
+    return send(502, {
+      error: 'library_schema_unavailable',
+      message: `The reading room could not be prepared: ${schema.note}`,
+    });
+  }
+
   const started = Date.now();
   try {
     const result = await projectLibrary({
@@ -108,6 +127,9 @@ export async function POST(request: Request) {
     return send(200, {
       ok: true,
       synced: result.synced,
+      // Said out loud rather than hidden: a caller seeing `schema: applied` is
+      // watching the reading room being built for the first time.
+      schema: schema.note,
       ms: Date.now() - started,
       at: new Date().toISOString(),
     });

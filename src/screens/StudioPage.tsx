@@ -27,7 +27,8 @@ import { useLibrary, TEMPLATE_BODY } from '../store/library';
 import { useUi } from '../store/ui';
 import { useAuth } from '../store/auth';
 import { useCloud } from '../store/cloud';
-import { pathTaken, publishSpeech } from '../services/data';
+import { pathTaken, publishSpeech, refreshReadingRoom } from '../services/data';
+import { clerkSessionToken } from '../services/clerk';
 import { useProfile } from '../store/profile';
 import { checkOriginality, contentSlug, COPYRIGHT_THRESHOLD } from '../lib/identity';
 import { slugifySegment, workPath } from '../lib/paths';
@@ -389,6 +390,21 @@ function Editor({
           toast(`Published — ${shortUrl(workPath(profile.username, finalSlug, finalFolder))}`, 'success');
           setWizard(false);
           void connect(true);
+          /*
+           * Postgres now holds it; the reading room does not yet. That copy is
+           * what readers are served, so it is rebuilt here — by the server,
+           * which is the only holder of the Turso token. Deliberately not
+           * awaited: the publish has already succeeded and the author should
+           * not watch a spinner for a copy that is a minute behind at worst.
+           */
+          void refreshReadingRoom(clerkSessionToken).then((result) => {
+            if (!result.ok && result.reason && result.reason !== 'no-session') {
+              useUi.getState().toast(
+                'Published. The fast copy will catch up on the next rebuild.',
+                'info',
+              );
+            }
+          });
         })()
           .catch((e: unknown) => toast((e as Error)?.message ?? 'Publish failed', 'error'))
           .finally(() => setPublishing(false));

@@ -99,3 +99,92 @@ npm run db:turso && npm run sync:turso && npm run build
 Set `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `SUPABASE_URL` and
 `SUPABASE_SERVICE_ROLE_KEY` for that build, then remove the last two and reset
 the build command to `npm run build`. Rotate the service key afterwards.
+
+---
+
+## The production pass — what the port actually turned up
+
+The migration above is the shape. This is what running it in anger found — each
+of these was a real fault or a real trap, not a tidy-up.
+
+### 1. A `loading.tsx` on a route that calls `notFound()` turns 404s into 200s
+
+The most expensive one. Adding `app/[username]/[[...rest]]/loading.tsx` makes
+the framework flush the page shell — with a 200 — and stream the page into it
+afterwards. By the time the page decides the handle does not exist and throws
+`notFound()`, the status code has already gone out over the wire. `/nobody-here`
+answered **200** with a "not found" body: exactly the thing the server-rendered
+handle page was built to stop, wearing a spinner.
+
+No `loading.tsx` exists anywhere in this project now. The trade — a spinner for
+a second on a slow cold start against every typo and dead link claiming to be a
+working page — is not close. The screens keep their own in-component loading
+states, which cost nothing.
+
+### 2. Server code must not read the inlined `VITE_*` variables
+
+`next.config.ts` inlines the five public variables at build time so the
+dashboard never changes. That substitution also lands in **server** bundles, so
+`process.env.VITE_SUPABASE_URL` inside `src/server/reading.ts` resolved to
+whatever the build saw — not what the running deployment was given. A preview,
+a local run or a test pointed at another database would silently keep talking to
+the one baked into the build, and the only symptom would be an empty page.
+
+`src/server/env.ts` reads the same names by bracket access, which the inliner
+does not rewrite, so the server sees its real environment. Client code is
+unchanged: inlining is exactly right there.
+
+### 3. The statement splitter was sending prose to the database
+
+Both schemas are applied by splitting the file on semicolons. The first version
+dropped the `--` that begins a comment but kept the comment's text, so
+`-- Handles: the site's address book` became SQL. `supabase/schema.sql` "applied"
+as 84 errors — and the same class of bug would have corrupted a *working*
+database silently.
+
+There is now one splitter, `src/server/sql.ts`, used by the runtime and by the
+checks, and it understands what a semicolon is inside: a string (with `''` and
+`E'\''`), a dollar-quoted body, a line comment, a nested block comment — and a
+`create trigger … begin … end;`, which is where the first fix broke SQLite.
+
+### 4. A copy that was never filled is not an empty library
+
+The reader asks the reading room first and Postgres second. "Empty" used to fall
+through correctly, but `source` was guessed from *configuration* rather than
+from who answered, so a misconfigured deployment reported itself as a healthy
+one and `npm run check:routes` believed it. `read()` now returns what happened.
+
+Related: `GET /api/library` used to answer `503 library_not_configured`
+whenever Turso was missing, even with a perfectly good Postgres configured —
+the endpoint contradicting the page it loads. With either database configured,
+it now serves; only with neither is it a 503.
+
+### 5. Publishing now rebuilds the reading room
+
+Publish and delete called nothing, so the projection was only as fresh as the
+last terminal run. Both call `/api/sync-library` on the way out (fire and
+forget — the publish has already succeeded). The endpoint also applies
+`turso/schema.sql` itself, so an empty reading room fills on first publish
+instead of needing LibSQL Studio first, and the Control Room has a **Rebuild
+reading room** button for the case where something was changed straight in
+Postgres.
+
+### 6. Pages that are cached must be able to refresh
+
+`/` and `/read/<id>` are prerendered, which is what makes them fast, but a
+prerendered page with no revalidation is frozen at build time: a speech
+published this morning would not appear on the front page until the next
+deploy. Both carry `export const revalidate = 60`.
+
+`/read/<id>` also answers a real **404** for a speech that is genuinely gone —
+and deliberately does *not* when the database could not be reached, because
+"this speech does not exist" and "nobody could check" are different sentences.
+
+### What is verified now
+
+`npm run verify:all` — 19 schema assertions against a real Postgres (PGlite),
+34 against the server reader (a real SQLite reading room, a stub PostgREST, and
+all four configured/unconfigured combinations), 17 against the projection and
+`/api/library`, and 48 against the running build, including a second phase that
+starts the same server with a database behind it and checks that a writer's name
+and work are in the HTML a crawler receives.

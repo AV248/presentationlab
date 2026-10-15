@@ -6,6 +6,7 @@ import { useCloud } from '../store/cloud';
 import { useAuth } from '../store/auth';
 import { wordCount, readingMinutes } from '../lib/text';
 import type { WebSpeech } from '../services/webSources';
+import type { CloudSpeech } from '../lib/speech';
 
 export type ItemSource = 'user' | 'cloud' | 'library' | 'web';
 
@@ -85,20 +86,37 @@ function decorate(
     myReaction: ctx.reactions[speech.id] ?? null,
     bookmarked: ctx.bookmarks.includes(speech.id),
     progress: ctx.progress[speech.id] ?? 0,
-    words: wordCount(speech.content),
-    minutes: readingMinutes(speech.content),
+    // A row handed over by the server carries its preview but not its body —
+    // the list only needs the preview, and shipping every speech's full text
+    // into the HTML of every page would be a cost with no reader-visible
+    // benefit. The estimate falls back to the preview in that case, which is
+    // within a minute of the truth and is corrected the moment the browser
+    // fetches the rows for real.
+    words: wordCount(speech.content || speech.preview),
+    minutes: readingMinutes(speech.content || speech.preview),
     rank: RANK[source],
     ...webExtra,
   };
 }
 
-export function useSpeeches(): CollectionItem[] {
+/**
+ * Every speech in the collection: the reader's own drafts, everything
+ * published by other people, the bundled starter library, and what the open
+ * archives have brought in.
+ *
+ * `seed` is what a server component already read — the published rows, ready
+ * before the browser has run. It is used only until the browser's own fetch
+ * lands, and only for the cloud rows, so a page can be rendered as real HTML
+ * without changing what it does once it is live.
+ */
+export function useSpeeches(seed?: CloudSpeech[]): CollectionItem[] {
   const mine = useLibrary((s) => s.mine);
   const shelf = useLibrary((s) => s.shelf);
   const hidden = useLibrary((s) => s.hidden);
   const bookmarks = useLibrary((s) => s.bookmarks);
   const progress = useLibrary((s) => s.progress);
-  const cloudItems = useCloud((s) => s.items);
+  const fetched = useCloud((s) => s.items);
+  const cloudItems = fetched.length ? fetched : (seed ?? []);
   const reactions = useAuth((s) => s.reactions);
 
   return useMemo(() => {
@@ -141,8 +159,8 @@ export function useSpeeches(): CollectionItem[] {
   }, [mine, cloudItems, shelf, hidden, bookmarks, progress, reactions]);
 }
 
-export function useSpeech(id: string | undefined): CollectionItem | undefined {
-  const items = useSpeeches();
+export function useSpeech(id: string | undefined, seed?: CloudSpeech[]): CollectionItem | undefined {
+  const items = useSpeeches(seed);
   return useMemo(() => items.find((item) => item.id === id), [items, id]);
 }
 

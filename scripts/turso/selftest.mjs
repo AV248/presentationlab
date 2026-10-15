@@ -109,6 +109,8 @@ async function bundle(entry, name) {
     platform: 'node',
     target: 'node20',
     packages: 'external',
+    // The app's own alias. esbuild is not TypeScript, so it has to be told.
+    alias: { '@': resolve(ROOT, 'src') },
     outfile,
     logLevel: 'error',
   });
