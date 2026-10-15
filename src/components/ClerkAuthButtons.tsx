@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * Sign-in methods, drawn in Presentation Buddy's clothes — and honest about
  * failure when it happens.

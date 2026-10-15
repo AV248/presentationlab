@@ -1,5 +1,7 @@
+'use client';
+
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from '@/lib/router';
 import { ArrowUpRight, X } from 'lucide-react';
 import { shortUrl } from '../lib/share';
 import { shareOrCopy } from '../lib/platform';

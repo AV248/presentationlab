@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useState } from 'react';
 import { Star, X } from 'lucide-react';
 import { useAuth } from '../store/auth';

@@ -1,5 +1,7 @@
+'use client';
+
 import { useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from '@/lib/router';
 import { Keyboard, Sparkles, X } from 'lucide-react';
 import { ThemeStudio } from './ThemeStudio';
 import { useUi } from '../store/ui';

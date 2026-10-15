@@ -15,7 +15,7 @@
  * on the server, used by `/api/library`, so it never reaches a visitor.
  */
 
-const env = (import.meta.env ?? {}) as ImportMetaEnv & Record<string, string | undefined>;
+import { env } from '../../lib/env';
 
 const clean = (value: string | undefined) => (value ?? '').trim();
 
@@ -55,7 +55,7 @@ export function backendSummary(): { name: string; configured: boolean; job: stri
   ];
 }
 
-if (import.meta.env?.DEV && !BACKEND_ENABLED) {
+if (env.DEV && !BACKEND_ENABLED) {
   console.info(
     '[pb] No Supabase configuration — records stay on this device. ' +
       'Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to use the shared library.',

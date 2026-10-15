@@ -1,3 +1,5 @@
+'use client';
+
 import { useState } from 'react';
 import { Heart, Share2, ThumbsDown } from 'lucide-react';
 import type { CollectionItem } from '../hooks/useCollection';

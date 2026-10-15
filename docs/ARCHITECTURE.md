@@ -1,5 +1,10 @@
 # How Presentation Buddy is put together
 
+> **3.1:** the layer on top of all of this is the Next.js App Router — one `page.tsx` per
+> route in `app/`, the screens in `src/screens/`, the endpoints in `app/api/*/route.ts`, and
+> `src/lib/router.tsx` keeping the old `<Link to=…>` vocabulary working. The three databases
+> below are exactly as described. See [NEXTJS.md](NEXTJS.md).
+
 Three databases, one identity, one writer per fact.
 
 This replaces the old `docs/FIRESTORE.md`. Everything it described — collections,

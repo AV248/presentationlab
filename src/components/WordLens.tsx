@@ -1,3 +1,5 @@
+'use client';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BookOpen, ExternalLink, Loader2, X } from 'lucide-react';
 import { lookup, type Entry } from '../services/dictionary';

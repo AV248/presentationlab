@@ -42,96 +42,6 @@ create extension if not exists "pgcrypto";     -- gen_random_uuid()
 
 
 -- ============================================================================
---  Identity helpers
--- ============================================================================
-
--- The signed-in person's id, or null. Never trust a uid from a request body.
-create or replace function public.current_uid()
-returns text
-language sql
-stable
-as $$
-  select nullif(auth.jwt() ->> 'sub', '')
-$$;
-
-create or replace function public.current_email()
-returns text
-language sql
-stable
-as $$
-  select lower(coalesce(nullif(auth.jwt() ->> 'email', ''), ''))
-$$;
-
--- Does the caller hold a role? SECURITY DEFINER so the check itself is not
--- subject to the row policies on `admins` (which would recurse).
-create or replace function public.is_admin()
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1 from public.admins
-    where uid = public.current_uid()
-      and role in ('admin', 'owner')
-  )
-$$;
-
-create or replace function public.is_site_owner()
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1 from public.admins
-    where uid = public.current_uid()
-      and role = 'owner'
-  )
-$$;
-
--- The one-time door for the first owner, and the reason this file can be given
--- to somebody without opening anything: it works only while `admins` is empty.
-create or replace function public.bootstrap_owner(p_uid text, p_email text default null)
-returns text
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if exists (select 1 from public.admins limit 1) then
-    return 'refused: an owner already exists';
-  end if;
-  if p_uid is null or length(p_uid) < 3 then
-    return 'refused: pass a Clerk user id';
-  end if;
-
-  insert into public.profiles (uid, email)
-  values (p_uid, lower(coalesce(p_email, '')))
-  on conflict (uid) do nothing;
-
-  insert into public.admins (uid, role, email)
-  values (p_uid, 'owner', lower(coalesce(p_email, '')));
-
-  return 'ok: ' || p_uid || ' is now the owner';
-end;
-$$;
-
--- An address a writer can no longer live at: the site's own pages.
-create or replace function public.username_taken(p_username text)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (select 1 from public.handles where username = p_username)
-$$;
-
-
--- ============================================================================
 --  People
 -- ============================================================================
 
@@ -324,6 +234,96 @@ create table if not exists public.site_settings (
   value      jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
+
+
+-- ============================================================================
+--  Identity helpers
+-- ============================================================================
+
+-- The signed-in person's id, or null. Never trust a uid from a request body.
+create or replace function public.current_uid()
+returns text
+language sql
+stable
+as $$
+  select nullif(auth.jwt() ->> 'sub', '')
+$$;
+
+create or replace function public.current_email()
+returns text
+language sql
+stable
+as $$
+  select lower(coalesce(nullif(auth.jwt() ->> 'email', ''), ''))
+$$;
+
+-- Does the caller hold a role? SECURITY DEFINER so the check itself is not
+-- subject to the row policies on `admins` (which would recurse).
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.admins
+    where uid = public.current_uid()
+      and role in ('admin', 'owner')
+  )
+$$;
+
+create or replace function public.is_site_owner()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.admins
+    where uid = public.current_uid()
+      and role = 'owner'
+  )
+$$;
+
+-- The one-time door for the first owner, and the reason this file can be given
+-- to somebody without opening anything: it works only while `admins` is empty.
+create or replace function public.bootstrap_owner(p_uid text, p_email text default null)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if exists (select 1 from public.admins limit 1) then
+    return 'refused: an owner already exists';
+  end if;
+  if p_uid is null or length(p_uid) < 3 then
+    return 'refused: pass a Clerk user id';
+  end if;
+
+  insert into public.profiles (uid, email)
+  values (p_uid, lower(coalesce(p_email, '')))
+  on conflict (uid) do nothing;
+
+  insert into public.admins (uid, role, email)
+  values (p_uid, 'owner', lower(coalesce(p_email, '')));
+
+  return 'ok: ' || p_uid || ' is now the owner';
+end;
+$$;
+
+-- An address a writer can no longer live at: the site's own pages.
+create or replace function public.username_taken(p_username text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (select 1 from public.handles where username = p_username)
+$$;
 
 
 -- ============================================================================
@@ -526,6 +526,7 @@ alter table public.admin_private  enable row level security;
 alter table public.handles        enable row level security;
 alter table public.speeches       enable row level security;
 alter table public.reactions      enable row level security;
+alter table public.shares         enable row level security;
 alter table public.speech_views   enable row level security;
 alter table public.ads            enable row level security;
 alter table public.sponsors       enable row level security;

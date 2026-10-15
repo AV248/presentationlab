@@ -1,4 +1,6 @@
-import { useNavigate } from 'react-router-dom';
+'use client';
+
+import { useNavigate } from '@/lib/router';
 import { Bookmark, Cloud, FileText, Mic2, PenLine, Globe, DraftingCompass } from 'lucide-react';
 import type { CollectionItem } from '../hooks/useCollection';
 import { useLibrary } from '../store/library';

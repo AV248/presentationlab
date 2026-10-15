@@ -7,7 +7,7 @@
  *
  * This is the full sync, and it is the same code the app uses: the endpoint
  * `POST /api/sync-library` and this script both call `projectLibrary()` in
- * `api/_project.ts`. One implementation, two entry points — so the reading room
+ * `src/server/project.ts`. One implementation, two entry points — so the reading room
  * cannot mean one thing when the site refreshes it and another when you do.
  *
  * Use it for the first fill, and after anything large — a migration, a bulk
@@ -63,7 +63,7 @@ console.log(`  token    : ${tursoUrl.startsWith('file:') ? 'not needed (local fi
 if (checkOnly) console.log('  mode     : check only — nothing will be written');
 
 /**
- * Load `api/_project.ts`.
+ * Load `src/server/project.ts`.
  *
  * It is TypeScript, written for the serverless runtime, and this script is
  * plain node — so it is bundled by esbuild first, the same way the Vite dev
@@ -78,7 +78,7 @@ async function loadProjection() {
   const outfile = resolve(outDir, 'project.mjs');
 
   await build({
-    entryPoints: [resolve(ROOT, 'api/_project.ts')],
+    entryPoints: [resolve(ROOT, 'src/server/project.ts')],
     bundle: true,
     format: 'esm',
     platform: 'node',
@@ -90,7 +90,7 @@ async function loadProjection() {
 
   const module = await import(`${outfile}?t=${Date.now()}`);
   if (typeof module.projectLibrary !== 'function') {
-    throw new Error('api/_project.ts did not export projectLibrary — the sync cannot run.');
+    throw new Error('src/server/project.ts did not export projectLibrary — the sync cannot run.');
   }
   return module.projectLibrary;
 }

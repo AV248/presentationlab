@@ -319,7 +319,7 @@ function docToRow(
     const column = toColumn(field, value);
     if (column !== undefined) row[field.column] = column;
   }
-  if (unknown.length && import.meta.env?.DEV) {
+  if (unknown.length && process.env.NODE_ENV !== 'production') {
     console.warn(`[pb] ignored unmapped fields for ${spec.table}:`, unknown.join(', '));
   }
   if (!partial && Object.keys(row).length === 0) {
@@ -385,7 +385,7 @@ export async function getDocs(ref: QueryRef): Promise<QuerySnapshot> {
   for (const filter of ref.filters) {
     const field = ref.spec.fields[filter.field];
     if (!field) {
-      if (import.meta.env?.DEV) console.warn(`[pb] filtered on unmapped field "${filter.field}"`);
+      if (process.env.NODE_ENV !== 'production') console.warn(`[pb] filtered on unmapped field "${filter.field}"`);
       continue;
     }
     const value = toColumn(field, filter.value);

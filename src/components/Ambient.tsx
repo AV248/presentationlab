@@ -1,3 +1,5 @@
+'use client';
+
 import { useSettings } from '../store/settings';
 import { useMemo } from 'react';
 
