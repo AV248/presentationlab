@@ -1,6 +1,7 @@
-/** Festival & occasion themes (2.6). Owner picks ONE in Firestore
- * `siteSettings/theme` { festivalId }; everyone sees it, anyone may still
- * personalise locally — the festival is a seasonal skin over the palette. */
+/** Festival & occasion themes (2.6). The owner picks one, stored as
+ * `site_settings.theme` = { festivalId }; everyone sees it and anyone may
+ * still personalise locally — the festival is a seasonal skin, never a
+ * replacement, and never explained to visitors (2.6.2). */
 export interface FestivalTheme { id: string; name: string; group: string; note: string; greeting: string; accent: string; accent2: string; glow: string; emoji: string }
 const F = (id:string,name:string,group:string,note:string,greeting:string,accent:string,accent2:string,emoji:string): FestivalTheme => ({ id,name,group,note,greeting,accent,accent2,glow:accent,emoji });
 export const FESTIVALS: FestivalTheme[] = [

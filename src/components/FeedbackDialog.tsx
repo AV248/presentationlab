@@ -6,7 +6,7 @@ import { submitFeedback, flushFeedbackQueue } from '../services/profiles';
 const KEY = 'pb.feedback.last';
 /** Central feedback (2.6): appears at a random, unhurried moment — never in
  * the first minutes, never more than once a fortnight, never mid-rehearsal.
- * Stars first, words second. Saved to Firestore `feedback` (queued locally
+ * Stars first, words second. Saved to the `feedback` table (queued locally
  * when the cloud is off). */
 export function FeedbackDialog() {
   const [open, setOpen] = useState(false);

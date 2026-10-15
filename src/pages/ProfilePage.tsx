@@ -181,29 +181,25 @@ function HandleFolder({ username, folder, works }: { username: string; folder: s
   );
 }
 
-/** What each token-exchange failure means, in words somebody can act on. */
+/** What each connection failure means, in words somebody can act on. */
 const CLOUD_PROBLEM: Record<string, string> = {
-  'not-configured': 'Firebase is not configured for this build, so there is nowhere to record a handle.',
+  'not-configured':
+    'This build has no database configured (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY), so there is nowhere to record a handle.',
   'no-session': 'The Clerk session was not ready in time — try again in a moment.',
-  'endpoint-missing': 'The API half of the deployment is missing: /api/clerk-firebase-token answered 404.',
-  'server-misconfigured':
-    'The token endpoint is deployed but not configured — it answered 501, and its message names the variable (CLERK_SECRET_KEY or FIREBASE_SERVICE_ACCOUNT_JSON).',
-  'sdk-unavailable':
-    'The token endpoint is deployed but its Clerk dependency was not packaged with the function (501 clerk_sdk_unavailable). That is a build problem on our side, not a missing setting — nothing in Vercel needs changing.',
-  'auth-rejected':
-    'The token endpoint answered, but Firebase Auth refused the token it minted. That happens when FIREBASE_SERVICE_ACCOUNT_JSON is a key from a different Firebase project than VITE_FIREBASE_PROJECT_ID — Firebase verifies the token against its own project. The technical line below names the error.',
-  'method-rejected':
-    'The API refused the request method (405): something in front of the function is turning the POST into a GET. Check for a redirect rule on /api/* in vercel.json or a proxy in front of the deployment.',
-  unauthorized: 'The token endpoint refused the request (401) — check that CLERK_AUTHORIZED_PARTIES lists this exact origin.',
-  'server-error': 'The token endpoint answered with an error. The deployment logs will have the detail.',
-  network: 'The request to the token endpoint did not complete — offline, or something is blocking /api.',
+  unauthorized:
+    'The database refused the Clerk session token. Postgres has to be told that Clerk is a trusted issuer — Supabase → Authentication → Third-party auth → Clerk — with this instance as the issuer.',
+  'server-error':
+    'The database answered with an error. Applying supabase/schema.sql is the usual fix; the technical line below names the rest.',
+  network: 'The request to the database did not complete — offline, or something is blocking it.',
 };
 
 /** /claim — the username lives in Clerk; this page claims it for the site.
  *  • Username set in Clerk's Manage Account → arrives here pre-filled.
  *  • Username typed here → written back into Clerk (Manage Account shows it).
- *  • One username per user, forever: once claimed it can never be changed,
- *    here, in Clerk sync, or in Firestore (claimUsername enforces it). */
+ *  • One username per user, forever: once claimed it can never be changed —
+ *    here, in Clerk, or in the database. Both ends enforce it: the server
+ *    writes it once through /api/clerk-set-username, and `handles` has a real
+ *    unique index. */
 export function ClaimPage() {
   usePageMeta('Your username', { robots: 'noindex, follow' });
   const user = useAuth((s) => s.user); const gate = useGate(); const toast = useUi((s) => s.toast);
@@ -217,9 +213,9 @@ export function ClaimPage() {
   const [retrying, setRetrying] = useState(false);
   const cloudDown = Boolean(bridge && !bridge.ok);
   const cloudReason = bridge?.reason ? CLOUD_PROBLEM[bridge.reason] : null;
-  // The specific words behind the failure (the server's message, or Firebase's
-  // auth/... code). Without this a rejected token reads as "network" and sends
-  // everyone looking at the wrong thing.
+  // The specific words behind the failure — Postgres names the policy it
+  // refused, PostgREST names the code. Without this a rejected token reads as
+  // "network" and sends everyone looking at the wrong thing.
   const cloudDetail = bridge?.detail ?? null;
   const v = validateUsername(form.username || '___');
   // Clerk username appearing after mount (set in Manage Account) fills the field.
@@ -238,11 +234,10 @@ export function ClaimPage() {
         const outcome = await setClerkUsername(username);
         if (!outcome.ok) throw new Error(outcome.message ?? 'Clerk did not accept that username.');
       }
-      // 2) Firestore claim: handles/{username} lock + users/{uid} profile.
-      //    That write needs a cloud session (Clerk traded for a Firebase
-      //    token). If it is not up, try once more here — and if it still is
-      //    not, say what is wrong rather than letting the write fail as a
-      //    bare "insufficient permissions".
+      // 2) The claim itself: the `handles` row is the lock, `profiles` mirrors
+      //    it. Both writes need the session the bridge established. If it is
+      //    not up, try once more here — and if it still is not, say what is
+      //    wrong rather than letting the write fail as a bare refusal.
       if (user?.providerId === 'clerk' && !useAuth.getState().bridge?.ok) {
         const { retryCloudSession } = await import('../services/clerk');
         const ok = await retryCloudSession();
@@ -263,8 +258,8 @@ export function ClaimPage() {
     }
     catch (e) {
       const message = (e as Error).message;
-      // The rare race worth naming: Clerk took the name, Firestore refused it
-      // because somebody claimed it a moment earlier. Say exactly that.
+      // The rare race worth naming: Clerk took the name, the database refused
+      // it because somebody claimed it a moment earlier. Say exactly that.
       toast(
         /already (taken|claimed)/i.test(message)
           ? `${message} If Clerk already set it on your account, contact amaavrit@yahoo.com so it can be released.`

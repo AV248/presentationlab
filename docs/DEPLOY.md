@@ -97,45 +97,63 @@ presentationbuddy.aavrit.dedyn.io {
 }
 ```
 
-## 4. Firebase
+## 4. The databases
 
-Entirely optional — without it the app is fully local, and every cloud
-feature degrades to a quiet "not configured".
+Optional in the truest sense: with no variables set, the app is fully local and
+every cloud feature degrades to a quiet "not configured". With them, it is a
+shared library with accounts.
 
-1. Create a project, enable **Authentication → Google** and **Microsoft**.
-2. Add `presentationbuddy.aavrit.dedyn.io` under **Authentication → Settings
-   → Authorized domains**. Sign-in fails with `auth/unauthorized-domain`
-   without this, and it is the single most common deploy mistake.
-3. Create a **Firestore** database.
-4. Deploy the rules — they are not optional, the defaults are wide open:
-   ```bash
-   firebase deploy --only firestore:rules
+Three databases, each with one job — Postgres is the truth, Turso serves
+reading, Convex carries presence. The full picture and every setting:
+[ARCHITECTURE.md](ARCHITECTURE.md). The short version:
+
+1. **Supabase** — create a project, then paste `supabase/schema.sql` into the
+   SQL editor and run it. Connect Clerk under **Authentication → Third-party
+   auth**. That is the entire setup: tables, indexes, policies and the two
+   counter functions arrive together.
+2. **Turso** — create a database, then `npm run db:turso` and
+   `npm run sync:turso`. Optional; without it reads come from Postgres.
+3. **Convex** — `npx convex deploy`, add Clerk as a provider, and create the
+   JWT template named `convex`. Optional; without it the site is simply quiet.
+4. Copy `.env.example` to `.env` and fill in the values — nine variables, and
+   [ENV.md](ENV.md) is the list in order.
+
+### About the policies
+
+They live inside the schema, beside the tables they guard, which is the reason
+Postgres replaced Firestore here. A rule that names a column that does not exist
+is a rule you discover in production; a foreign key is one you discover in the
+editor.
+
+The interesting part is still the counters. A like has to move a number on a row
+you do not own, and in the Firestore version that had to be permitted by a rule
+allowing any signed-in person to change `likes` and nothing else. It is now a
+database function — `react_to_speech()` — that moves the reaction row, the
+speech's counters and the author's score inside one transaction. Nothing about
+the write is the client's to get wrong, and the totals can always be recomputed
+from the rows underneath them.
+
+Field names are still **capitalised** in the app (`Title`, `Content`, `Author`)
+— that is the schema from v1, and the mapping into real columns happens in one
+file. `npm run check:schema` fails the build if a field is mapped to a column
+that does not exist.
+
+### Making the first owner
+
+Roles live in `admins`, and only an `owner` may write them, so the first one
+comes from the database itself:
+
+1. Sign in to the site once, so a `profiles` row exists for you.
+2. Clerk Dashboard → **Users** → copy your user id.
+3. Supabase → **SQL Editor**:
+
+   ```sql
+   select public.bootstrap_owner('<clerk-user-id>', 'amaavrit@yahoo.com');
    ```
-5. Copy `.env.example` to `.env` and fill in the web config.
 
-### About the rules
-
-Counters are the interesting part. A like has to move a number on a document
-you do not own, so `firestore.rules` allows any signed-in person to change
-`views`, `likes`, `dislikes` and `shares` — and nothing else — on any speech.
-`diff().affectedKeys().hasOnly([...])` enforces that: touch the title or the
-body in the same write and the owner check applies instead. Each counter is
-also capped at `previous + 1`, so a hostile client cannot write `likes = 1e9`.
-
-Field names are **capitalised** (`Title`, `Content`, `Author`) — that is the
-original schema from v1 and the client still writes it. The rules validate
-those exact keys.
-
-### Making the first admin
-
-Roles live in `admins/{uid}` and only an `owner` may write them, so the first
-one has to be created from the console by hand:
-
-1. Sign in to the live site once so Firebase creates your account.
-2. **Authentication → Users** → copy your UID.
-3. **Firestore** → create collection `admins` → document ID = your UID →
-   field `role` (string) = `owner`.
 4. Reload. `/admin` is now reachable.
+
+It refuses if a role already exists — which is exactly what you want it to do.
 
 ## 5. Search Console
 

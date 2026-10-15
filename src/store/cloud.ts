@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { fetchSpeeches, type CloudSpeech, type CloudStatus } from '../services/data';
-import { FIREBASE_ENABLED, FIREBASE_PROJECT } from '../services/firebase';
+import { BACKEND_ENABLED, BACKEND_PROJECT } from '../services/backend';
 
 interface CloudState {
   status: CloudStatus;
@@ -16,15 +16,15 @@ interface CloudState {
 let started = false;
 
 export const useCloud = create<CloudState>((set, get) => ({
-  status: FIREBASE_ENABLED ? 'connecting' : 'off',
-  enabled: FIREBASE_ENABLED,
-  project: FIREBASE_PROJECT,
+  status: BACKEND_ENABLED ? 'connecting' : 'off',
+  enabled: BACKEND_ENABLED,
+  project: BACKEND_PROJECT,
   items: [],
   lastSync: null,
   loaded: false,
 
   connect: async (force = false) => {
-    if (!FIREBASE_ENABLED) {
+    if (!BACKEND_ENABLED) {
       set({ status: 'off', loaded: true });
       return;
     }

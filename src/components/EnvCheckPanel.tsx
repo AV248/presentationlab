@@ -145,7 +145,7 @@ export function EnvCheckPanel({ compact = false }: { compact?: boolean }) {
         >
           {probe === null
             ? checking
-              ? 'Asking the token endpoint…'
+              ? 'Asking the reading room…'
               : 'Not checked yet.'
             : probe.ok
               ? `${probe.label}: ${probe.detail}`
@@ -163,10 +163,10 @@ export function EnvCheckPanel({ compact = false }: { compact?: boolean }) {
           ))}
         </ol>
         <p className="pb-muted" style={{ fontSize: '0.74rem', lineHeight: 1.6, marginTop: 6 }}>
-          Then the three server-only ones, with <strong>no</strong> VITE_ prefix. Full instructions, including
-          where each value comes from: <span className="pb-mono">docs/ENV.md</span>. Clerk{' '}
-          {clerkOk ? 'is' : 'is not'} configured and the cloud {cloudOk ? 'is' : 'is not'} — that is why the site
-          currently behaves the way it does.
+          Then the {SERVER_VARIABLE_NAMES.length} server-only ones above, with <strong>no</strong> VITE_ prefix.
+          Full instructions, including where each value comes from:{' '}
+          <span className="pb-mono">docs/ENV.md</span>. Clerk {clerkOk ? 'is' : 'is not'} configured and the
+          database {cloudOk ? 'is' : 'is not'} — that is why the site currently behaves the way it does.
         </p>
       </details>
     </div>

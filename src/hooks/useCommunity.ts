@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchContributors, fetchPosts, type Contributor, type Post } from '../services/data';
-import { FIREBASE_ENABLED } from '../services/firebase';
+import { BACKEND_ENABLED } from '../services/backend';
 
 interface CommunityData {
   contributors: Contributor[];
@@ -13,13 +13,13 @@ interface CommunityData {
 let cache: { contributors: Contributor[]; posts: Post[]; at: number } | null = null;
 
 /**
- * Leaderboard and open-mic posts, straight from Firestore.
+ * Leaderboard and open-mic posts, straight from the database.
  * Only real accounts appear here — there are no placeholder people.
  */
 export function useCommunity(): CommunityData {
   const [contributors, setContributors] = useState<Contributor[]>(cache?.contributors ?? []);
   const [posts, setPosts] = useState<Post[]>(cache?.posts ?? []);
-  const [loading, setLoading] = useState(!cache && FIREBASE_ENABLED);
+  const [loading, setLoading] = useState(!cache && BACKEND_ENABLED);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
 
@@ -29,7 +29,7 @@ export function useCommunity(): CommunityData {
   }, []);
 
   useEffect(() => {
-    if (!FIREBASE_ENABLED) {
+    if (!BACKEND_ENABLED) {
       setLoading(false);
       return;
     }

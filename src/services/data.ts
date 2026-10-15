@@ -1,24 +1,30 @@
 /**
- * Firestore access for Presentation Buddy.
+ * Data access for Presentation Buddy.
  *
- * Collections (matching the original Presentation Lab, minus the password
- * handling):
- *   presentations  — speeches. Public read; authors may write.
- *   bloggerblogs   — community posts ("open mic"). Authors may write.
- *   bloggers       — one doc per contributor, with real reaction counters.
- *   reactions      — one doc per (person, speech): like or dislike.
- *   shares         — one doc per (person, speech) share.
- *   users          — profile mirror for every signed-in person.
- *   admins/{uid}   — role documents: 'owner' | 'admin'.
- *   admin          — the legacy allow-list from v1 (checked by email only).
- *   sponsors       — optional sponsor slots used by the ad gate.
+ * Everything durable lives in Postgres (Supabase). The names below are the
+ * app's own collection names; src/services/backend/supabase.ts maps each one
+ * to a table, and to the column behind every field:
+ *
+ *   presentations — speeches. Public read; authors may write their own.
+ *   bloggerblogs  — community posts ("open mic"). Authors may write.
+ *   users         — one row per person, carrying their own like score.
+ *   handles       — the username lock: one row per claimed name.
+ *   reactions     — one row per (person, speech): like or dislike.
+ *   shares        — one row per (person, speech) share.
+ *   admins        — role rows: 'owner' | 'admin'.
+ *   adminPrivate  — the second lock; readable only by a role-holder.
+ *   servingads    — sponsored cards.
+ *   sponsors      — optional sponsor slots used by the ad gate.
+ *   feedback      — what people tell us.
+ *   siteSettings  — one row per site-wide setting.
  *
  * Nothing here invents numbers. Counters only ever move by real increments
- * tied to a signed-in person.
+ * tied to a signed-in person, and the two that must be atomic — reacting and
+ * sharing — are single database functions rather than a sequence of writes.
  */
 
 import type { Speech } from '../data/speeches';
-import { loadFirebase, FIREBASE_ENABLED } from './firebase';
+import { loadBackend, BACKEND_ENABLED } from './backend';
 
 export type CloudStatus = 'off' | 'connecting' | 'online' | 'error';
 export type Role = 'owner' | 'admin' | null;
@@ -45,7 +51,7 @@ function num(value: unknown, fallback = 0): number {
 function isoTimestamp(value: unknown): string {
   if (!value) return '';
   try {
-    // Firestore Timestamp
+    // Rows carry ISO strings; the shape below is for anything older.
     const maybe = value as { toDate?: () => Date; seconds?: number };
     if (typeof maybe.toDate === 'function') return maybe.toDate().toISOString();
     if (typeof maybe.seconds === 'number') return new Date(maybe.seconds * 1000).toISOString();
@@ -109,7 +115,7 @@ function mapSpeech(id: string, data: Record<string, unknown>): CloudSpeech {
 /* ------------------------------------------------------------------ */
 
 async function fs() {
-  const bundle = await loadFirebase();
+  const bundle = await loadBackend();
   if (!bundle) return null;
   return bundle;
 }
@@ -125,7 +131,7 @@ export interface CloudResult {
 /* ------------------------------------------------------------------ */
 
 export async function fetchSpeeches(): Promise<CloudResult> {
-  if (!FIREBASE_ENABLED) return { items: [], status: 'off' };
+  if (!BACKEND_ENABLED) return { items: [], status: 'off' };
   try {
     const bundle = await fs();
     if (!bundle) return { items: [], status: 'off' };
@@ -258,9 +264,17 @@ export interface ReactionState {
 }
 
 /**
- * Sets or clears a reaction inside a transaction so the speech counters and
- * the author's `bloggers` counters can never drift apart.
- * Points are the rule from the original site: +1 per like, −1 per 3 dislikes.
+ * Sets or clears a reaction.
+ *
+ * The whole operation — the reaction row, the speech's counters and the
+ * author's points — happens inside one Postgres function
+ * (`public.react_to_speech`), so it is atomic on the server rather than
+ * transactional in a browser tab. Clicking the same reaction twice takes it
+ * back; points are +1 per like, −1 per 3 dislikes, exactly as on the original
+ * site.
+ *
+ * `uid` is passed for the reader's own bookkeeping; the function takes the
+ * identity from the verified token, so it cannot be spoofed from here.
  */
 export async function setReaction(
   speechId: string,
@@ -269,69 +283,20 @@ export async function setReaction(
 ): Promise<ReactionState> {
   const bundle = await fs();
   if (!bundle) throw new Error('Sign-in is required to react.');
-  const { fs: f, db } = bundle;
+  const { rpc } = bundle;
 
-  return f.runTransaction(db, async (tx) => {
-    const speechRef = f.doc(db, 'presentations', speechId);
-    const reactionRef = f.doc(db, 'reactions', `${uid}_${speechId}`);
-
-    const speechSnap = await tx.get(speechRef);
-    const reactionSnap = await tx.get(reactionRef);
-
-    const speechData = speechSnap.exists() ? speechSnap.data() ?? {} : {};
-    const previous = reactionSnap.exists() ? (str((reactionSnap.data() ?? {}).kind) as ReactionKind) : null;
-
-    let likes = num(speechData.likes);
-    let dislikes = num(speechData.dislikes);
-
-    if (previous === kind) {
-      // Clicking the same reaction twice takes it back.
-      if (kind === 'like') likes = Math.max(0, likes - 1);
-      else dislikes = Math.max(0, dislikes - 1);
-      tx.delete(reactionRef);
-      return { kind: null, likes, dislikes } as ReactionState;
-    }
-
-    if (previous === 'like') likes = Math.max(0, likes - 1);
-    if (previous === 'dislike') dislikes = Math.max(0, dislikes - 1);
-    if (kind === 'like') likes += 1;
-    else dislikes += 1;
-
-    tx.set(reactionRef, {
-      uid,
-      speechId,
-      kind,
-      updatedAt: f.serverTimestamp(),
-    });
-
-    // Only counter-update when the author is a real, known contributor.
-    const authorUid = str(speechData.uid);
-    if (speechSnap.exists() && authorUid) {
-      const bloggerRef = f.doc(db, 'bloggers', authorUid);
-      const bloggerSnap = await tx.get(bloggerRef);
-      if (bloggerSnap.exists()) {
-        const blogger = bloggerSnap.data() ?? {};
-        const receivedLikes = num(blogger.likesReceived) + (kind === 'like' ? 1 : 0) - (previous === 'like' ? 1 : 0);
-        const receivedDislikes =
-          num(blogger.dislikesReceived) + (kind === 'dislike' ? 1 : 0) - (previous === 'dislike' ? 1 : 0);
-        tx.set(
-          bloggerRef,
-          {
-            likesReceived: Math.max(0, receivedLikes),
-            dislikesReceived: Math.max(0, receivedDislikes),
-            points: Math.max(0, receivedLikes - Math.floor(receivedDislikes / 3)),
-            updatedAt: f.serverTimestamp(),
-          },
-          { merge: true },
-        );
-      }
-    }
-
-    tx.update(speechRef, { likes, dislikes });
-
-    return { kind, likes, dislikes } as ReactionState;
-  });
+  const result = await rpc<{ kind: string | null; likes: number; dislikes: number }>(
+    'react_to_speech',
+    { p_speech_id: speechId, p_kind: kind },
+  );
+  void uid;
+  return {
+    kind: (result?.kind ?? null) as ReactionKind | null,
+    likes: Number(result?.likes ?? 0),
+    dislikes: Number(result?.dislikes ?? 0),
+  };
 }
+
 
 export async function fetchMyReactions(uid: string): Promise<Record<string, ReactionKind>> {
   const bundle = await fs();
@@ -357,19 +322,19 @@ export async function fetchMyReactions(uid: string): Promise<Record<string, Reac
 /* shares — signed in only                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Count a share, once per person per speech.
+ *
+ * `public.record_share` inserts the row and moves the counter in one
+ * statement, so two taps in another tab cannot double-count; a repeat share by
+ * the same person is a no-op that returns the current number.
+ */
 export async function recordShare(speechId: string, uid: string): Promise<number> {
   const bundle = await fs();
   if (!bundle) throw new Error('Sign-in is required to share.');
-  const { fs: f, db } = bundle;
-  await f.setDoc(f.doc(db, 'shares', `${uid}_${speechId}`), {
-    uid,
-    speechId,
-    createdAt: f.serverTimestamp(),
-  });
-  const ref = f.doc(db, 'presentations', speechId);
-  await f.updateDoc(ref, { shares: f.increment(1) });
-  const snap = await f.getDoc(ref);
-  return num((snap.data() ?? {}).shares);
+  void uid;
+  const total = await bundle.rpc<number>('record_share', { p_speech_id: speechId });
+  return num(total);
 }
 
 /* ------------------------------------------------------------------ */
@@ -391,7 +356,7 @@ export async function fetchPosts(): Promise<Post[]> {
   if (!bundle) return [];
   const { fs: f, db } = bundle;
   try {
-    const snap = await f.getDocs(f.query(f.collection(db, 'bloggerblogs'), f.limit(100)));
+    const snap = await f.getDocs(f.query(f.collection(db, 'posts'), f.limit(100)));
     return snap.docs
       .map((doc) => {
         const data = doc.data();
@@ -423,14 +388,11 @@ export async function publishPost(title: string, body: string, uid: string, auth
     uid,
     createdAt: f.serverTimestamp(),
   });
-  try {
-    await f.updateDoc(f.doc(db, 'bloggers', uid), {
-      posts: f.increment(1),
-      updatedAt: f.serverTimestamp(),
-    });
-  } catch {
-    /* counter is best effort */
-  }
+  // There used to be a second write here, bumping a `posts` counter on a
+  // `bloggers` document. That collection no longer exists — and the leaderboard
+  // reads `profiles.points`, maintained by the reaction function, so the
+  // counter it fed was never displayed. Removed rather than redirected: a
+  // counter nobody reads is a number waiting to be wrong.
 }
 
 export async function deletePost(id: string) {
@@ -463,17 +425,22 @@ export async function fetchContributors(): Promise<Contributor[]> {
   if (!bundle) return [];
   const { fs: f, db } = bundle;
   try {
-    const snap = await f.getDocs(f.query(f.collection(db, 'bloggers'), f.limit(200)));
+    // One row per person. `likes_received`/`dislikes_received` are maintained
+    // by public.react_to_speech, so the points column is always explainable
+    // from the reactions themselves.
+    const snap = await f.getDocs(
+      f.query(f.collection(db, 'users'), f.orderBy('likesReceived', 'desc'), f.limit(200)),
+    );
     const rows = snap.docs.map((doc) => {
       const data = doc.data();
       const likesReceived = num(data.likesReceived);
       const dislikesReceived = num(data.dislikesReceived);
       return {
         uid: doc.id,
-        name: str(data.name, 'Anonymous'),
+        name: str(data.displayName, 'Anonymous'),
         email: typeof data.email === 'string' ? data.email : null,
         photoURL: typeof data.photoURL === 'string' ? data.photoURL : null,
-        posts: num(data.posts),
+        posts: num(data.points),
         likesReceived,
         dislikesReceived,
         points: pointsFor(likesReceived, dislikesReceived),
@@ -512,35 +479,31 @@ export async function fetchUsers(): Promise<
  * still carry the original `admin` collection we also check the e-mail
  * allow-list — never a password, which should never have lived in the client.
  */
-export async function fetchRole(uid: string, email: string | null): Promise<Role> {
+/**
+ * The role of one person, read from `admins`.
+ *
+ * The e-mail argument went away with the legacy v1 allow-list: a role is a row
+ * keyed by uid now, and the old fallback could only ever have thrown, because
+ * the collection it queried no longer exists.
+ */
+export async function fetchRole(uid: string): Promise<Role> {
   const bundle = await fs();
   if (!bundle) return null;
   const { fs: f, db } = bundle;
   try {
-    const direct = await f.getDoc(f.doc(db, 'admins', uid));
-    if (direct.exists()) {
-      const role = str((direct.data() ?? {}).role);
+    const row = await f.getDoc(f.doc(db, 'admins', uid));
+    if (row.exists()) {
+      const role = str((row.data() ?? {}).role);
       if (role === 'owner' || role === 'admin') return role;
     }
+    return null;
   } catch {
-    /* ignore and fall through to the legacy check */
+    // A refused read is not "no role" — but there is nothing else to try: a
+    // role the database will not show this person is not a role they hold.
+    // The old code fell through to a `admin` collection that no longer exists,
+    // which made a permissions problem look like a legacy fallback.
+    return null;
   }
-  if (email) {
-    try {
-      const legacy = await f.getDocs(
-        f.query(f.collection(db, 'admin'), f.where('email', '==', email), f.limit(1)),
-      );
-      const first = legacy.docs[0];
-      if (first) {
-        const role = str((first.data() ?? {}).role);
-        if (role === 'owner' || role === 'admin') return role;
-        return 'admin';
-      }
-    } catch {
-      /* no legacy collection, or rules deny it */
-    }
-  }
-  return null;
 }
 
 /** One-time bootstrap: make the signed-in person the owner. */
@@ -565,7 +528,9 @@ export async function setRole(uid: string, role: 'owner' | 'admin' | 'none') {
     await f.deleteDoc(f.doc(db, 'admins', uid));
     return;
   }
-  await f.setDoc(f.doc(db, 'admins', uid), { uid, role, updatedAt: f.serverTimestamp() }, { merge: true });
+  // `grantedAt` is a real column; the `updatedAt` this used to send matched no
+  // field in the map, so it was dropped and the row never recorded the change.
+  await f.setDoc(f.doc(db, 'admins', uid), { uid, role, grantedAt: f.serverTimestamp() }, { merge: true });
 }
 
 /* ------------------------------------------------------------------ */
@@ -603,13 +568,21 @@ export async function fetchSponsors(): Promise<Sponsor[]> {
 
 /* ------------------------------------------------------------------ */
 
+/**
+ * Postgres answers in five-character codes; a person should not have to read
+ * them. The ones worth naming are named, and everything else is passed through
+ * as the database wrote it — trimmed, never invented.
+ */
 export function describeError(error: unknown): string {
   const code = (error as { code?: string })?.code ?? '';
   const message = (error as { message?: string })?.message ?? '';
-  if (code === 'permission-denied') return 'Firestore rules denied that request.';
-  if (code === 'unavailable') return 'You appear to be offline.';
-  if (code === 'failed-precondition') return 'This query needs a Firestore index.';
-  return message.replace(/^FirebaseError:\s*/, '').slice(0, 160) || 'Something went wrong.';
+  if (code === '42501' || code === 'PGRST301') return 'The database refused that request — sign in and try again.';
+  if (code === '23505') return 'That name is already taken.';
+  if (code === '23503') return 'That row refers to something that no longer exists.';
+  if (code === '42P01' || code === 'PGRST205') return 'The database is missing a table — apply supabase/schema.sql.';
+  if (code === 'P0001') return message.slice(0, 160) || 'The database declined that.';
+  if (!navigator.onLine) return 'You appear to be offline.';
+  return message.replace(/^BackendError:\s*/, '').slice(0, 160) || 'Something went wrong.';
 }
 
 /** All published speeches belonging to one /username handle. */
@@ -652,7 +625,7 @@ export async function moveSpeech(
 }
 
 export async function fetchSpeechesByUsername(username: string): Promise<CloudSpeech[]> {
-  if (!FIREBASE_ENABLED) return [];
+  if (!BACKEND_ENABLED) return [];
   const bundle = await fs(); if (!bundle) return [];
   const { fs: f, db } = bundle;
   try {

@@ -14,8 +14,8 @@ import { HOUSE_ADS, fetchActiveAds, pickAd, type Ad } from '../services/ads';
  *   • dismissible for the rest of the session
  *   • every external link carries rel="sponsored noopener noreferrer"
  *
- * Ads are documents from the `servingads` collection in the separate ads
- * Firebase project. Every URL in them is scheme-checked in src/services/ads.ts
+ * Ads are rows from the `ads` table in this site's own database. Every URL in
+ * them is scheme-checked in src/services/ads.ts
  * before it reaches this component, so `RedirectURL: "javascript:..."` in the
  * database cannot become a clickable link.
  *

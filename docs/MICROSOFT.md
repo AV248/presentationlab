@@ -74,21 +74,21 @@ registered and correct for Clerk:
 https://clerk.aavrit.dedyn.io/v1/oauth_callback
 ```
 
-Add the Firebase handler **only** if you also use the no-Clerk path (Clerk is
-absent and the app falls back to Firebase's own `OAuthProvider`):
+That is the only callback this app needs. There is no Firebase handler to add,
+because there is no Firebase: Clerk is the only identity provider, and it is the
+one holding the client id and secret.
 
 ```powershell
 Invoke-MgGraphRequest -Method PATCH `
   -Uri "https://graph.microsoft.com/v1.0/applications/$objectId" `
   -Body (@{ web = @{ redirectUris = @(
-    'https://clerk.aavrit.dedyn.io/v1/oauth_callback',
-    'https://reflectioncapturedthoughts.firebaseapp.com/__/auth/handler'
+    'https://clerk.aavrit.dedyn.io/v1/oauth_callback'
   ) } } | ConvertTo-Json -Depth 5)
 ```
 
-Replacing the list is safe here: both entries are owned by us, and the Clerk
-callback must never be dropped — losing it breaks every Microsoft sign-in
-with `redirect_uri_mismatch`.
+If a Firebase handler is still listed, removing it is safe and tidy. The Clerk
+callback must never be dropped — losing it breaks every Microsoft sign-in with
+`redirect_uri_mismatch`.
 
 ## Fix 4 — permissions and consent
 
@@ -196,5 +196,5 @@ and the portal lock — nothing worth preserving.
 | `access_denied` | Org policy, or the account lacks assignment | Fix 4.2 |
 | `unauthorized_client` / "not enabled for consumers" | Wrong identifier in Clerk (Secret ID or Object ID instead of the Application (client) ID), or an app that excludes personal accounts | See the section above |
 | "This account is not allowed" in Entra | `Assignment required?` is on | Fix 4.2 |
-| Sign-in works, then the site still says signed out | The Clerk→Firebase token exchange failed | Check `CLERK_SECRET_KEY` and `FIREBASE_SERVICE_ACCOUNT_JSON` in Vercel; the endpoint names the missing variable |
+| Sign-in works, then the site still says signed out | The Clerk session cookie is missing or was set for a different Clerk instance | Check the cookie under `clerk.aavrit.dedyn.io`, and that `VITE_CLERK_PUBLISHABLE_KEY` belongs to the instance you configured |
 | Username keeps being asked for | The username is set in Clerk but not claimed here | `/claim` opens pre-filled — confirm it once; usernames are permanent |

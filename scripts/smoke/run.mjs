@@ -71,12 +71,13 @@ await build({
     'import.meta.env.PROD': 'false',
     'import.meta.env.DEV': 'true',
     'import.meta.env.BASE_URL': JSON.stringify('/'),
-    // Firebase and Clerk are deliberately left unset: the
-    // smoke test exercises the fully-local app, which is the configuration
-    // most likely to be somebody's first run and the one that must never
-    // break. Clerk in particular needs a real browser and a real network.
-    'import.meta.env.VITE_FIREBASE_API_KEY': JSON.stringify(''),
-    'import.meta.env.VITE_FIREBASE_PROJECT_ID': JSON.stringify(''),
+    // Every backend is deliberately left unset: the smoke test exercises the
+    // fully-local app, which is the configuration most likely to be somebody's
+    // first run and the one that must never break. Clerk in particular needs a
+    // real browser and a real network.
+    'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(''),
+    'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(''),
+    'import.meta.env.VITE_CONVEX_URL': JSON.stringify(''),
     'import.meta.env.VITE_CLERK_PUBLISHABLE_KEY': JSON.stringify(''),
   },
   logLevel: 'error',

@@ -21,7 +21,7 @@ import { useSettings, type ContrastBoost, type ReducedMotionPref } from '../stor
 import { useCloud } from '../store/cloud';
 import { useAuth } from '../store/auth';
 import { useUi } from '../store/ui';
-import { FIREBASE_ENABLED, FIREBASE_PROJECT } from '../services/firebase';
+import { BACKEND_ENABLED, BACKEND_PROJECT } from '../services/backend';
 import { deleteSpeechDoc, publishSpeech } from '../services/data';
 import { formatCount } from '../lib/text';
 import { pageMetaFor } from '../data/routes';
@@ -341,7 +341,7 @@ export function ControlPage() {
       {tab === 'cloud' && (
         <section className="pb-panel" style={{ padding: '18px 20px' }}>
           <h2 style={{ fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <Cloud size={17} /> Cloud {FIREBASE_ENABLED ? '' : '(not configured)'}
+            <Cloud size={17} /> Cloud {BACKEND_ENABLED ? '' : '(not configured)'}
           </h2>
           <div className="pb-well" style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span
@@ -361,11 +361,11 @@ export function ControlPage() {
                       : 'Local only'}
               </div>
               <div className="pb-muted" style={{ fontSize: '0.76rem' }}>
-                {FIREBASE_PROJECT ? `Project: ${FIREBASE_PROJECT}` : 'Add VITE_FIREBASE_* variables to enable sync.'}
+                {BACKEND_PROJECT ? `Database: ${BACKEND_PROJECT}` : 'Add VITE_SUPABASE_URL to enable sync.'}
                 {cloud.error ? ` · ${cloud.error}` : ''}
               </div>
             </div>
-            <button type="button" className="pb-btn pb-btn-sm" onClick={() => void cloud.connect(true)} disabled={!FIREBASE_ENABLED}>
+            <button type="button" className="pb-btn pb-btn-sm" onClick={() => void cloud.connect(true)} disabled={!BACKEND_ENABLED}>
               <RefreshCw size={14} /> Sync now
             </button>
           </div>

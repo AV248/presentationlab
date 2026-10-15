@@ -34,69 +34,76 @@ under **Configure → Domains**.
 
 ## Architecture in one paragraph
 
-Clerk signs people in. Firestore stores the data, but it cannot validate a
-Clerk JWT by itself — so `api/clerk-firebase-token.ts` verifies the Clerk
-session with your secret key and mints a Firebase custom token for the same
-person. Firestore rules then match on `request.auth.uid`, which is the Clerk
-user id. Ads come from a **second, separate** Firebase project that this app
-can only read.
+Clerk signs people in, and its session token is presented **directly** to the
+two databases that need one: Postgres (Supabase) trusts Clerk as a third-party
+issuer, and Convex trusts the same token through a JWT template named `convex`.
+There is no token exchange, no Firebase, and no second identity. Ads are rows in
+the same Postgres database as everything else. Turso serves reading.
 
 ```
-Browser                Vercel                        Google / Clerk
-────────               ──────                        ──────────────
-Clerk modal  ────────► Clerk (sign-in)
+Browser                    Vercel                  Databases
+────────                   ──────                  ─────────
+Clerk modal ─────────────► Clerk (sign-in)
    │
-   └─ session token ─► /api/clerk-firebase-token ──► Clerk: verify
-                              │                      Firebase Admin: mint
-                              └──── custom token ──► Firebase Auth
-                                                          │
-                                     request.auth.uid ───┘──► Firestore
+   ├─ session token ─────────────────────────────►  Supabase: Postgres + RLS
+   │                                                  ↳ the truth
+   │
+   ├─ session token ─────────────────────────────►  Convex: presence, activity
+   │                                                  ↳ ephemeral
+   │
+   └─ GET /api/library ────► /api/library ───────►  Turso: published copy + FTS5
+                              (holds the token)       ↳ derived
 ```
+
+The full picture, the three schemas and the order to set them up:
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
-## Environment variables
+
+
 
 In Vercel: **Project → Settings → Environment Variables**. Set each for
-Production, Preview and Development as appropriate.
+Production, Preview and Development as appropriate. The complete list, with
+where each value comes from, is in [ENV.md](ENV.md) — this is the same list.
 
-### Client-safe — bundled into the browser
-
-These are inlined into the JavaScript that ships to every visitor. Everything
-here is genuinely public by design.
+### Public — bundled into the browser. Vercel type: Plain
 
 | Variable | Value | Notes |
 | --- | --- | --- |
-| `VITE_SITE_URL` | `https://your-domain.com` | **Set this first.** Canonicals, sitemap URLs, Open Graph URLs and structured data all derive from it. Leave it wrong and Google is told every page is a duplicate of a domain you do not control. No trailing slash. |
+| `VITE_SITE_URL` | `https://presentationbuddy.aavrit.dedyn.io` | **Set this first.** Canonicals, sitemap URLs, Open Graph URLs and structured data all derive from it. No trailing slash. |
 | `VITE_CLERK_PUBLISHABLE_KEY` | `pk_live_…` | Clerk Dashboard → API keys. |
-| `VITE_FIREBASE_API_KEY` | `AIza…` | Data project (`reflectioncapturedthoughts`). |
-| `VITE_FIREBASE_AUTH_DOMAIN` | `reflectioncapturedthoughts.firebaseapp.com` | |
-| `VITE_FIREBASE_PROJECT_ID` | `reflectioncapturedthoughts` | |
-| `VITE_FIREBASE_STORAGE_BUCKET` | `reflectioncapturedthoughts.firebasestorage.app` | |
-| `VITE_FIREBASE_MESSAGING_SENDER_ID` | `331335730832` | |
-| `VITE_FIREBASE_APP_ID` | `1:331335730832:web:731df65bd40f9646adfa15` | |
-| `VITE_FIREBASE_MEASUREMENT_ID` | `G-7NXNZDNDRE` | |
+| `VITE_SUPABASE_URL` | `https://<project>.supabase.co` | Supabase → Project Settings → Data API. |
+| `VITE_SUPABASE_ANON_KEY` | the anon/public key | Supabase → Project Settings → API keys. Public by design: the row policies are what protect the data, and every request is checked against them. |
+| `VITE_CONVEX_URL` | `https://<deployment>.convex.cloud` | Optional. Without it, presence and the activity ticker are simply absent. |
 
-> **Firebase web config values are not secrets.** They identify the project in
-> the browser; they cannot read data on their own. What actually protects your
-> data is `firestore.rules`. This is why they are safe to publish and why
-> putting them behind a "secret" mechanism would be theatre.
+> **None of these is a secret.** They identify infrastructure in the browser.
+> What actually protects the data is `supabase/schema.sql`, which asks Postgres
+> who is asking. Putting the anon key behind a "secret" mechanism would be
+> theatre — and putting a *service_role* key under `VITE_` would be a genuine
+> incident, which is why `npm run audit:secrets` fails the build over it.
 
 ### Server-only — never prefix with `VITE_`
 
-| Variable | Value | Notes |
-| --- | --- | --- |
-| `CLERK_SECRET_KEY` | `sk_live_…` | Verifies sessions before a Firebase token is minted. **Rotate the one you shared.** |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | the whole service-account JSON on one line | Data project only. Needed to mint custom tokens. |
-| `CLERK_AUTHORIZED_PARTIES` | `https://presentationbuddy.aavrit.dedyn.io` | **Required** once the Clerk root domain is `aavrit.dedyn.io` — see step 5 below. Without it, a compromised subdomain on the shared root can replay a token here. |
+| Variable | Vercel type | Value | Notes |
+| --- | --- | --- | --- |
+| `CLERK_SECRET_KEY` | **Sensitive** | `sk_live_…` | Used by `/api/clerk-set-username` to write a claimed username into Clerk. That is what keeps claiming working while "Restrict changes" is on. |
+| `CLERK_AUTHORIZED_PARTIES` | Plain | `https://presentationbuddy.aavrit.dedyn.io` | **Required** once the Clerk root domain is `aavrit.dedyn.io`: Clerk accepts cross-origin requests from any subdomain of a configured root domain by default, so without this a compromised subdomain on the shared root could replay a token. |
+| `TURSO_DATABASE_URL` | Plain | `libsql://…` | Optional. Reads fall back to Postgres without it. |
+| `TURSO_AUTH_TOKEN` | **Sensitive** | the database token | Optional, and a real credential: the functions read the reading room with it, and the sync writes it. |
+
+Those four are read at **run time**, so changing one takes effect on the next
+request. The five above are inlined at **build time** — saving a new value does
+nothing until you redeploy. That single difference explains most of the "I set
+it and nothing changed" reports.
 
 **The rule:** Vite inlines every `VITE_`-prefixed variable into the browser
 bundle. Adding that prefix to `CLERK_SECRET_KEY` would publish it to every
 visitor who opens devtools.
 
 You do not have to remember this. `npm run verify` runs
-`scripts/check-secrets.mjs`, which fails the build if anything secret sits
-under a `VITE_` prefix, or if `.env` is still tracked in git:
+`scripts/check-secrets.mjs`, which fails the build if anything secret sits under
+a `VITE_` prefix, or if `.env` is still tracked in git:
 
 ```
 ✗ VITE_CLERK_SECRET_KEY is a Clerk secret key but starts with VITE_,
@@ -105,110 +112,73 @@ under a `VITE_` prefix, or if `.env` is still tracked in git:
 
 Add `npm run verify` as a CI check so this never reaches production.
 
-### Getting the service account
+### Making the reading room fast (optional, five minutes)
 
-Firebase console → **Project settings → Service accounts → Generate new
-private key**. That downloads JSON containing real newlines inside the
-private key, which does not paste cleanly into a single-line field. Pick one:
+Turso is what makes reads cheap and search real. Skipping it costs nothing but
+speed — reading is served from Postgres, the same rows, one hop further away.
 
 ```bash
-# Option A — flatten the newlines (they are already escaped as \n in the file)
-node -e "console.log(JSON.stringify(require('./serviceAccount.json')))"
-
-# Option B — base64, which the app accepts with a prefix
-base64 -w0 serviceAccount.json      # paste as: base64:eyJ0eXBlIjoi...
+# once, with TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in .env
+npm run db:turso        # apply turso/schema.sql
+npm run sync:turso      # fill it from Postgres
 ```
-
-Until this is set, visitors can still sign in and browse the library — the
-token endpoint returns `501` and cloud writes are simply unavailable.
 
 ---
 
-## Firestore rules
 
-Two projects, two rule files. Deploying to the wrong one is the single most
-likely mistake here.
 
-### Data project — `reflectioncapturedthoughts`
 
-File: `firestore.rules`
+One database, one schema file, and no way to deploy it to the wrong project.
 
-```bash
-firebase use reflectioncapturedthoughts
-firebase deploy --only firestore:rules
-```
+**File: `supabase/schema.sql`.** Apply it in Supabase → **SQL Editor** →
+paste the whole file → **Run**. It is idempotent: running it twice changes
+nothing, and it is safe to re-paste after this repository adds a column.
 
-| Collection | Read | Write |
+There is no CLI deploy step and no rules file to keep in sync, because the
+policies live *inside* the schema, next to the tables they guard. That is the
+whole reason Postgres replaced Firestore here: a rule that references a column
+that does not exist is a broken rule you find out about at 2am, and a foreign
+key is one you find out about in the editor.
+
+What it enforces, in short:
+
+| Table | Who may read | Who may write |
 | --- | --- | --- |
-| `presentations` | everyone | author, or admin. Anyone signed in may nudge `views` / `likes` / `dislikes` / `shares` by **1** — see below |
-| `reactions` | signed in | only your own; the id must be `<your uid>_<speech id>` |
-| `shares` | signed in | only your own |
-| `bloggerblogs` | everyone | author, or admin |
-| `bloggers` | everyone | yourself, or admin. Others may only move `likesReceived` / `dislikesReceived` (+1) and `points` (+100) |
-| `users` | signed in | only your own, and only the seven listed fields |
-| `admins` | signed in | **site owner only** — nobody can grant themselves a role |
-| `sponsors` | everyone | admin |
-| `ads` | admin | **denied** — ads moved to the other project |
-| `admin` | signed in | denied |
-| anything else | **denied** | **denied** |
+| `profiles` | everyone | the person themselves |
+| `handles` | everyone | the person claiming it, **once** — and role-holders |
+| `admins` | everyone (a role is not a secret) | role-holders |
+| `admin_private` | the role-holder who owns it | the same |
+| `speeches` | everyone | the author, and role-holders |
+| `reactions` / `shares` | the person, and role-holders | the person, through the database function |
+| `ads` / `sponsors` | everyone | role-holders |
+| `posts` | everyone | the author, and role-holders |
+| `feedback` | role-holders | anyone |
+| `site_settings` | everyone | the owner |
 
-Three details worth understanding:
+### Reacting and sharing are functions, not scripts
 
-**The counter exception.** A like has to move a number on a document you do
-not own. So a signed-in person may change the four public counters — and
-`diff().affectedKeys().hasOnly([...])` means that the instant a write touches
-the title, body or author, it stops qualifying and the owner check applies
-instead. Each counter is also capped at `previous + 1`, so nobody writes
-`likes = 10000000`.
+`react_to_speech()` and `record_share()` do their work in a single transaction
+inside Postgres: the reaction row, the speech's counters, and the author's
+score all move together, or none of them do. Doing this in a browser tab — as
+the old Firestore version had to — means two people reacting at the same instant
+can lose a count. It also means the numbers can always be recomputed from the
+underlying rows, which is the property that makes them trustworthy.
 
-**`isSignedIn()` names its providers.** It accepts only tokens minted from a
-verified Clerk session, or the legacy Google/Microsoft Firebase providers. If
-someone later enables anonymous or email/password auth in the Firebase
-console — for testing, or by accident — it grants nothing here. Anonymous
-sign-in is a very common way to accidentally give the internet write access.
+### The first owner, once
 
-**The catch-all at the bottom denies everything unnamed**, which is what makes
-a typo in a collection name fail closed rather than open.
+There is no console to add yourself to. After applying the schema, run this in
+the SQL editor with your own Clerk user id (Clerk Dashboard → Users):
 
-### `servingads` — ad documents
-
-No separate deploy: the rule lives in `firestore.rules`, which you already
-push to the data project.
-
-```
-match /servingads/{adId} {
-  allow read: if true;                        // every visitor sees the ads
-  allow write: if isAdmin();                  // never the web app
-}
+```sql
+select public.bootstrap_owner('<clerk-user-id>', 'amaavrit@yahoo.com');
 ```
 
-The web app performs no write to this collection at all — ads are managed in
-the Firebase console, which bypasses rules by design. So a bug or a
-compromised key in the main app cannot alter ad
-content, and an ad operator's mistake cannot reach presentations or profiles.
-
-### The `servingads` document shape
-
-| Field | Type | Used for |
-| --- | --- | --- |
-| `Title` | string | headline |
-| `Content` | string | full copy |
-| `ImageURL` | string (https) | image on the card |
-| `DescriptionPreview` | string | one-line teaser |
-| `RedirectURL` | string (https) | click destination |
-
-Because this collection is world-readable and edited outside the codebase,
-every field is treated as untrusted input. `src/services/ads.ts` parses both
-URL fields and requires `http:`/`https:` before either reaches the DOM — so a
-document containing `RedirectURL: "javascript:…"` is skipped rather than
-rendered. Titles and copy go through React as text, never as HTML.
-
-Ads are labelled "Sponsored" and carry `rel="sponsored noopener noreferrer"`,
-which is what keeps paid links from affecting your own rankings.
+It grants the `owner` role exactly once: if a role already exists, it refuses.
+Every later role change happens in the site's own Admin workspace.
 
 ---
 
-## Clerk setup
+
 
 1. **Domains** — Configure → Domains. Add **`aavrit.dedyn.io`** (the root, not
    the subdomain). Because `dedyn.io` is a public suffix, `aavrit.dedyn.io` is
@@ -231,10 +201,16 @@ which is what keeps paid links from affecting your own rankings.
 5. **Authorized parties** — set `CLERK_AUTHORIZED_PARTIES` to
    `https://presentationbuddy.aavrit.dedyn.io`. The second half of the same
    lock: a compromised subdomain on the shared root then cannot replay a token
-   at `api/clerk-firebase-token.ts`.
-6. **Session token lifetime** — the default is fine. The app re-exchanges
-   lazily and caches per user id, so a short lifetime does not cause a storm
-   of token mints.
+   at the API. This is also the value the Clerk dashboard checks when a session
+   is presented from another origin.
+6. **Session token lifetime** — a short lifetime is fine. `connectSession()`
+   proves the session once per user id per tab and the token getters hand the
+   clients a fresh token whenever they ask, so nothing mints tokens in a loop.
+7. **JWT template for Convex** — Dashboard → **JWT Templates** → new template
+   named exactly `convex` (or copy Convex's own template from its dashboard
+   setup page). Without it, presence and the activity ticker stay empty; with a
+   differently-named template they do too, which is the one silent failure worth
+   knowing about here.
 
 > **The CSP must name the production Frontend API.** Development serves Clerk
 > from `suitable-bison-4886.clerk.accounts.dev`; with a production instance and
@@ -277,8 +253,10 @@ and `public/_headers`; if you ever move Clerk instances, change it in both.
 
 - [ ] `https://your-domain.com/robots.txt` — check the `Sitemap:` line names your domain
 - [ ] `https://your-domain.com/sitemap.xml` — 56 URLs, all on your domain
-- [ ] Sign in end to end, then like something. If the like fails, the service
-      account is missing or the rules were not deployed.
+- [ ] Sign in end to end, then like something. If the like fails, either
+      Supabase does not yet trust Clerk as a third-party issuer (Dashboard →
+      Authentication → Third-party auth → Clerk), or the schema was not applied.
+      The app says which, in words — that is what the environment panel is for.
 - [ ] Search Console → add property → submit the sitemap
 - [ ] Confirm `curl -I https://your-domain.com` shows the security headers
 

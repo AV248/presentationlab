@@ -7,6 +7,7 @@ import {
   clerkIsMounted,
 } from '../services/clerk';
 import { fetchRole, fetchMyReactions, type ReactionKind, type Role } from '../services/data';
+import { BACKEND_ENABLED } from '../services/backend';
 
 interface AuthState {
   ready: boolean;
@@ -16,7 +17,7 @@ interface AuthState {
   pending: SignInProvider | null;
   error: string | null;
   configured: boolean;
-  /** Outcome of the last Clerk → Firebase token exchange, for diagnostics. */
+  /** Outcome of the last session check, for diagnostics. */
   bridge: { ok: boolean; reason?: ExchangeFailure; detail?: string } | null;
 
   init: () => void;
@@ -49,26 +50,11 @@ export const useAuth = create<AuthState>((set, get) => ({
     if (initialised) return;
     initialised = true;
 
-    // Clerk owns identity when it is configured. Subscribing to Firebase Auth
-    // here as well would fight it: Firebase starts signed out, so the listener
-    // would immediately overwrite the Clerk user with null.
-    if (CLERK_ENABLED) return;
-
-    void authService
-      .completeRedirectSignIn()
-      .catch(() => null)
-      .then(() => {
-        const stop = authService.subscribeToAuth(async (user) => {
-          set({ user, ready: true });
-          if (user) {
-            void get().loadReactions();
-            void get().refreshRole();
-          } else {
-            set({ role: null, reactions: {} });
-          }
-        });
-        return stop;
-      });
+    // Clerk owns identity, and it always will: `ClerkAuthBridge` is what puts
+    // a session into this store (`setSession`), and it is the only thing that
+    // may. Reaching for anything else here would race it — which is exactly
+    // what a second auth provider listening at the same time used to do.
+    set({ ready: true });
   },
 
   setSession: (user) => {
@@ -130,7 +116,7 @@ export const useAuth = create<AuthState>((set, get) => ({
   refreshRole: async () => {
     const user = get().user;
     if (!user) return;
-    const role = await fetchRole(user.uid, user.email);
+    const role = await fetchRole(user.uid);
     set({ role });
   },
 
@@ -138,13 +124,10 @@ export const useAuth = create<AuthState>((set, get) => ({
 }));
 
 /**
- * True when sign-in is offered at all.
- *
- * Clerk is preferred; Firebase's own providers remain as the fallback for an
- * installation that has Firebase config but no Clerk key.
+ * True when sign-in is offered at all. Clerk is the only identity this app
+ * has, so this is exactly the same question as "is Clerk configured".
  */
-export const isSignInAvailable = () =>
-  CLERK_ENABLED || Boolean(import.meta.env?.VITE_FIREBASE_API_KEY);
+export const isSignInAvailable = () => CLERK_ENABLED;
 
-/** Kept for the settings page and the sign-in sheet's diagnostics. */
-export const isFirebaseAvailable = () => Boolean(import.meta.env?.VITE_FIREBASE_API_KEY);
+/** True when the databases are configured, for the settings page's diagnostics. */
+export const isCloudAvailable = () => BACKEND_ENABLED;

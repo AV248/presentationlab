@@ -64,19 +64,24 @@ Rule this out deliberately, because it looks identical to 2 and 3:
 
 ## Who may become the owner
 
-Ownership is a document — `admins/{uid}` with `role: 'owner'` — but the *first*
-one was impossible to create through the app, because creating it required
-already holding it:
+Ownership is a row — `admins.uid` with `role = 'owner'` — and only an owner may
+write one, which used to leave the first one impossible to create from inside
+the app. With Postgres the dead end simply does not exist: the database can be
+asked directly, once, by the person who owns it.
 
-```js
-allow create: if isSiteOwner();   // isSiteOwner() → hasAdminDoc() → exists(admins/{uid})
+```sql
+select public.bootstrap_owner('<clerk-user-id>', 'amaavrit@yahoo.com');
 ```
 
-`firestore.rules` now carries a founder clause: `isFounder()` is true for one
-specific account (the site's own Clerk user id) and `isSiteOwner()` includes it.
-So that account may bootstrap its own document — or simply act as owner without
-one — while nobody else can promote themselves. No need to ever open the
-database again.
+`bootstrap_owner()` grants the owner role **only if no role exists yet**, so it
+cannot promote anybody on a site that already has an owner — a stranger who
+found the function in the schema gets nothing. Every later role change happens
+in the site's own Admin workspace, where the policies take over.
+
+The Firestore version of this needed a founder clause in the rules, and that
+clause was the fix for the "Missing or insufficient permissions" dead end. The
+same dead end cannot occur here, because there is no rule to write: the first
+role is created by the database owner, in the database, and by nobody else.
 
 ## Checking the API by hand
 
@@ -96,18 +101,20 @@ Three answers, three meanings:
 | --- | --- |
 | `405 method_not_allowed` | The function is deployed. Only POST is accepted; end-user traffic does this correctly. |
 | `401 missing_session_token` | Deployed **and configured** — everything is present, the request simply had no credentials. |
-| `501 clerk_not_configured` | Deployed but `CLERK_SECRET_KEY` is absent; the message says so. |
+| `501 clerk_not_configured` | Deployed but `CLERK_SECRET_KEY` is absent; the message names it. |
 | `501 clerk_sdk_unavailable` | The function is deployed and configured but **could not load its own SDK** — a packaging fault, not a missing variable. See "The literal-specifier rule" below. |
-| `501 firebase_admin_not_configured`, message begins "…is missing, or does not contain…" | Deployed but `FIREBASE_SERVICE_ACCOUNT_JSON` is absent or malformed. Use the `base64:` form. |
 
-The code name `firebase_admin_not_configured` is kept for compatibility, but the
-endpoint no longer uses any Firebase SDK — it signs the custom token directly
-with Node's `crypto` (see "Why there is no Admin SDK" below). That removed a
-failure which looked exactly like a configuration problem: the old
-`firebase-admin` dependency reached an ESM-only package, and on a runtime whose
-CommonJS cannot `require()` an ES module every request answered 501 with
-*"Server SDKs failed to load: require() of ES Module …"*. If you ever see that
-message again, it is the dependency, not your variables.
+Those three answers are the whole vocabulary now. The token exchange had two
+more — neither of which can happen, because there is no exchange: no
+`firebase_admin_not_configured`, no "Firebase Auth refused the custom token",
+no credential that could be for the wrong project. That is most of the point of
+this switch.
+
+The reading room answers a fourth way, and it is worth knowing because it looks
+alarming and is not: `503 library_not_configured` means Turso has not been set
+up, so reads are being served from Postgres — the same rows, one hop further
+away. The environment panel labels it "not set up (harmless)" for exactly that
+reason.
 
 ### The literal-specifier rule
 
@@ -136,43 +143,32 @@ nothing looks wrong. Measured with the same tracer the host uses:
 package an endpoint names would not be shipped, so this cannot recur silently.
 It is part of `npm run verify`.
 
-### Why there is no Admin SDK
+## Applying the schema
 
-Minting a Firebase custom token is one RS256 JWT signed with the service
-account's private key. Node's own `crypto` does that, so
-`/api/clerk-firebase-token` needs no Firebase SDK — which is why it cannot be
-broken by one. `firebase-admin@14` requires Node 22 and pulls `jose@6` (ESM
-only) through `jwks-rsa`; depending on it made the endpoint's health a function
-of the host's module loader. `package.json` also pins
-`"engines": { "node": "22.x" }`, so the runtime matches what the remaining
-dependencies expect.
+There is no rules file to deploy and no Firebase CLI to install. The tables,
+indexes, policies and counter functions are one file:
 
-## Deploying the rules
-
-`firebase.json` and `.firebaserc` are in the repository, so from a clone:
-
-```bash
-npm run deploy:rules          # firebase deploy --only firestore:rules
+```
+Supabase → SQL Editor → paste supabase/schema.sql → Run
 ```
 
-(First time: `npm install -g firebase-tools` and `firebase login`.) The project
-is `reflectioncapturedthoughts`, set in `.firebaserc`.
-
-To reproduce the site's own call from a terminal:
+It is idempotent, so re-pasting after a pull that adds a column is the correct
+thing to do. To reproduce an endpoint's own answer from a terminal:
 
 ```bash
-curl -s -X POST https://presentationbuddy.aavrit.dedyn.io/api/clerk-firebase-token \
-  -H 'Content-Type: application/json' -d '{}'
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  https://presentationbuddy.aavrit.dedyn.io/api/clerk-set-username
 ```
 
-`{"error":"missing_session_token"}` (401) is the healthy answer. The in-app
-check — sign-in sheet → **Server-only variables → Check now**, or
-**/admin → Setup & environment** — does exactly this and translates the result.
+`401` is the healthy answer — deployed, configured, and correctly refusing a
+request with no session. The in-app check (sign-in sheet → **Server-only
+variables → Check now**, or **/admin → Setup & environment**) does the same
+thing and translates the result.
 
 A `405` in response to the app's own POST is a different matter: something in
 front of the function is turning the request into a GET (a redirect rule on
 `/api/*`, or a proxy). The Claim page and the environment panel both say so,
-because the exchange reports `method-rejected` rather than a generic error.
+because the connection reports `method-rejected` rather than a generic error.
 
 ## 5. Proof, whichever way it went
 
@@ -190,14 +186,24 @@ Clerk → **Logs** is the server side of the same story:
 - `oauth_callback.failed` → the provider refused; the reason is in the event.
 - nothing at all → the frontend never reached Clerk (1, 4).
 
-## Claiming a handle needs the same cloud session
+## Claiming a handle needs the same session
 
-`handles/{username}` is written under Firestore rules, so it needs the custom
-token from `/api/clerk-firebase-token` — the same chain described above. When
-that chain is broken the symptom is *"Missing or insufficient permissions"* on
-the claim, not an obvious auth message. The Claim page now names the cause
-(from the token exchange's own reason), offers to retry the connection, and
-points at the environment check in the sign-in sheet.
+A `handles` row is written under Postgres policies, so it needs the Clerk
+session token — the same session the whole app uses, with nothing minted in
+between. When that connection is not up, the symptom used to be *"Missing or
+insufficient permissions"* on the claim. It is now a sentence: the Claim page
+names the cause in the app's own words (the database's message, and the reason
+the connection reported), offers to try again, and points at the environment
+check in the sign-in sheet.
+
+The four reasons it can give, and what each one means:
+
+| Reason | What is actually wrong |
+| --- | --- |
+| `not-configured` | No `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` in this build |
+| `no-session` | Clerk had not finished signing in when the claim was attempted — try again |
+| `unauthorized` | Postgres does not yet trust Clerk as a third-party issuer (Supabase → Authentication → Third-party auth → Clerk) |
+| `network` | The request never completed — offline, or something blocked it |
 
 ## What the app does about these, in code
 

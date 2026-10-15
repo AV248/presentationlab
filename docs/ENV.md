@@ -1,180 +1,143 @@
-# Environment checklist — setting Presentation Buddy up from zero
+# Environment variables
 
-Everything the deployment reads, in the order to add it. Delete nothing until
-this list is complete: a half-configured environment is the one state that
-*looks* broken in a dozen unrelated ways.
+The complete list. Nine variables, in the order to paste them, and nothing else
+is read by anything in this repository. `.env.example` is the same list with the
+commentary; this file says where each value comes from and what breaks without
+it.
 
-**Two rules**
-
-1. **`VITE_` means public.** Vite inlines every `VITE_` variable into the
-   JavaScript bundle at build time. Values under that prefix must be safe for
-   any visitor to read. The three credentials at the bottom must never carry it
-   (the repo's `npm run audit:secrets` fails the build if they do).
-2. **Changing any `VITE_` variable requires a redeploy.** Vercel does not
-   rebuild because a variable changed; the value is baked in when the bundle is
-   built. Save → *Redeploy*.
-
-You can verify the whole thing without leaving the site: open the sign-in sheet
-(there is a **"Trouble signing in? The facts"** section) or, as an
-administrator, **/admin → Setup & environment**. The panel shows every variable
-as `set` / `missing` / `wrong`, names what breaks without it, and asks the API
-for its own verdict on the server-only three.
+`.env.example` → copy to `.env` for local development. Vercel → **Project →
+Settings → Environment Variables** for production.
 
 ---
 
-## Quick reference — name, type, where the value comes from
+## The rule
 
-**Type** is the Vercel setting: *Plain* = ordinary variable (these all end up in
-the browser bundle, so hiding them only makes life harder); *Sensitive* = masked
-and encrypted, for credentials. Everything starting `VITE_` is Plain by
-definition — the value is inlined into the JavaScript every visitor downloads.
+Vite inlines **every** variable beginning with `VITE_` into the JavaScript
+bundle that ships to the browser. So:
 
-| # | Variable | Type | Value comes from |
+| Prefix | Visibility | Vercel type |
+| --- | --- | --- |
+| `VITE_` | in the browser bundle — public by design | **Plain** |
+| no prefix | read only by functions in `api/` | Plain, except where marked **Sensitive** |
+
+Exactly two names on this list are secrets, and they are the only two that need
+masking. `npm run audit:secrets` fails the build if a secret ends up in a
+`VITE_` variable.
+
+---
+
+## Step 1 — the five public variables
+
+Vercel type **Plain** for all five. Paste them in this order.
+
+| # | Name | Where the value comes from | Without it |
 | --- | --- | --- | --- |
-| 1 | `VITE_CLERK_PUBLISHABLE_KEY` | Plain | Clerk → production instance → API keys → *Publishable key* (`pk_live_…`) |
-| 2 | `VITE_SITE_URL` | Plain | `https://presentationbuddy.aavrit.dedyn.io` (literal, no trailing slash) |
-| 3 | `VITE_FIREBASE_API_KEY` | Plain | Firebase console → data project → Project settings → Your apps → Web app → Config |
-| 4 | `VITE_FIREBASE_AUTH_DOMAIN` | Plain | same Config box |
-| 5 | `VITE_FIREBASE_PROJECT_ID` | Plain | same Config box |
-| 6 | `VITE_FIREBASE_STORAGE_BUCKET` | Plain | same Config box |
-| 7 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | Plain | same Config box |
-| 8 | `VITE_FIREBASE_APP_ID` | Plain | same Config box |
-| 9 | `VITE_FIREBASE_MEASUREMENT_ID` | Plain | same Config box (optional) |
-| 10 | `CLERK_SECRET_KEY` | **Sensitive** | Clerk → production instance → API keys → *Secret key* (`sk_live_…`) |
-| 11 | `CLERK_AUTHORIZED_PARTIES` | Plain | `https://presentationbuddy.aavrit.dedyn.io,https://pb.devs.surf` |
-| 12 | `FIREBASE_SERVICE_ACCOUNT_JSON` | **Sensitive** | Firebase console → **data** project → Project settings → Service accounts → *Generate new private key* (whole JSON, one line) |
+| 1 | `VITE_SITE_URL` | `https://presentationbuddy.aavrit.dedyn.io` — your own canonical origin | Canonical tags, the sitemap and Open Graph point somewhere unintended, so search engines may index every page as a duplicate |
+| 2 | `VITE_CLERK_PUBLISHABLE_KEY` | Clerk Dashboard → **API keys** → *Publishable key* (`pk_live_…` in production) | No sign-in at all. Reading still works |
+| 3 | `VITE_SUPABASE_URL` | Supabase → **Project Settings → Data API** → *Project URL* | Nothing can be published, reacted to or saved. Reading falls back to local-only |
+| 4 | `VITE_SUPABASE_ANON_KEY` | Supabase → **Project Settings → API keys** → *anon / public* | Same as above: the request is refused before a policy is even consulted |
+| 5 | `VITE_CONVEX_URL` | `npx convex deploy` prints it (Dashboard → Settings → URL) | Presence and the live activity ticker go quiet. **Optional** — everything else is unaffected |
 
-Add them in the **Production** environment (tick **Preview** too if you want a
-working sign-in on preview deployments). Then **redeploy** — `VITE_` values are
-baked in at build time.
+> **`VITE_SUPABASE_ANON_KEY` is not a secret.** It unlocks nothing on its own:
+> every request is checked against the policies in `supabase/schema.sql`, which
+> ask Postgres *who is asking* using the Clerk session token. A `service_role`
+> or `sb_secret_` key here would be a real mistake, because that one bypasses
+> every policy — and the app's own environment check turns red and says so.
 
-## Where each value comes from
+Two other things belong to this step, and neither is an environment variable:
 
-### 1. Clerk (sign-in, sessions, usernames)
-
-| Variable | Value | Where |
-| --- | --- | --- |
-| `VITE_CLERK_PUBLISHABLE_KEY` | `pk_live_…` | Clerk Dashboard → **production** instance → API keys → *Publishable key* |
-
-Use the **production** instance (the one that owns `clerk.aavrit.dedyn.io`),
-and its **live** key. A `pk_test_` key on a live domain is the most common cause
-of "it redirects back and I am not signed in": development sessions live in
-third-party cookies, which browsers block. The audit panel flags this
-explicitly rather than letting you guess.
-
-### 2. Firebase, the DATA project
-
-Firebase console → **Project settings → Your apps → Web app → SDK setup and
-configuration → Config**. Copy the seven values exactly.
-
-| Variable | Example shape |
-| --- | --- |
-| `VITE_FIREBASE_API_KEY` | `AIza…` |
-| `VITE_FIREBASE_AUTH_DOMAIN` | `<project>.firebaseapp.com` |
-| `VITE_FIREBASE_PROJECT_ID` | `reflectioncapturedthoughts` |
-| `VITE_FIREBASE_STORAGE_BUCKET` | `<project>.appspot.com` |
-| `VITE_FIREBASE_MESSAGING_SENDER_ID` | digits |
-| `VITE_FIREBASE_APP_ID` | `1:…:web:…` |
-| `VITE_FIREBASE_MEASUREMENT_ID` | `G-…` (optional) |
-
-These are **public by design** — they identify the project, they do not
-authorise anything. Access control is `firestore.rules`, which is why deploying
-those rules is not optional.
-
-### 3. The site itself
-
-| Variable | Value |
-| --- | --- |
-| `VITE_SITE_URL` | `https://presentationbuddy.aavrit.dedyn.io` — no trailing slash |
-
-Canonical tags, sitemap URLs, Open Graph and structured data all derive from
-this. Get it wrong and search engines see every page as a duplicate of a domain
-you do not own. The audit panel compares it against the origin actually serving
-the page.
-
-### 4. Ads — no variables
-
-Ad documents live in `servingads` **inside the data project**, so they arrive
-with group 2. Create the collection in the Firebase console and add documents
-to it; `docs/ADS.md` has the field shape. Without them the site shows house
-ads and is completely healthy.
-
-### 5. Server-only (no `VITE_` prefix)
-
-Read by two serverless endpoints and nothing else — `api/clerk-firebase-token.ts`
-(the Clerk session → Firebase token exchange) and `api/clerk-set-username.ts`
-(the one-time username write, which needs the secret key because Clerk's
-*Restrict changes* setting blocks the browser from doing it). They never reach
-the browser.
-
-| Variable | Value | Where |
-| --- | --- | --- |
-| `CLERK_SECRET_KEY` | `sk_live_…` | Clerk → production instance → API keys → *Secret key* |
-| `CLERK_AUTHORIZED_PARTIES` | `https://presentationbuddy.aavrit.dedyn.io` | your own knowledge — comma-separated origins allowed to trade a session for a Firebase token. Add `https://pb.devs.surf` too if people sign in there. |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | the whole service-account JSON on **one line** | Firebase console → Project settings → Service accounts → *Generate new private key* |
-
-Notes:
-
-- If your tooling mangles the newlines, base64-encode the file
-  (`base64 -w0 service.json`) and prefix the value with `base64:`.
-- If any of these three is ever pasted somewhere public, rotate it: Clerk →
-  API keys → *Rotate*; Firebase → delete the service-account key and create a
-  new one.
+- **Clerk domains.** Dashboard → **Configure → Domains** → add
+  `presentationbuddy.aavrit.dedyn.io`. Without it, live keys are refused on your
+  own domain.
+- **Canonical share host.** `VITE_SITE_URL` is the canonical origin; shared links
+  are always `https://pb.devs.surf/<path>`, which is built into the app.
 
 ---
 
-## The order to do it in
+## Step 2 — the four server-only variables
 
-1. Add the Clerk pair (publishable in group 1, secret in group 5).
-2. Add the seven data-project values (group 2).
-3. Add `VITE_SITE_URL` (group 3).
-4. Add the three server-only values (group 5).
-5. Firebase console (data project): **Firestore Database → create** if it does
-   not exist, and deploy the rules: `firebase deploy --only firestore:rules`.
-6. Clerk dashboard: **Domains** shows the production domain verified; **SSO
-   connections** has Google and Microsoft enabled *in the production instance*.
-7. Redeploy. (Any `VITE_` change needs a fresh build.)
-8. Verify: open the site → sign-in sheet → *Trouble signing in? The facts* →
-   every group should read **complete**; then **/admin → Setup & environment**
-   → **Check now** → *"Ready: the endpoint is deployed and both server
-   variables are in place."*
+No `VITE_` prefix. Read by the functions in `api/` at run time, so a change
+takes effect on the next request — no redeploy needed.
 
-## What breaks, specifically, without each group
+| # | Name | Vercel type | Where the value comes from | Without it |
+| --- | --- | --- | --- | --- |
+| 6 | `CLERK_SECRET_KEY` | **Sensitive** | Clerk Dashboard → **API keys** → *Secret key* (`sk_live_…`) | `/api/clerk-set-username` cannot write a username into Clerk, so `/claim` stops working while "Restrict changes" is on. Everything else is unaffected |
+| 7 | `CLERK_AUTHORIZED_PARTIES` | Plain | `https://presentationbuddy.aavrit.dedyn.io` — comma-separated, no trailing slashes | The username endpoint refuses sessions from your own origin. Not optional: Clerk accepts cross-origin requests from **any** subdomain of a configured root domain by default |
+| 8 | `TURSO_DATABASE_URL` | Plain | turso.tech → your database → the `libsql://` URL | Reading is served from Postgres — the same rows, one hop further away. **Optional**: the site is complete without it, just not the fast one |
+| 9 | `TURSO_AUTH_TOKEN` | **Sensitive** | turso.tech → your database → *Create token* | Same as above. A real credential: it reads the reading room, and the sync writes it |
 
-| Missing | What you will see |
+The two Turso names are read at request time, not baked in, so they can be added
+later without touching the build. Variables 1–5 are **baked in at build time** —
+saving one in Vercel changes nothing until you redeploy. That single difference
+explains most of the "I set it and it did nothing" reports.
+
+---
+
+## Step 3 — local only, never in Vercel
+
+The one-time Firestore import needs three things, and the running site needs
+none of them. Keep them in `.env`; do not add them to Vercel.
+
+| Name | Use |
 | --- | --- |
-| Clerk key | Sign-in sheet says sign-in is not switched on; the app is fully local; reactions and publishing unavailable |
-| `pk_test_` key on a live domain | Providers complete and land back signed out; configured provider credentials appear to be ignored |
-| Data project | Library shows only local speeches; nothing publishes; no reactions, roles, leaderboard or feedback to Firestore |
-| `VITE_SITE_URL` | Canonical/OG/sitemap URLs point at the wrong origin |
-| `servingads` collection absent or empty | House ads only — no error, by design |
-| `CLERK_SECRET_KEY` | Sign-in works (Clerk is client-side) but `request.auth.uid` never exists, so Firestore refuses all writes |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | Same as above, plus `/api/clerk-firebase-token` answers `501 firebase_admin_not_configured` ("…is missing, or does not contain project_id, private_key and client_email"). A 501 with `error: "clerk_sdk_unavailable"` is a *packaging* problem (the function could not load its own dependency) — never a missing variable, and nothing in Vercel fixes it. Note the key must belong to the **same project** as `VITE_FIREBASE_PROJECT_ID`: Firebase Auth verifies a custom token against its own project's keys, so a key from another project is refused and no cloud session is ever created. |
-| `CLERK_AUTHORIZED_PARTIES` | The token endpoint refuses the exchange for origins it was not told about (401) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | path to the Firebase service account JSON |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | the same JSON inline, on one line (either one, not both) |
+| `SUPABASE_SERVICE_ROLE_KEY` | lets the importer write other people's rows — it bypasses the row policies on purpose |
 
-## Deleting secrets does not delete data
+```bash
+npm run migrate:firestore              # plan only
+npm run migrate:firestore -- --apply
+```
 
-Environment variables are the site's *keys*, not its *contents*. Every speech,
-profile, handle, reaction and piece of feedback lives in the Firestore data
-project and is untouched by clearing Vercel. Re-adding the values restores
-access to exactly the data that was there.
+Then revoke the Firebase service account and retire the project. Full order:
+[ARCHITECTURE.md § Setting it up](ARCHITECTURE.md#2-setting-it-up-in-order).
 
-## The workspace has a second lock (2.7)
+---
 
-`/admin` is now three things at once:
+## The whole list, in one block
 
-1. **Invisible** to anyone without a role — the page answers as if it does not
-   exist (it is already `noindex, nofollow`).
-2. **Password-protected** by a passphrase the role-holder sets in *Setup* →
-   *The password on this page*. Stored in `adminPrivate/gate` as a
-   PBKDF2-SHA256 hash (210,000 iterations, per-install salt), never as text, and
-   readable only by role-holders. Asked once per browser session; *Lock now*
-   ends it.
-3. **Fully powered**: role-holders may edit ads, reserve and hand out handles,
-   set the theme and manage content. `canManage()` in `firestore.rules` is the
-   one place that decides this — the founder account is included by name, so
-   ownership never depends on a document that only an owner could create.
+```bash
+# ── Public (VITE_) — Vercel: Plain ───────────────────────────────────────────
+VITE_SITE_URL=https://presentationbuddy.aavrit.dedyn.io
+VITE_CLERK_PUBLISHABLE_KEY=pk_live_…
+VITE_SUPABASE_URL=https://<project>.supabase.co
+VITE_SUPABASE_ANON_KEY=…
+VITE_CONVEX_URL=https://<deployment>.convex.cloud        # optional
 
-The password is a lock on the door, not the wall: the rules are what refuse
-writes from anyone without the role. Forget the password and you can delete the
-`adminPrivate/gate` document in the Firebase console to clear it.
+# ── Server only — Vercel: Sensitive for the two marked ✓ ─────────────────────
+CLERK_SECRET_KEY=sk_live_…                                ✓ Sensitive
+CLERK_AUTHORIZED_PARTIES=https://presentationbuddy.aavrit.dedyn.io
+TURSO_DATABASE_URL=libsql://<database>.turso.io
+TURSO_AUTH_TOKEN=…                                        ✓ Sensitive
+```
+
+---
+
+## Checking it from inside the app
+
+You do not have to guess. The app audits itself:
+
+- **Sign-in sheet → Environment** — every variable above, marked `set`,
+  `missing` or `placeholder`, with a short fingerprint (never a value). It also
+  asks the server for its own verdict, which is the only way to see the
+  server-only variables from a browser.
+- **Admin → Setup** — the same panel, plus the server-only half.
+- **Control Room → Cloud** — the database it is actually talking to, and whether
+  the connection is up.
+
+`src/services/envCheck.ts` is the list those panels are built from, and it is
+the same list as this file. If they ever disagree, the code is right.
+
+---
+
+## Troubleshooting
+
+| Symptom | What it is |
+| --- | --- |
+| Nothing publishes; the library shows only local work | Variables 3–4 are missing or wrong, **or** the build predates them. `VITE_` values are inlined at build time: redeploy |
+| Sign-in returns to the site and nothing happens | `pk_test_` keys in production, or the domain is not added under Clerk → Configure → Domains |
+| Everything works, no presence | Variable 5 is unset, or the Clerk JWT template is not named exactly `convex` |
+| "That name is already taken" for a name nobody holds | A previous claim left a `handles` row. Admin → Handles releases it |
+| Publishing works, but the person who just published sees a stale library | The reading room is a copy. It refreshes on publish through `POST /api/sync-library`; `npm run sync:turso` forces it |
+| Reads work immediately after a deploy, then break a week later | The Supabase free project paused after no traffic. Open the dashboard once; a weekly visit keeps it awake |
+| `/api/library` answers `503 library_not_configured` | Deliberate, and harmless: Turso is optional and reads fall back to Postgres. The site's environment check labels it "not set up (harmless)" for that reason |

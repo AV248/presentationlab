@@ -5,7 +5,7 @@
  *
  *   • the second lock on /admin — a password the role-holder sets, stored as a
  *     PBKDF2-SHA256 hash and never in plain text. It is a *convenience* lock,
- *     not the security boundary: Firestore rules refuse writes from anyone
+ *     not the security boundary: the database's row policies refuse writes from anyone
  *     without the role, password or not. This only keeps a borrowed laptop out
  *     of the desk.
  *   • ads, in `servingads` — create, edit, delete, from inside the site.
@@ -16,13 +16,13 @@
  * minutes.
  */
 
-import { loadFirebase } from './firebase';
+import { loadBackend } from './backend';
 import { clearAdCache } from './ads';
 import { validateUsername } from '../lib/identity';
 import { slugifySegment } from '../lib/paths';
 
 async function fs() {
-  const bundle = await loadFirebase();
+  const bundle = await loadBackend();
   if (!bundle) throw new Error('Cloud is not configured on this installation.');
   return bundle;
 }
