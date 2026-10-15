@@ -9,8 +9,8 @@ app is built to make changing it impossible rather than merely discouraged.
 | | |
 | --- | --- |
 | **Clerk** | Owns the username. It appears in Manage Account, it is what `/claim` pre-fills, and it is what the app writes when a name is claimed. |
-| **Firestore `handles/{username}`** | The uniqueness lock for the *site*. The document id **is** the username, so two people cannot hold the same address — the second write fails by construction. Create-only. |
-| **Firestore `users/{uid}.username`** | The mirror the site reads to show `@name` in the sidebar, and to resolve `/username` without a lookup by email. |
+| **Postgres `handles.username`** | The uniqueness lock for the *site*. The primary key **is** the username, so two people cannot hold the same address — the second write fails on the unique index, not on a check the app remembered to make. Rows are created, never re-pointed. |
+| **Postgres `profiles.username`** | The mirror the site reads to show `@name` in the sidebar, and to resolve `/username` without a lookup by email. |
 
 ## Three layers of immutability
 
@@ -25,31 +25,33 @@ app is built to make changing it impossible rather than merely discouraged.
    the current username first and refuses to overwrite it, refuses to remove
    it (an empty value is a `400`), and validates the shape before writing.
    Only the first, null → value write ever succeeds.
-3. **Firestore.** `handles/{username}` cannot change ownership (rules compare
-   the stored `uid`), and `claimUsername()` refuses a second, different
-   username for the same account.
+3. **Postgres.** `handles` is created, never changed: the policies allow the
+   person named on the row to insert it once and do not grant an update at all,
+   and `claimUsername()` refuses a second, different username for the same
+   account. A rename is therefore not something the app can be talked into —
+   only an owner editing the row directly can move a handle.
 
 ## A username set in Clerk is claimed automatically
 
 Setting a username in Clerk's Manage Account is not the same as owning the
-address here: the site's address book is `handles/{username}`. So on every
-sign-in, once the cloud session is up, the app records the Clerk username as
-the person's handle — creating `handles/{username}` if it is free and
-mirroring the display name into `users/{uid}`. The sidebar then reads
+address here: the site's address book is the `handles` table. So on every
+sign-in, once the connection is up, the app records the Clerk username as the
+person's handle — inserting the `handles` row if the name is free and mirroring
+the display name onto `profiles`. The sidebar then reads
 **@username — your page** instead of asking for something they already gave.
 
 It is deliberately quiet and safe:
 
 - **never steals** — a handle held by somebody else is reported, not taken
   (the Claim page explains and keeps the tab);
-- **create-only** — an existing document of the person's own is left alone,
-  because the rules refuse an *update* by anyone but the owner, and that
-  refusal used to look like "Missing or insufficient permissions" on a retry;
+- **create-only** — an existing row of the person's own is left alone, because
+  the policies grant an insert and no update, and a retry is a no-op rather than
+  the old "Missing or insufficient permissions" of a refused second write;
 - **never blanks a profile** — display name is merged, never replacing a bio
   or links somebody has already written;
-- **only when the cloud is reachable** — without a Firebase session there is
-  nothing to write, and the Claim page says which part of the environment is
-  missing rather than failing silently.
+- **only when the database is reachable** — without a session there is nothing
+  to write, and the Claim page names which part of the environment is missing
+  rather than failing silently.
 
 If Clerk holds a name that is already taken on the site, the Claim page shows
 it pre-filled, marks it taken, and asks for a different name — Clerk keeps
@@ -68,19 +70,18 @@ whatever is confirmed there.
      is kept only as a fallback for local development or a host without the
      function, and *that* is the path Clerk refuses when changes are
      restricted.
-   - then creates `handles/{username}` and mirrors the profile into
-     `users/{uid}`.
+   - then inserts the `handles` row and mirrors the profile onto `profiles`.
 3. From then on the sidebar shows **@username** instead of "Claim your
-   username", on every device: the app restores the claimed handle from
-   Firestore on each sign-in.
+   username", on every device: the app restores the claimed handle from the
+   database on each sign-in.
 
 ## If a username genuinely must change
 
 It is deliberately awkward, and it takes an owner:
 
 1. Clerk Dashboard → **Users** → the person → change the username.
-2. Firestore → delete `handles/{old-username}` and clear (or correct)
-   `users/{uid}.username`.
+2. Supabase → **Table editor** → delete the old `handles` row and correct
+   `profiles.username` for that person.
 3. The person signs in again and claims the new name — the old one becomes
    available to nobody until it is claimed again, so do step 3 promptly if you
    want to keep it out of circulation.
@@ -93,7 +94,7 @@ canonical URLs already point at the old address.
 | What you see | What it means | What to do |
 | --- | --- | --- |
 | *"Your username is immutable and cannot be modified or removed."* | Clerk's Restrict-changes layer doing its job — the **front-end** write was refused | Nothing, if it came from the Manage Account UI. If it came from claiming, the server path is not deployed or `CLERK_SECRET_KEY` is missing, so the app fell back to the browser SDK |
-| `username_taken` | Clerk already has that username on another account | Choose another — the site checks Firestore first, so this is usually a stale race |
+| `username_taken` | Clerk already has that username on another account | Choose another — the site checks the database first, so this is usually a stale race |
 | `username_invalid` | Shape rejected (3–30 characters; lowercase letters, digits, `-`, `_`; must start and end with a letter or digit) | Fix the name in the form |
 | `501 clerk_not_configured` | `CLERK_SECRET_KEY` is not set in Vercel (or it carries a `VITE_` prefix, which would be a leak) | Add it without the prefix, then redeploy |
 | `401 missing_session_token` / `invalid_session_token` | No session, or `CLERK_AUTHORIZED_PARTIES` does not include the origin you are on | Check the origin in that variable, and sign in again |
@@ -107,8 +108,8 @@ canonical URLs already point at the old address.
 - **No rename UI.** There is no screen anywhere in the product that offers to
   change a username, because there is no supported way to do it.
 - **No admin "release" button.** Changing a handle means touching Clerk and
-  two Firestore documents in the right order — a job for the console, not for
-  a button that could be pressed by accident.
+  two rows in the right order — a job for the table editor, not for a button
+  that could be pressed by accident.
 
 ## Reserved handles, and giving one to somebody (2.7)
 
@@ -121,8 +122,9 @@ canonical URLs already point at the old address.
   same breath, so their page exists immediately.
 * **Release** a handle to put it back in circulation.
 
-A name reserved *for* a person can be claimed by that person alone — the rules
-allow the claim when the document names their uid, or their verified e-mail.
+A name reserved *for* a person can be claimed by that person alone — the
+policies allow the claim when the row names their uid, or their verified
+e-mail.
 
 ## Custom addresses (2.7)
 

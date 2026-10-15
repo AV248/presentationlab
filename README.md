@@ -2,7 +2,7 @@
 
 **Read it. Write it. Say it out loud.**
 
-Version 2.6.2 — pure-white falling-leaves entry animation; the festival theme is now exclusively the owner's (Firestore), layered over — never replacing — the user's own theme from the 13,709,280-combination studio; shared/copied links are *only* `pb.devs.surf/<path>`, nothing else; `/username` profiles and `/username/content` render at their own addresses. (2.6 — animated “Rise” entry, `/username` handles with `pb.devs.surf` short links, step-by-step publishing with copyright protection & originality screening, 20 festival/occasion themes the owner sets from Firestore, a central star-feedback dialog saved to Firestore, emotional share moments, centred rehearsal start, and separate phone/tablet/desktop optimisation. (2.5 — a local-first workspace built on one idea: **qualities are not gifted, they are
+Version 2.6.2 — pure-white falling-leaves entry animation; the festival theme is now exclusively the owner's, layered over — never replacing — the user's own theme from the 13,709,280-combination studio; shared/copied links are *only* `pb.devs.surf/<path>`, nothing else; `/username` profiles and `/username/content` render at their own addresses. (2.6 — animated “Rise” entry, `/username` handles with `pb.devs.surf` short links, step-by-step publishing with copyright protection & originality screening, 20 festival/occasion themes the owner sets, a central star-feedback dialog saved to the database, emotional share moments, centred rehearsal start, and separate phone/tablet/desktop optimisation. (2.5 — a local-first workspace built on one idea: **qualities are not gifted, they are
 built.** You climb by doing the reps, so the app is shaped around the rep — a fullscreen
 **Rehearsal Room** where you actually speak out loud, a **Writing Desk** with a dictionary that
 suggests stronger words as you type, a reader that quietly defines the words you do not know,
@@ -13,9 +13,11 @@ session, each credited to the archive it came from.
 layout was rebuilt mobile-first, and the theme engine (13,709,280 combinations) moved out of
 the way rather than away — it is still all there, just no longer the first thing you see.
 
-2.5 turns it into something you can put in front of real people. **Clerk** owns sign-in,
-**presentations and all user data live in their own Firebase project**, and **ads are served
-from a second, separate Firebase project this app cannot write to**. Structured data was
+2.5 turns it into something you can put in front of real people. **Clerk** owns sign-in, and from
+2.6.2 the data lives in **three databases with one job each**: Postgres (Supabase) holds every
+durable record, Turso serves the reading room — a derived copy of published work with full-text
+search — and Convex carries presence and live activity. One writer per fact, so they cannot
+disagree. See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**. Structured data was
 widened — breadcrumbs on every page, `Article` on every speech, a `HowTo` on the rehearsal
 room — so the site can appear as more than a line of text in search results.
 
@@ -23,8 +25,9 @@ room — so the site can appear as more than a line of text in search results.
 > "it redirects back and I am not signed in". Usernames — who owns them, why
 > they cannot change — are in **[docs/USERNAMES.md](docs/USERNAMES.md)**.
 >
-> Deploying? **[docs/VERCEL.md](docs/VERCEL.md)** has every environment variable, the
-> Firestore rules for both projects, and the order to do things in.
+> Deploying? **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** has the three databases and
+> the order to set them up; **[docs/ENV.md](docs/ENV.md)** is the complete variable list;
+> **[docs/VERCEL.md](docs/VERCEL.md)** is the Vercel walkthrough.
 > If you are on nginx or Caddy instead, see **[docs/DEPLOY.md](docs/DEPLOY.md)**.
 
 ---
@@ -55,10 +58,10 @@ copy from the reader, the library cards or the rehearsal room.
 | Ask | Shipped |
 | --- | --- |
 | Animated logo on entry | Empty screen → stairs draw up → dot blinks awake → wordmark. Once a session, skippable, reduced-motion safe (`Splash.tsx`) |
-| Free to read, login to react/create, username to share | Reactions already gated by sign-in; publishing now requires a claimed unique `/username` (`handles/{username}` lock in Firestore, `/claim` page with bio/location/website/signature) |
+| Free to read, login to react/create, username to share | Reactions already gated by sign-in; publishing now requires a claimed unique `/username` (a real unique index on `handles.username`, `/claim` page with bio/location/website/signature) |
 | Your path is yours | `/:username` is the person; `/:username/:slug` is only their content. Reserved words can never be claimed |
 | Short links | Every share/copy uses `https://pb.devs.surf` + the exact same path; canonical SEO stays on the main domain. Attach `pb.devs.surf` in Vercel → Domains and 301 it to the canonical host (docs/VERCEL.md) |
-| Feedback | Central dialog at a random moment (1.5–4 min in, ≤ once/fortnight, never mid-rehearsal): 5 stars, then words → Firestore `feedback` (queued locally offline) |
+| Feedback | Central dialog at a random moment (1.5–4 min in, ≤ once/fortnight, never mid-rehearsal): 5 stars, then words → the `feedback` table (queued locally offline) |
 | Share moments | Emotional house cards (“Someone you know is quietly dreading a presentation…”) that share the short link — never popups, dismissible per session |
 | Rehearsal | Teleprompter now starts with its first line at the middle of the screen; cue line sits at 50% |
 | Copyright | Writers can block copy/download/print per speech; publishing screens content against the library (8-word shingle overlap) and pauses near-duplicates |
@@ -88,7 +91,7 @@ hover effects; landscape phones get a shorter stage; installed PWAs get safe-are
 
 Ads are noticeable but never interrupting: theme-native cards labelled *Sponsored*, capped at
 one per scroll region, dismissible per session, loaded after the page settles, and rendered with
-`rel="sponsored nofollow"`. Campaigns are documents in Firestore (`ads` collection:
+`rel="sponsored nofollow"`. Campaigns are rows in the `ads` table (
 `title`, `description`, `url`, optional `image`, `active`) edited from `/admin`. Offline or with
 an empty collection, the slot quietly disappears and shows a small house card instead.
 
@@ -103,10 +106,12 @@ an empty collection, the slot quietly disappears and shows a small house card in
   precisely so that policy can hold.
 - **Cache policy**: hashed `/assets/*` immutable for a year; HTML and `sw.js`
   always revalidated, so a deploy actually reaches people.
-- **Firestore rules** (`firestore.rules`): default-deny, with counters as the
-  one careful exception — a signed-in person may move `views`, `likes`,
-  `dislikes` and `shares` on any speech and *nothing else*, enforced with
-  `diff().affectedKeys().hasOnly(...)` and a one-step-at-a-time cap.
+- **Postgres row policies** (`supabase/schema.sql`): default-deny, written in
+  terms of the verified Clerk user id. Reading is open; writing is the author's
+  own rows; the counters that must move on somebody else's row — likes and
+  shares — move only through the database's own functions, inside a
+  transaction. `npm run check:schema` fails the build if the app maps a field
+  to a column that does not exist.
 - **Service worker**: every fetch path resolves to a real `Response`, so a
   cache miss while offline degrades instead of throwing.
 
@@ -140,63 +145,72 @@ technical blocker, promotion is what actually climbs the results.
 
 ---
 
-## Firebase setup (production)
+## Database setup (production)
 
-The app runs completely without Firebase. To switch on the shared library and community:
+The app runs completely without any of this. With no variables set, the library
+is local to the browser, sign-in is off, and every cloud feature degrades to a
+quiet "not configured" — which is what makes these steps safe to take slowly.
 
-1. **Create a Firebase project** and add a Web app.
-2. **Do not enable any Firebase sign-in method.** Clerk owns sign-in; Firebase Auth exists only
-   to accept the custom tokens our own function mints from a verified Clerk session. This is
-   deliberate: `firestore.rules` names exactly the providers it accepts, so switching on
-   anonymous or email/password auth here would grant nothing.
-3. **Create a Firestore database** (production mode is fine).
-4. **Deploy the rules** in `firestore.rules`:
-   ```bash
-   npm i -g firebase-tools
-   firebase login
-   firebase init firestore      # choose your project
-   firebase deploy --only firestore:rules
-   ```
-5. **Copy `.env.example` to `.env`** and fill in the web config values from Project settings.
+Three databases, one job each. The full walkthrough, with every setting and
+every step in order, is **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**:
+
+1. **Supabase (the truth)** — create a project, paste `supabase/schema.sql` into
+   the SQL editor, run it, and connect Clerk under *Authentication →
+   Third-party auth*. Tables, indexes, policies and the counter functions all
+   arrive together.
+2. **Turso (the reading room)** — optional. `npm run db:turso`, then
+   `npm run sync:turso`. Without it, reading is served from Postgres.
+3. **Convex (the live layer)** — optional. `npx convex deploy`, add Clerk as a
+   provider, create the JWT template named `convex`.
+4. **Copy `.env.example` to `.env`** — nine variables, and
+   **[docs/ENV.md](docs/ENV.md)** is the list in order.
    ```bash
    cp .env.example .env
    ```
-   Firebase *web* config values identify the project in the browser and are public by design —
-   access is governed entirely by the security rules, never by these keys.
-6. **Claim owner access**: sign in inside the app, open **Control Room → Admin access**, and press
-   *Make this account the owner*. This writes `admins/{uid} = { role: 'owner' }` once.
-   It replaces the seeded e-mail/password list the first version shipped with — no password is
-   ever stored in the database.
+5. **Claim owner access** — sign in once, then run this in Supabase →
+   SQL Editor, with your own Clerk user id:
+   ```sql
+   select public.bootstrap_owner('<clerk-user-id>', 'amaavrit@yahoo.com');
+   ```
+   It grants the owner role once, and refuses if a role already exists. Every
+   later role change happens in the site's own Admin workspace.
+6. **Bring the old data across** (once) — `npm run migrate:firestore` plans,
+   `npm run migrate:firestore -- --apply` writes. It reads Firestore and never
+   deletes anything, so Firestore stays as the archive until you are satisfied.
 
-### Firestore collections
+### Where everything lives
 
-| Collection | Purpose |
-| --- | --- |
-| `presentations` | Published speeches: `Title`, `Content`, `Preview`, `Category`, `Occasion`, `Tags`, `Author`, `uid`, `Date`, `views`, `likes`, `dislikes`, `shares`, `ad` |
-| `bloggerblogs` | Open-mic notes (the old creative-creator wall) |
-| `bloggers` | One doc per contributor with real reaction counters and points |
-| `reactions` | One doc per (person, speech): `kind` is `like` or `dislike` |
-| `shares` | One doc per (person, speech) share |
-| `users` | Profile mirror for every signed-in person |
-| `admins/{uid}` | Role documents: `owner` or `admin` |
-| `admin` | Legacy e-mail allow-list from v1 — read only, never written, no passwords |
-| `sponsors` | Optional sponsor slots shown before sponsor-supported speeches |
-| `servingads` | Ad documents — `Title`, `Content`, `ImageURL`, `DescriptionPreview`, `RedirectURL`. Public to read, role-holder to write. See `docs/ADS.md`. |
+| Collection (app name) | Table | Purpose |
+| --- | --- | --- |
+| `presentations` | `speeches` | Published speeches: `Title`, `Content`, `Preview`, `Category`, `Occasion`, `Tags`, `Author`, `uid`, `Date`, `views`, `likes`, `dislikes`, `shares`, `ad` |
+| `bloggerblogs` | `posts` | Open-mic notes (the old creative-creator wall) |
+| `users` | `profiles` | One row per person, carrying their own like/dislike score |
+| `handles` | `handles` | The username lock — one row per claimed name, created never changed |
+| `reactions` | `reactions` | One row per (person, speech): `kind` is `like` or `dislike` |
+| — | `shares` | One row per (person, speech) share |
+| `admins` | `admins` | Role rows: `owner` or `admin` |
+| `adminPrivate` | `admin_private` | The second lock's secret, readable only by a role-holder |
+| `siteSettings` | `site_settings` | One row per site-wide setting, including the owner's festival |
+| `sponsors` | `sponsors` | Optional sponsor slots shown before sponsor-supported speeches |
+| `servingads` | `ads` | Sponsored cards — see `docs/ADS.md` |
+| `feedback` | `feedback` | The star-then-words dialog, saved as it arrives |
+| — | `library` (**Turso**) | The reading room: published work + FTS5, rebuilt not written |
+| — | `presence` / `activity` (**Convex**) | Who is here now, and what just happened |
+
+The left column is what the app says; the right is what the database calls it.
+`src/services/backend/supabase.ts` is the only file that knows both, and
+`npm run check:schema` fails the build if a field is mapped to a column that
+does not exist.
 
 Points follow the original rule and are computed from real counters:
 `points = likesReceived − floor(dislikesReceived / 3)`.
 
-### One Firebase project, one rules file
+### One database, one schema file
 
-Everything lives in `reflectioncapturedthoughts`: presentations, profiles, reactions, roles —
-and ads, in `servingads`. Public read, role-holder write, and the web app has no write path to
-them at all.
-
-Until 2.6.2 ads lived in a second project (`a-a-v-r-i-t`) so that a bug in the main app could
-not touch ad content. That isolation is now expressed as a rule rather than as an entire second
-project: it bought a smaller blast radius at the cost of seven more environment variables, a
-second rules file and a second console to get wrong — more machinery than one read-only
-collection justifies.
+Everything durable lives in the same Postgres database: profiles, handles,
+roles, speeches, reactions, ads. There is no second project and no second rules
+file to keep in sync — the policies live inside `supabase/schema.sql`, beside
+the tables they guard, and applying that one file is the whole deploy.
 
 Because `servingads` is world-readable and edited outside this codebase, every field is treated
 as untrusted input. `src/services/ads.ts` parses `ImageURL` and `RedirectURL` and requires
@@ -205,30 +219,28 @@ is skipped rather than rendered. Ads are labelled *Sponsored* and carry
 `rel="sponsored noopener noreferrer"`, which is what keeps paid links from touching your own
 rankings.
 
-### How sign-in reaches Firestore
+### How sign-in reaches the data
 
-Clerk signs the visitor in. Firestore cannot validate a Clerk JWT by itself, so
-`api/clerk-firebase-token.ts` verifies the Clerk session **server-side** with your secret key
-and mints a Firebase custom token for the same person. `request.auth.uid` in the rules is then
-the Clerk user id.
+Clerk signs the visitor in, and its session token is presented **directly** to
+both databases that need one. Postgres trusts Clerk as a third-party auth
+provider, so `auth.jwt() ->> 'sub'` is the Clerk user id and every policy is
+written in terms of it. Convex trusts the same token through a JWT template
+named `convex`. Turso never learns who is asking: it is a public reading room.
 
-That function is the only place the Firebase Admin credential is ever read. If it were in the
-browser bundle it would be a full read/write key to your database — which is the mistake this
-design exists to make impossible. `npm run verify` fails the build if anything secret ends up
-under a `VITE_` prefix.
-
-Until the service account is configured the endpoint returns `501`; visitors can still sign in
-and browse the library, and only cloud writes are unavailable.
-
----
+There is no token exchange, no custom token, and no credential that can mint one
+— which removes a whole class of "it signed me in but the database disagrees"
+failures, and the endpoint that used to broker it. If the connection is not up,
+the app says so in words — `not-configured`, `no-session`, `unauthorized` or
+`network` — and names what to do about each.
 
 ## Honest data, always
 
 - **No invented people.** Only signed-in accounts appear on the leaderboard. The starter library is
   attributed to Presentation Buddy, because that is who wrote it.
-- **No invented numbers.** Views, likes, dislikes and shares come from Firestore counters that only
-  move for real reads and real signed-in reactions. Where no counter exists, the UI shows nothing
-  rather than a zero.
+- **No invented numbers.** Views, likes, dislikes and shares come from counters in Postgres that
+  only move for real reads and real signed-in reactions, and the two that must be atomic are
+  database functions rather than a sequence of writes. Where no counter exists, the UI shows
+  nothing rather than a zero.
 - **No fake freshness.** "Latest" is really newest-first, and work published by people always sits
   above the starter library and web arrivals.
 - **Sponsor slot.** If a speech is flagged `ad`, a five-second slot runs first. With no sponsor
@@ -285,8 +297,9 @@ separately when iterating.
 ### Stack
 
 React 19 · TypeScript (strict) · Vite 7 · Tailwind v4 bridged to runtime CSS variables · Zustand ·
-lucide-react · Firebase 12 (lazy-loaded: auth and Firestore only download when someone signs in or
-the library asks for cloud speeches) · PWA manifest + service worker.
+lucide-react · Clerk 5 (sign-in) · Supabase (`@supabase/supabase-js`, lazy-loaded: the data layer
+only downloads when someone signs in or the library asks for cloud speeches) · Convex (presence)
+· `@libsql/client` server-side for the Turso reading room · PWA manifest + service worker.
 
 ---
 
