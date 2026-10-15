@@ -1,9 +1,9 @@
 {
   "name": "presentation-buddy",
   "private": true,
-  "version": "3.1.0-beta.0",
+  "version": "3.1.0",
   "type": "module",
-  "description": "Presentation Buddy 3.1 (beta) \u2014 Next.js App Router in front of one identity and three databases: Supabase/Postgres for every durable record, Turso for the reading room, Convex for presence and live activity. The Vercel environment variable names are unchanged from 2.x.",
+  "description": "Presentation Buddy 3.1 \u2014 Next.js App Router in front of one identity and three databases: Supabase/Postgres for every durable record, Turso for the reading room, Convex for presence and live activity. The Vercel environment variable names are unchanged from 2.x.",
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/cards/run.mjs && next build",

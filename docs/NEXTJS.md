@@ -1,6 +1,6 @@
 # 3.0 — the move to Next.js
 
-Version 3.1 (beta) runs on the **Next.js App Router**. Everything that made the
+Version 3.1 runs on the **Next.js App Router**. Everything that made the
 site work — Clerk for identity, Postgres for the truth, Turso for the reading
 room, Convex for the live layer — is unchanged, and so are the environment
 variable names. This file records what moved, what did not, and what has to

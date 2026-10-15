@@ -1,6 +1,6 @@
 # Presentation Buddy
 
-> **3.1 (beta): Next.js App Router.** The same screens, the same three databases and the
+> **3.1: Next.js App Router.** The same screens, the same three databases and the
 > same environment variables — now on the framework, with every page that can be known at
 > build time served as static HTML. What moved and what has to change in Vercel is in
 > [docs/NEXTJS.md](docs/NEXTJS.md).
