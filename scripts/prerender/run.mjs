@@ -84,8 +84,10 @@ await build({
       PROD: true,
       DEV: false,
       BASE_URL: '/',
-      VITE_FIREBASE_API_KEY: '',
-      VITE_FIREBASE_PROJECT_ID: '',
+      // The databases are left unset on purpose: prerendering renders the
+      // fully-local app, which is the configuration that must never break.
+      VITE_SUPABASE_URL: '',
+      VITE_SUPABASE_ANON_KEY: '',
     }),
   },
   logLevel: 'error',

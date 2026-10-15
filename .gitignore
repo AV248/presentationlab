@@ -1,4 +1,5 @@
 node_modules
+.tmp
 scripts/smoke/.out
 dist
 dist-ssr

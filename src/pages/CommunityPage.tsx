@@ -5,7 +5,7 @@ import { useCommunity } from '../hooks/useCommunity';
 import { useAuth } from '../store/auth';
 import { useUi } from '../store/ui';
 import { publishPost, deletePost } from '../services/data';
-import { FIREBASE_ENABLED } from '../services/firebase';
+import { BACKEND_ENABLED } from '../services/backend';
 import { formatCount } from '../lib/text';
 import { useGate } from '../components/SignIn';
 import { AdSlot } from '../components/AdSlot';
@@ -83,10 +83,10 @@ export function CommunityPage() {
         </div>
       </section>
 
-      {!FIREBASE_ENABLED && (
+      {!BACKEND_ENABLED && (
         <div className="pb-well" style={{ padding: 16, fontSize: '0.86rem', lineHeight: 1.65 }}>
-          Firebase is not configured on this installation, so there is no shared community to show
-          yet. Add the environment variables and this page fills with real accounts.
+          No database is configured on this installation, so there is no shared community to show
+          yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY and this page fills with real accounts.
         </div>
       )}
 
@@ -175,7 +175,7 @@ export function CommunityPage() {
         {contributors.length === 0 ? (
           <p className="pb-muted" style={{ padding: '24px 0', textAlign: 'center', lineHeight: 1.7 }}>
             {loading
-              ? 'Asking Firestore who has written something…'
+              ? 'Asking the database who has written something…'
               : 'Nobody here yet. Publish a speech and the first name on this board is yours.'}
           </p>
         ) : (

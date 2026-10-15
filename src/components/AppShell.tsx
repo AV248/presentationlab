@@ -351,7 +351,7 @@ function CloudBadge() {
 }
 
 function FestivalRibbon() {
-  // Owner-selected in Firestore only — visitors cannot change the season.
+  // Owner-selected in the database only — visitors cannot change the season.
   const [site, setSite] = useState<string | null>(null);
   useEffect(() => { void fetchSiteFestival().then(setSite); }, []);
   const f = festivalById(site);

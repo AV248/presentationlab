@@ -5,10 +5,10 @@ import { festivalById } from '../data/festivals';
 import { fetchSiteFestival } from '../services/profiles';
 
 /**
- * The user's own five-axis theme is the base. The festival theme — chosen
- * ONLY by the site owner in Firestore `siteSettings/theme` — is a thin
- * seasonal layer over it (accent family + greeting), never a replacement
- * and never selectable by visitors (2.6.2).
+ * The user's own five-axis theme is the base. The festival is a thin seasonal
+ * layer over it (accent family + greeting) — never a replacement, never
+ * selectable by visitors, and in 2.6.2 settled silently: the only place it can
+ * be chosen is the owner's own settings row, `site_settings.theme`.
  */
 export function useThemeEngine() {
   const theme = useSettings((s) => s.theme);

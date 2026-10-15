@@ -35,9 +35,9 @@ import {
 import { validateUsername } from '../lib/identity';
 import { FESTIVALS } from '../data/festivals';
 import { fetchSiteFestival, setSiteFestival } from '../services/profiles';
-import { FIREBASE_ENABLED } from '../services/firebase';
+import { BACKEND_ENABLED } from '../services/backend';
 import { EnvCheckPanel } from '../components/EnvCheckPanel';
-import { ADS_ENABLED } from '../services/firebaseAds';
+import { ADS_ENABLED } from '../services/ads';
 import { formatCount } from '../lib/text';
 
 /**
@@ -136,9 +136,9 @@ export function AdminPage() {
   }
 
   // The second lock. A password the role-holder set, asked once per browser
-  // session. It is not the security boundary — Firestore rules are, and they
-  // refuse writes from anyone without the role — it is a lock on the door for
-  // the borrowed-laptop case.
+  // session. It is not the security boundary — the database's row policies are,
+  // and they refuse writes from anyone without the role — it is a lock on the
+  // door for the borrowed-laptop case.
   if (unlocked === false && gate?.configured !== false) {
     if (gate === null) {
       return (
@@ -150,7 +150,7 @@ export function AdminPage() {
     return <AdminGate onUnlocked={() => setUnlocked(true)} />;
   }
 
-  if (!FIREBASE_ENABLED || !user) {
+  if (!BACKEND_ENABLED || !user) {
     return (
       <div className="pb-page pb-narrow">
         <section className="pb-panel" style={{ padding: '22px 24px' }}>
@@ -286,24 +286,22 @@ export function AdminPage() {
               <Megaphone size={16} /> Live inventory
             </h2>
             <p className="pb-muted" style={{ fontSize: '0.8rem', lineHeight: 1.7, marginBottom: 10 }}>
-              Sponsored cards are served from the <span className="pb-mono">servingads</span>{' '}
-              collection of this site's own Firebase project. This desk is read-only by design —
-              add, edit, pause or re-weight ads in the Firebase console, where a change appears
-              within ten minutes (the browser caches the list).
+              Sponsored cards are kept in the <span className="pb-mono">ads</span> table beside
+              everything else this site owns, and every change made here is live within a minute
+              (the browser caches the list). Only a role-holder can write to it; everybody can
+              read it, which is exactly what showing an ad to a visitor requires.
             </p>
             <p className="pb-muted" style={{ fontSize: '0.78rem', lineHeight: 1.7 }}>
-              Every document needs <span className="pb-mono">Title</span>,{' '}
-              <span className="pb-mono">Content</span>, <span className="pb-mono">ImageURL</span>,{' '}
-              <span className="pb-mono">DescriptionPreview</span> and{' '}
-              <span className="pb-mono">RedirectURL</span>. Both URLs are scheme-checked before
-              they reach the page, so a document carrying a{' '}
+              An ad needs <span className="pb-mono">Title</span> and{' '}
+              <span className="pb-mono">Content</span>. The image and the link are each optional —
+              an ad may be words alone, or words that go nowhere. Any URL that is given is
+              scheme-checked before it reaches the page, so a card carrying a{' '}
               <span className="pb-mono">javascript:</span> link is skipped rather than rendered.
             </p>
             {!ADS_ENABLED && (
               <p className="pb-muted" style={{ fontSize: '0.8rem', marginTop: 10 }}>
-                No Firebase project is configured on this installation, so the site is showing
-                its own house promos instead of reading{' '}
-                <span className="pb-mono">servingads</span>.
+                No database is configured on this installation, so the site is showing its own
+                house promos instead of reading <span className="pb-mono">ads</span>.
               </p>
             )}
           </div>
@@ -514,7 +512,7 @@ function SiteThemeTab({ isOwner }: { isOwner: boolean }) {
   return (
     <section className="pb-panel" style={{ padding: '16px 18px' }}>
       <h2 style={{ fontSize: '1rem', marginBottom: 6 }}>Festival theme for the whole site</h2>
-      <p className="pb-muted" style={{ fontSize: '0.84rem', marginBottom: 14 }}>{isOwner ? 'Stored in Firestore siteSettings/theme — every visitor sees it on their next visit. People may still personalise on their own device.' : 'Only the owner can change the site theme.'}</p>
+      <p className="pb-muted" style={{ fontSize: '0.84rem', marginBottom: 14 }}>{isOwner ? 'Stored as site_settings.theme — every visitor sees it on their next visit. People may still personalise on their own device.' : 'Only the owner can change the site theme.'}</p>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {FESTIVALS.map((f) => (
           <button key={f.id} type="button" disabled={!isOwner} className={`pb-chip ${current === f.id ? 'pb-chip-accent' : ''}`} onClick={() => { void setSiteFestival(f.id).then(() => { setCurrent(f.id); toast(`Site theme: ${f.name}`, 'success'); }).catch((e: Error) => toast(e.message, 'error')); }}>{f.emoji} {f.name}</button>

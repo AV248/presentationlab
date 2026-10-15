@@ -137,8 +137,8 @@ export function AboutPage() {
             {[
               'Your drafts, notes, bookmarks and reading positions live in this browser. They are not uploaded.',
               'No analytics, no advertising scripts, no cookie banner.',
-              'Sign-in is handled by Google or Microsoft. We store your name, e-mail and picture so your words can be attributed to you — never a password.',
-              'Firestore holds only what you publish, plus anonymous counters for views, likes, dislikes and shares.',
+              'Sign-in is handled by Google or Microsoft, through Clerk. We store your name, e-mail and picture so your words can be attributed to you — never a password.',
+              'The database holds only what you publish, plus counters for views, likes, dislikes and shares.',
               'Export everything, or wipe the device, from the Control Room.',
             ].map((line) => (
               <li key={line} className="pb-muted" style={{ fontSize: '0.84rem', lineHeight: 1.65 }}>

@@ -4,7 +4,8 @@
  * Deleting and re-adding environment variables is the one operation where a
  * single typo produces a site that looks broken in a dozen unrelated ways — a
  * library with no cloud speeches, a sign-in sheet that says "not switched on",
- * a token exchange answering 501. This module turns all of that into one
+ * a reading room answering 503 and naming nothing. This module turns all of
+ * that into one
  * honest list: every variable the app reads, whether this build actually has
  * it, what it powers, and what stops working without it.
  *
@@ -122,32 +123,97 @@ function siteUrlReport(): VarReport {
   return { name, status: 'set', what, breaks, hint: value };
 }
 
-const firebaseVar = (name: string, what: string) =>
-  report(name, env[name as keyof ImportMetaEnv] as string | undefined, what, 'Cloud speeches, profiles, reactions and publishing stay local-only.', keyFingerprint);
+/**
+ * The anon key is public by design — it only ever unlocks what the row policies
+ * allow. A *secret* key in a `VITE_` variable is the one mistake here that is
+ * worth shouting about, because it is in the browser bundle and it bypasses
+ * every policy in supabase/schema.sql.
+ */
+function anonKeyReport(): VarReport {
+  const name = 'VITE_SUPABASE_ANON_KEY';
+  const value = (env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() ?? '';
+  const what = 'The public key the browser presents, paired with the signed-in session.';
+  const breaks = 'Writes are refused and nothing can be published.';
+  if (!value) return { name, status: 'missing', what, breaks, hint: '' };
+  if (value.startsWith('sb_secret_') || value.startsWith('service_role')) {
+    return {
+      name,
+      status: 'danger',
+      what,
+      breaks: 'A SECRET key is in a public variable — it is in the browser bundle and it ignores every row policy. Rotate it and use the anon/publishable key.',
+      hint: 'secret key — wrong kind',
+    };
+  }
+  // A legacy anon key is a JWT whose payload carries `"role":"anon"`.
+  if (value.split('.').length === 3) {
+    try {
+      const payload = JSON.parse(atob(value.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { role?: string };
+      if (payload.role === 'service_role') {
+        return {
+          name,
+          status: 'danger',
+          what,
+          breaks: 'A service-role JWT is in a public variable — it is in the browser bundle and it ignores every row policy. Rotate it.',
+          hint: 'service_role — wrong kind of key',
+        };
+      }
+    } catch {
+      /* not a JWT we can read; the shape checks below still apply */
+    }
+  }
+  return { name, status: 'set', what, breaks, hint: keyFingerprint(value) };
+}
 
-/** The data project's web config — public by design, but required as a set. */
+/** Postgres — where everything durable lives, and the only critical group. */
 function dataGroup(): GroupReport {
   const vars: VarReport[] = [
-    firebaseVar('VITE_FIREBASE_API_KEY', 'Identifies the data project to the browser.'),
-    firebaseVar('VITE_FIREBASE_AUTH_DOMAIN', 'Firebase Auth host used by the token exchange.'),
-    firebaseVar('VITE_FIREBASE_PROJECT_ID', 'Which project the cloud library reads and writes.'),
-    firebaseVar('VITE_FIREBASE_STORAGE_BUCKET', 'Storage bucket for the project.'),
-    firebaseVar('VITE_FIREBASE_MESSAGING_SENDER_ID', 'Sender id (web config).'),
-    firebaseVar('VITE_FIREBASE_APP_ID', 'App id (web config).'),
-    firebaseVar('VITE_FIREBASE_MEASUREMENT_ID', 'Analytics id, if enabled.'),
+    report(
+      'VITE_SUPABASE_URL',
+      env.VITE_SUPABASE_URL as string | undefined,
+      'The Postgres project this site reads and writes.',
+      'Publishing, reacting, profiles and ads stay local-only.',
+      keyFingerprint,
+    ),
+    anonKeyReport(),
   ];
-  // Partially configured is the dangerous state: the app must never half-connect.
-  const apiKey = vars[0].status === 'set';
-  const projectId = vars[2].status === 'set';
-  if (apiKey !== projectId) {
-    const culprit = apiKey ? vars[2] : vars[0];
-    culprit.status = 'danger';
-    culprit.breaks = 'Half-configured: the app needs the API key and the project id together.';
+  // Half-configured is the dangerous state: the app must never half-connect.
+  const url = vars[0].status === 'set';
+  const key = vars[1].status === 'set';
+  if (url !== key && (vars[0].status !== 'danger' || vars[1].status !== 'danger')) {
+    const culprit = url ? vars[1] : vars[0];
+    if (culprit.status !== 'danger') {
+      culprit.status = 'danger';
+      culprit.breaks = 'Half-configured: the app needs the URL and the public key together.';
+    }
   }
   return {
     id: 'data',
-    title: 'Firebase — the data project',
+    title: 'Postgres — everything durable',
     weight: 'critical',
+    vars,
+    ok: vars.every((v) => v.status === 'set'),
+  };
+}
+
+/**
+ * Prettiness, not plumbing. The live layer shows who else is reading and what
+ * just happened; without it the site is exactly as useful, so its absence is
+ * reported and never treated as a fault.
+ */
+function liveGroup(): GroupReport {
+  const vars: VarReport[] = [
+    report(
+      'VITE_CONVEX_URL',
+      env.VITE_CONVEX_URL as string | undefined,
+      'The live layer: who is here now, and what just happened.',
+      'Presence and live activity go quiet. Everything else is unaffected.',
+      keyFingerprint,
+    ),
+  ];
+  return {
+    id: 'live',
+    title: 'Convex — the live layer (optional)',
+    weight: 'optional',
     vars,
     ok: vars.every((v) => v.status === 'set'),
   };
@@ -177,16 +243,17 @@ export function auditEnvironment(): GroupReport[] {
   };
   site.ok = site.vars.every((v) => v.status === 'set');
 
-  // Ads need no variables of their own: `servingads` lives in the data
-  // project, so the `data` group above covers them. One fewer thing to
-  // configure, and one fewer way to be half-configured.
-  return [clerk, site, dataGroup()];
+  // Ads need no variables of their own: `servingads` is a table beside
+  // everything else, so the group above covers them. One fewer thing to
+  // configure, and one fewer way to be half-configured. The reading room needs
+  // no variables here either — Turso is reached by the server, never by the
+  // browser, so its two names are checked through `probeServerEnv()` instead.
+  return [clerk, site, dataGroup(), liveGroup()];
 }
 
-/** True when the two variables that gate the whole cloud are both present. */
+/** True when the two variables that gate everything durable are both present. */
 export function cloudConfigured(): boolean {
-  const report = dataGroup();
-  return report.ok;
+  return dataGroup().ok;
 }
 
 /* ------------------------------------------------------------------ */
@@ -207,13 +274,18 @@ export interface ServerProbe {
 }
 
 /**
- * Ask the token endpoint to describe itself.
+ * Ask the reading room to describe itself.
  *
- * A POST with no session token is the perfect probe: a *correctly configured*
- * server answers `401 missing_session_token` (everything is present, the
- * request simply had no credentials), while a misconfigured one answers `501`
- * and names the variable it lacks. A 404 means the function is not deployed —
- * or the host is serving HTML for it, which looks identical from here.
+ * `/api/library` is the only endpoint that holds a secret, so it is also the
+ * only way to see the server-only variables from a browser. A plain GET is the
+ * perfect probe: a *configured* deployment answers `200` with rows, a
+ * deployment that has not been given a Turso database answers `503
+ * library_not_configured` and names what it lacks, and a missing function
+ * answers `404`.
+ *
+ * That 503 is deliberately *not* treated as broken: reading falls back to
+ * Postgres, which holds the same rows, so the site is whole without Turso and
+ * the panel says so instead of calling it a failure.
  *
  * Never throws. This runs on pages anyone can open.
  */
@@ -228,10 +300,9 @@ export async function probeServerEnv(): Promise<ServerProbe> {
   if (typeof fetch !== 'function') return { ...blank, label: 'Cannot check', detail: 'This browser cannot make the request.' };
 
   try {
-    const response = await fetch('/api/clerk-firebase-token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
+    const response = await fetch('/api/library?max=1', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
       credentials: 'same-origin',
     });
 
@@ -244,53 +315,50 @@ export async function probeServerEnv(): Promise<ServerProbe> {
     }
 
     const code = payload.error ?? '';
+    const named = /([A-Z][A-Z_]{3,})/.exec(payload.message ?? '')?.[1];
 
-    if (response.status === 401 && (code === 'missing_session_token' || code === 'invalid_session_token')) {
+    if (response.ok) {
       return {
         reachable: true,
         ok: true,
-        label: 'Ready',
-        detail: 'The endpoint is deployed and both server variables are in place.',
+        label: 'Reading room ready',
+        detail:
+          'The SQLite copy answered, so TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are both in place on the server.',
         missing: [],
       };
     }
 
-    if (response.status === 501) {
-      // 501 covers two unrelated faults, and conflating them sent people to
-      // Vercel for days. `clerk_sdk_unavailable` is the function failing to load
-      // its *own* dependency — a packaging problem that no environment variable
-      // can fix. Only the other codes name a variable.
-      if (code === 'clerk_sdk_unavailable') {
-        return {
-          reachable: true,
-          ok: false,
-          label: 'Deployment is missing a dependency',
-          detail:
-            payload.message ??
-            'The function could not load the Clerk SDK. That is a packaging problem in the deployment, not a missing variable.',
-          missing: [],
-        };
-      }
-      const missing = /([A-Z][A-Z_]{3,})/.exec(payload.message ?? '')?.[1];
+    if (response.status === 503 && code === 'library_not_configured') {
       return {
         reachable: true,
         ok: false,
-        label: 'Server variable missing',
-        detail: payload.message ?? 'The endpoint is running but is not configured.',
-        missing: missing ? [missing] : [],
+        label: 'Reading room not set up (harmless)',
+        detail:
+          'No Turso database is attached, so reading is served from Postgres — the same rows, one hop further away. Add TURSO_DATABASE_URL and TURSO_AUTH_TOKEN when you want the faster and searchable copy.',
+        missing: ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN'],
+      };
+    }
+
+    if (response.status === 503) {
+      return {
+        reachable: true,
+        ok: false,
+        label: 'Reading room unreachable',
+        detail: payload.message ?? 'The endpoint is configured but could not reach its database.',
+        missing: named ? [named] : [],
       };
     }
 
     if (response.status === 405) {
-      // Reachable only if something in front of the function turns POSTs into
-      // GETs — the app itself never sends anything else.
+      // Reachable only if something in front of the function turns GETs into
+      // something else — the app never sends anything but GET here.
       return {
         reachable: true,
         ok: false,
         label: 'Rejected the method',
         detail:
           payload.message ??
-          'The endpoint refused a POST. Something in front of the function is rewriting the request.',
+          'The endpoint refused a GET. Something in front of the function is rewriting the request.',
         missing: [],
       };
     }
@@ -302,7 +370,7 @@ export async function probeServerEnv(): Promise<ServerProbe> {
         label: response.status === 404 ? 'Not deployed' : `HTTP ${response.status}`,
         detail:
           response.status === 404
-            ? 'No function answered at /api/clerk-firebase-token — the API half of the deployment is missing, so the cloud cannot be reached.'
+            ? 'No function answered at /api/library. Reading still works — it falls back to Postgres — but search and the faster copy do not exist on this deployment.'
             : 'The endpoint answered something other than JSON. Check the deployment logs.',
         missing: [],
       };
@@ -329,5 +397,15 @@ export async function probeServerEnv(): Promise<ServerProbe> {
 /** The names to paste into Vercel, in the order they should be added. */
 export const CLIENT_VARIABLE_NAMES = auditEnvironment().flatMap((group) => group.vars.map((v) => v.name));
 
-/** Server-only names, shown as a reminder (their values never touch the bundle). */
-export const SERVER_VARIABLE_NAMES = ['CLERK_SECRET_KEY', 'CLERK_AUTHORIZED_PARTIES', 'FIREBASE_SERVICE_ACCOUNT_JSON'];
+/**
+ * Server-only names, shown as a reminder — their values never touch the bundle.
+ * The two Turso names are the ones the reading room holds; Clerk's are what
+ * `/api/clerk-set-username` uses. Nothing else needs a secret, because nothing
+ * else in this site talks to a service the browser is not allowed to reach.
+ */
+export const SERVER_VARIABLE_NAMES = [
+  'CLERK_SECRET_KEY',
+  'CLERK_AUTHORIZED_PARTIES',
+  'TURSO_DATABASE_URL',
+  'TURSO_AUTH_TOKEN',
+];

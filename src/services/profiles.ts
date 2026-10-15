@@ -1,14 +1,16 @@
-import { loadFirebase, FIREBASE_ENABLED } from './firebase';
+import { loadBackend, BACKEND_ENABLED } from './backend';
 import { validateUsername } from '../lib/identity';
-async function fs() { return loadFirebase(); }
+async function fs() { return loadBackend(); }
 const str = (v: unknown, f = '') => typeof v === 'string' ? v : f;
 export interface PublicProfile { username: string; uid: string; displayName: string; bio: string; location: string; website: string; signature: string; createdAt: string }
-/** Claim /username: handles/{username} is the uniqueness lock (create-only
- * in firestore.rules); users/{uid} mirrors the profile for the leaderboard. */
+/** Claim /username: the `handles` row is the uniqueness lock, and it is
+ * create-only — the database has a real unique index on `handles.username`, so
+ * two people racing for the same name cannot both win. `profiles` mirrors the
+ * profile the public page and the leaderboard read. */
 /** Does a handle exist? `unknown` when we simply cannot tell (denied read,
- * offline, Firebase unconfigured) — never guess "free" in that case. */
+ * offline, database unconfigured) — never guess "free" in that case. */
 export async function fetchHandleState(username: string): Promise<'held' | 'free' | 'unknown'> {
-  if (!FIREBASE_ENABLED) return 'unknown';
+  if (!BACKEND_ENABLED) return 'unknown';
   const b = await fs(); if (!b) return 'unknown';
   try {
     const snap = await b.fs.getDoc(b.fs.doc(b.db, 'handles', username));
@@ -43,7 +45,7 @@ export async function autoClaimUsername(
 ): Promise<AutoClaimResult> {
   const v = validateUsername(raw);
   if (!v.ok) return { ok: false, username: v.username, reason: 'invalid' };
-  if (!FIREBASE_ENABLED) return { ok: false, username: v.username, reason: 'unavailable' };
+  if (!BACKEND_ENABLED) return { ok: false, username: v.username, reason: 'unavailable' };
   const b = await fs(); if (!b) return { ok: false, username: v.username, reason: 'unavailable' };
   const { fs: f, db } = b;
   try {
@@ -90,8 +92,8 @@ export async function autoClaimUsername(
 export async function claimUsername(uid: string, raw: string, profile: Partial<PublicProfile>): Promise<string> {
   const v = validateUsername(raw); if (!v.ok) throw new Error(v.error);
   // Local-first: claiming works offline as a reservation on this device;
-  // Firestore enforces global uniqueness when configured.
-  if (!FIREBASE_ENABLED) return v.username;
+  // The database enforces global uniqueness (handles.username is unique).
+  if (!BACKEND_ENABLED) return v.username;
   const b = await fs(); if (!b) return v.username;
   const { fs: f, db } = b;
   // One username per user, and it can never be changed.
@@ -114,7 +116,7 @@ export async function claimUsername(uid: string, raw: string, profile: Partial<P
   return v.username;
 }
 export async function fetchProfile(username: string): Promise<PublicProfile | null> {
-  if (!FIREBASE_ENABLED) return null;
+  if (!BACKEND_ENABLED) return null;
   const b = await fs(); if (!b) return null;
   const { fs: f, db } = b;
   try {
@@ -127,7 +129,7 @@ export async function fetchProfile(username: string): Promise<PublicProfile | nu
   } catch { return null; }
 }
 export async function fetchOwnProfile(uid: string): Promise<PublicProfile | null> {
-  if (!FIREBASE_ENABLED) return null;
+  if (!BACKEND_ENABLED) return null;
   const b = await fs(); if (!b) return null;
   try {
     const u = await b.fs.getDoc(b.fs.doc(b.db, 'users', uid));
@@ -142,7 +144,7 @@ export async function fetchReservation(
   username: string,
   me: { uid?: string; email?: string | null } = {},
 ): Promise<'free' | 'mine' | 'reserved' | 'taken' | 'unknown'> {
-  if (!FIREBASE_ENABLED) return 'unknown';
+  if (!BACKEND_ENABLED) return 'unknown';
   const b = await fs(); if (!b) return 'unknown';
   try {
     const snap = await b.fs.getDoc(b.fs.doc(b.db, 'handles', username));
@@ -161,7 +163,7 @@ export async function fetchReservation(
 
 export async function isUsernameAvailable(raw: string, myUid?: string): Promise<boolean> {
   const v = validateUsername(raw); if (!v.ok) return false;
-  if (!FIREBASE_ENABLED) return true;
+  if (!BACKEND_ENABLED) return true;
   const b = await fs(); if (!b) return true;
   try { const s = await b.fs.getDoc(b.fs.doc(b.db, 'handles', v.username)); return !s.exists() || str((s.data() ?? {}).uid) === myUid; } catch { return true; }
 }
@@ -170,7 +172,7 @@ export async function submitFeedback(uid: string | null, rating: number, text: s
   try {
     const raw = localStorage.getItem('pb.feedback.queue'); const q = raw ? JSON.parse(raw) as unknown[] : []; q.push(payload); localStorage.setItem('pb.feedback.queue', JSON.stringify(q.slice(-50)));
   } catch { /* ignore */ }
-  if (!FIREBASE_ENABLED) return 'local';
+  if (!BACKEND_ENABLED) return 'local';
   const b = await fs(); if (!b) return 'local';
   try { await b.fs.addDoc(b.fs.collection(b.db, 'feedback'), { ...payload, createdAt: b.fs.serverTimestamp() }); return 'cloud'; } catch { return 'local'; }
 }
@@ -178,7 +180,7 @@ let flushing = false;
 /** Deliver any feedback queued while offline/unconfigured. Called on app
  * start and whenever the dialog opens, so nothing a user wrote is stranded. */
 export async function flushFeedbackQueue(): Promise<void> {
-  if (flushing || !FIREBASE_ENABLED) return;
+  if (flushing || !BACKEND_ENABLED) return;
   let queue: Record<string, unknown>[] = [];
   try { queue = JSON.parse(localStorage.getItem('pb.feedback.queue') ?? '[]') as Record<string, unknown>[]; } catch { return; }
   if (!queue.length) return;
@@ -191,14 +193,36 @@ export async function flushFeedbackQueue(): Promise<void> {
     localStorage.removeItem('pb.feedback.queue');
   } catch { /* keep the queue for the next visit */ } finally { flushing = false; }
 }
+/**
+ * The owner's festival, as `site_settings.theme`.
+ *
+ * The row is `{ key: 'theme', value: { festivalId } }`. The value column is
+ * JSON, so a settings bag can grow without a migration — but it does have to be
+ * written *into* that column: a bare `festivalId` key would not match any
+ * mapped field, and the engine drops what it cannot map rather than inventing
+ * a column. That is the right call at runtime and a silent no-op here, which is
+ * why this pairing is written out in full in one place.
+ */
 export async function fetchSiteFestival(): Promise<string | null> {
-  if (!FIREBASE_ENABLED) return null;
+  if (!BACKEND_ENABLED) return null;
   const b = await fs(); if (!b) return null;
-  try { const s = await b.fs.getDoc(b.fs.doc(b.db, 'siteSettings', 'theme')); return s.exists() ? str((s.data() ?? {}).festivalId) || null : null; } catch { return null; }
+  try {
+    const snap = await b.fs.getDoc(b.fs.doc(b.db, 'siteSettings', 'theme'));
+    if (!snap.exists()) return null;
+    const value = (snap.data() ?? {}).value;
+    // Tolerates a row that stored the id directly, which an older build did.
+    const id = typeof value === 'string' ? value : str((value as Record<string, unknown>)?.festivalId);
+    return id || null;
+  } catch { return null; }
 }
+
 export async function setSiteFestival(festivalId: string): Promise<void> {
   const b = await fs(); if (!b) throw new Error('Cloud is not configured on this installation.');
-  await b.fs.setDoc(b.fs.doc(b.db, 'siteSettings', 'theme'), { festivalId, updatedAt: b.fs.serverTimestamp() }, { merge: true });
+  await b.fs.setDoc(
+    b.fs.doc(b.db, 'siteSettings', 'theme'),
+    { value: { festivalId }, updatedAt: b.fs.serverTimestamp() },
+    { merge: true },
+  );
 }
 export const SUPPORT_EMAIL = 'amaavrit@yahoo.com';
 export const SUPPORT_URL = 'https://contact.aavrit.dedyn.io';

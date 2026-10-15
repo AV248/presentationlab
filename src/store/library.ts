@@ -10,7 +10,7 @@ export interface StoredSpeech extends Speech {
   source: 'user';
   status: SpeechStatus;
   updatedAt: string;
-  /** Set once the draft has been pushed to Firestore. */
+  /** Set once the draft has been saved to the database. */
   cloudId?: string;
   /** The address it lives at: /you/<folder>/<slug> (one folder at most). */
   folder?: string;

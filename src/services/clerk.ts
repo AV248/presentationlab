@@ -1,22 +1,20 @@
 /**
  * Clerk configuration.
  *
- * Clerk owns sign-in, sessions, MFA and the user profile. Firebase Auth is
- * still used — but only as a *token exchange target*: after Clerk signs
- * somebody in, the app asks our own serverless function to mint a Firebase
- * custom token for that same person, so Firestore security rules keep
- * working exactly as they do today (`request.auth.uid`).
+ * Clerk owns sign-in, sessions, MFA and the user profile — it is the only
+ * identity in the whole stack. The session token Clerk hands out is presented
+ * directly to the two databases that need one:
  *
- * That indirection is deliberate. It means:
- *   • no dual sign-in — the visitor signs in once, with Clerk
- *   • `request.auth.uid` in firestore.rules is the Clerk user id, stable
- *     across sessions and devices
- *   • the Firebase Admin credential that can mint those tokens never
- *     reaches the browser
+ *   • Postgres, through Supabase's third-party auth, where `auth.jwt()->>'sub'`
+ *     is the Clerk user id and the row policies in supabase/schema.sql read it
+ *   • Convex, through the `convex` JWT template, for presence and activity
  *
- * If the publishable key is absent the whole thing is inert: the app falls
- * back to its previous Firebase sign-in (or to being fully local), and
- * nothing here throws.
+ * Turso needs no token at all: it is a read-only copy of published work, served
+ * by /api/library, and it never learns who is asking.
+ *
+ * So there is exactly one sign-in, one user id, and no credential that has to
+ * mint anything else. If the publishable key is absent the whole layer is inert
+ * and the app stays fully readable; nothing here throws.
  */
 
 const env = import.meta.env ?? ({} as ImportMetaEnv);
@@ -187,7 +185,7 @@ interface ClerkHandlers {
   updateUsername?: (username: string) => Promise<void>;
   /** The current Clerk session token, for calls to our own API. */
   getSessionToken?: () => Promise<string | null>;
-  /** Attempt the Clerk → Firebase token exchange again. */
+  /** Present the Clerk session to the databases again. */
   retryExchange?: () => Promise<boolean>;
 }
 
@@ -218,7 +216,7 @@ export async function clerkUpdateUsername(username: string): Promise<boolean> {
   return true;
 }
 
-/** Ask for another Clerk → Firebase token exchange. False if not mounted. */
+/** Ask the app to hand the session to the databases again; false if unmounted. */
 export async function retryCloudSession(): Promise<boolean> {
   if (!handlers?.retryExchange) return false;
   try {

@@ -1,14 +1,21 @@
-import { loadAdsFirebase, ADS_ENABLED, ADS_COLLECTION } from './firebaseAds';
+import { loadBackend, BACKEND_ENABLED } from './backend';
+
+/**
+ * Ads are available exactly when the durable store is: the `servingads`
+ * collection lives in Postgres beside everything else, and the site reads it
+ * under a row policy that lets everybody read and only role-holders write.
+ */
+export const ADS_ENABLED = BACKEND_ENABLED;
 
 /**
  * Sponsored slots.
  *
- * Ads are documents in the `servingads` collection of the site's own Firebase
- * project, readable by everyone and writable only by a role-holder (see
- * firestore.rules). See src/services/firebaseAds.ts for why they are no longer
- * in a project of their own.
+ * Ads are rows in the site's own `ads` table — one database, not a second
+ * project — readable by everyone and writable only by a role-holder (see the
+ * ads policies in supabase/schema.sql).
  *
- * Document shape (capitalised, as the collection is written by another app):
+ * Row shape (the capitalised field names are the app's, kept from the original
+ * Presentation Lab so the same records migrate unchanged):
  *
  *   servingads/{id}
  *     Title              string  headline
@@ -198,7 +205,7 @@ function mapAd(id: string, data: Record<string, unknown>): Ad | null {
 
 interface CacheShape {
   at: number;
-  /** Raw Firestore documents, not mapped ads — see readCache. */
+  /** Raw ad documents, not mapped ads — see readCache. */
   ads: { id?: unknown } & Record<string, unknown>[];
 }
 
@@ -249,7 +256,7 @@ let flight: Promise<Ad[]> | null = null;
  * never throws, never logs.
  */
 export async function fetchActiveAds(options: { fresh?: boolean } = {}): Promise<Ad[]> {
-  if (!ADS_ENABLED) return [];
+  if (!BACKEND_ENABLED) return [];
 
   if (!options.fresh) {
     const cached = readCache();
@@ -259,16 +266,15 @@ export async function fetchActiveAds(options: { fresh?: boolean } = {}): Promise
 
   flight = (async () => {
     try {
-      const bundle = await loadAdsFirebase();
+      const bundle = await loadBackend();
       if (!bundle) return [];
 
       const { fs, db } = bundle;
-      const target = fs.query(fs.collection(db, ADS_COLLECTION), fs.limit(MAX_ADS));
-      // Ask the server, not a local cache: this collection is edited by hand
-      // and a stale read is indistinguishable from "my change did not save".
-      const snap = fs.getDocsFromServer
-        ? await fs.getDocsFromServer(target).catch(() => fs.getDocs(target))
-        : await fs.getDocs(target);
+      // PostgREST answers from the database, so there is no local cache to
+      // outrun: a save in the workspace is visible on the next read.
+      const snap = await fs.getDocs(
+        fs.query(fs.collection(db, 'servingads'), fs.limit(MAX_ADS)),
+      );
 
       const ads = snap.docs
         .map((doc) => mapAd(doc.id, doc.data()))

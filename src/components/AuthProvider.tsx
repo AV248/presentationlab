@@ -19,9 +19,10 @@ import {
   registerClerkHandlers,
 } from '../services/clerk';
 import {
+  connectSession,
   ensureProfile,
-  exchangeClerkSessionForFirebase,
-  signOutFirebaseOnly,
+  disconnectSession,
+  signOut,
   type AuthUser,
 } from '../services/auth';
 import { useAuth } from '../store/auth';
@@ -30,10 +31,10 @@ import { useProfile } from '../store/profile';
 /**
  * Authentication provider.
  *
- * Clerk owns identity when it is configured; the component below keeps the
- * app's existing `useAuth` store in step with it, so no page had to change.
- * When Clerk is not configured this is a transparent wrapper and the app
- * falls back to its previous behaviour (Firebase providers, or fully local).
+ * Clerk owns identity; the component below keeps the app's existing `useAuth`
+ * store in step with it, so no page had to change. When Clerk is not
+ * configured this is a transparent wrapper and the app is fully readable,
+ * just not writable.
  */
 
 /** The subset of Clerk's user object the app actually reads. */
@@ -117,12 +118,11 @@ function useColorScheme(): 'light' | 'dark' {
  * The bridge. Renders nothing; it exists to move identity from Clerk's React
  * context into the zustand store every other component already reads.
  *
- * It also performs the token exchange: once Clerk has signed somebody in, it
- * asks our serverless function for a Firebase custom token, so Firestore
- * rules keep matching on `request.auth.uid`. That step is best-effort —
- * browsing the library never required it, so a failure leaves the visitor
- * signed in to Clerk with cloud writes unavailable, and is recorded on the
- * store rather than thrown.
+ * It also connects the session: once Clerk has signed somebody in, the Clerk
+ * session token is handed to Postgres and Convex, and one authenticated read
+ * proves both accept it. That step is best-effort — browsing the library never
+ * required it, so a failure leaves the visitor signed in to Clerk with writes
+ * unavailable, recorded on the store rather than thrown.
  */
 function ClerkAuthBridge() {
   const { isLoaded, isSignedIn, userId, getToken } = useClerkAuth();
@@ -201,9 +201,10 @@ function ClerkAuthBridge() {
         }
       } catch { /* private mode */ }
       store.setSession(null);
-      // A Clerk sign-out must not leave a live Firebase session behind, or
-      // Firestore would still accept writes from the previous person.
-      void signOutFirebaseOnly();
+      // A sign-out must not leave a live database session behind, or the
+      // next person on this browser would still be writing as the last one.
+      disconnectSession();
+      void signOut();
       return;
     }
 
@@ -218,7 +219,7 @@ function ClerkAuthBridge() {
     // Mirror the profile so the leaderboard has a name to show. Best effort.
     ensureProfile(authUser);
 
-    // Restore an already-claimed handle from Firestore (users/{uid}) so the
+    // Restore an already-claimed handle from the person's own row so the
     // sidebar shows @username — not "Claim" — on every device.
     void import('../services/profiles').then(({ fetchOwnProfile }) =>
       fetchOwnProfile(authUser.uid).then((own) => {
@@ -251,12 +252,20 @@ function ClerkAuthBridge() {
       } catch { /* steering is a courtesy, never a blocker */ }
     }
 
+    // "Exchange" is a word from when a second identity had to be minted. What
+    // happens now is a handshake: the Clerk session is given to Postgres and
+    // Convex, and one authenticated read proves they accept it.
     const runExchange = () =>
-      exchangeClerkSessionForFirebase(clerkUser.id, () => latest.current.getToken()).then((outcome) => {
+      connectSession(clerkUser.id, () => latest.current.getToken()).then((outcome) => {
         useAuth.getState().setBridge(outcome);
-        // Only now can Firestore be written to, so only now can the handle
-        // the person already owns in Clerk be recorded as theirs here.
-        if (outcome.ok) void claimClerkHandle(authUser);
+        // Only once the database accepts the token can a handle be written,
+        // so only now can the name they already own in Clerk be recorded.
+        if (outcome.ok) {
+          void claimClerkHandle(authUser);
+          void import('./../services/backend').then(({ live }) =>
+            live.logActivity('visit', window.location.pathname, '', authUser.displayName ?? ''),
+          );
+        }
         return outcome.ok;
       });
 

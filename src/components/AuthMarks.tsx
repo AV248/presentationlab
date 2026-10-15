@@ -1,9 +1,10 @@
 /**
  * The provider marks, drawn once.
  *
- * Both sign-in surfaces use these: the Clerk path (ClerkAuthButtons, where
- * Clerk owns the flow) and the no-Clerk path (the Firebase provider list).
- * One drawing each keeps the two from ever drifting apart.
+ * Both sign-in surfaces use these: Clerk's own prebuilt buttons, and the two
+ * buttons this app draws itself (SignIn) so the marks match the house style
+ * whether Clerk is configured or the page is showing its setup notice. One
+ * drawing each keeps the two from ever drifting apart.
  */
 
 export function GoogleMark({ size = 17 }: { size?: number }) {
