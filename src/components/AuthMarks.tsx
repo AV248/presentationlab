@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * The provider marks, drawn once.
  *

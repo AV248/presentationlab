@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Loader2, Repeat2, Sparkles } from 'lucide-react';
 import { alternativesFor, lookup, type Alternative, type Entry } from '../services/dictionary';

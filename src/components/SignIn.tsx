@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect } from 'react';
 import { Check, Heart, PencilLine, Share2, X } from 'lucide-react';
 import { EnvCheckPanel } from './EnvCheckPanel';

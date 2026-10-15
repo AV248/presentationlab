@@ -1,8 +1,13 @@
 # Presentation Buddy
 
+> **3.1 (beta): Next.js App Router.** The same screens, the same three databases and the
+> same environment variables — now on the framework, with every page that can be known at
+> build time served as static HTML. What moved and what has to change in Vercel is in
+> [docs/NEXTJS.md](docs/NEXTJS.md).
+
 **Read it. Write it. Say it out loud.**
 
-Version 2.6.2 — pure-white falling-leaves entry animation; the festival theme is now exclusively the owner's, layered over — never replacing — the user's own theme from the 13,709,280-combination studio; shared/copied links are *only* `pb.devs.surf/<path>`, nothing else; `/username` profiles and `/username/content` render at their own addresses. (2.6 — animated “Rise” entry, `/username` handles with `pb.devs.surf` short links, step-by-step publishing with copyright protection & originality screening, 20 festival/occasion themes the owner sets, a central star-feedback dialog saved to the database, emotional share moments, centred rehearsal start, and separate phone/tablet/desktop optimisation. (2.5 — a local-first workspace built on one idea: **qualities are not gifted, they are
+Feature history. 2.6.2 — pure-white falling-leaves entry animation; the festival theme is now exclusively the owner's, layered over — never replacing — the user's own theme from the 13,709,280-combination studio; shared/copied links are *only* `pb.devs.surf/<path>`, nothing else; `/username` profiles and `/username/content` render at their own addresses. (2.6 — animated “Rise” entry, `/username` handles with `pb.devs.surf` short links, step-by-step publishing with copyright protection & originality screening, 20 festival/occasion themes the owner sets, a central star-feedback dialog saved to the database, emotional share moments, centred rehearsal start, and separate phone/tablet/desktop optimisation. (2.5 — a local-first workspace built on one idea: **qualities are not gifted, they are
 built.** You climb by doing the reps, so the app is shaped around the rep — a fullscreen
 **Rehearsal Room** where you actually speak out loud, a **Writing Desk** with a dictionary that
 suggests stronger words as you type, a reader that quietly defines the words you do not know,

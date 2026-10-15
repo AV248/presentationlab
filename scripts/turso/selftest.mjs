@@ -17,8 +17,9 @@
  *     honours `limit`/`offset`, so paging is exercised for real;
  *   • a real SQLite file in `node_modules/.pb-selftest`, with the real
  *     `turso/schema.sql` applied by the real `apply.mjs`;
- *   • the real `api/_project.ts`, bundled exactly as the deployment bundles it;
- *   • the real `api/library.ts` handler, called with a request and a response
+ *   • the real `src/server/project.ts`, bundled exactly as the deployment bundles it;
+ *   • the real `app/api/library/route.ts` handler, called with a real Request and
+ *     read back as a real Response
  *     object, and its answers read back.
  *
  * Nothing is mocked that matters. What is faked is only the remote host.
@@ -114,27 +115,29 @@ async function bundle(entry, name) {
   return import(`${outfile}?t=${Date.now()}`);
 }
 
-/** A request and a response object, just real enough for the handler. */
-function call(handler, path, method = 'GET') {
-  return new Promise((done) => {
-    const res = {
-      statusCode: 200,
-      headers: {},
-      setHeader(key, value) {
-        this.headers[key.toLowerCase()] = value;
-      },
-      end(body) {
-        let json = null;
-        try {
-          json = body ? JSON.parse(body) : null;
-        } catch {
-          json = null;
-        }
-        done({ status: this.statusCode, headers: this.headers, json, raw: body ?? '' });
-      },
-    };
-    handler({ method, url: path, headers: {} }, res);
+/**
+ * Call the route handler the way Next.js does: a real `Request` in, a real
+ * `Response` out. Nothing is faked, so a handler that answers with a header or
+ * a status this test does not expect fails here rather than in production.
+ */
+async function call(route, path, method = 'GET') {
+  // The module, not one function: Next.js dispatches by exported method name,
+  // so a POST to a handler that exports no POST is exactly what the deployment
+  // would see — and that is the case worth testing.
+  const handler = route[method] ?? route.GET;
+  const response = await handler(new Request(`http://localhost${path}`, { method }));
+  const raw = await response.text();
+  let json = null;
+  try {
+    json = raw ? JSON.parse(raw) : null;
+  } catch {
+    json = null;
+  }
+  const headers = {};
+  response.headers.forEach((value, key) => {
+    headers[key.toLowerCase()] = value;
   });
+  return { status: response.status, headers, json, raw };
 }
 
 /* ------------------------------------------------------------------ */
@@ -156,7 +159,7 @@ try {
   expect('turso/schema.sql applies to an empty database', objects.rows.length === 2, `found ${objects.rows.length} of 2 objects`);
 
   /* 2 — the projection copies published rows, and only those. */
-  const { projectLibrary } = await bundle('api/_project.ts', 'project.mjs');
+  const { projectLibrary } = await bundle('src/server/project.ts', 'project.mjs');
   const first = await projectLibrary({
     supabaseUrl: `http://127.0.0.1:${PORT}`,
     apiKey: 'stub',
@@ -201,7 +204,7 @@ try {
   /* 6 — the endpoint the browser actually calls. */
   process.env.TURSO_DATABASE_URL = DB_URL;
   process.env.TURSO_AUTH_TOKEN = 'unused';
-  const handler = (await bundle('api/library.ts', 'library.mjs')).default;
+  const handler = await bundle('app/api/library/route.ts', 'library.mjs');
 
   const listed = await call(handler, '/api/library?max=3');
   expect('GET /api/library lists the newest work', listed.status === 200 && listed.json.items.length === 3, `status ${listed.status}`);

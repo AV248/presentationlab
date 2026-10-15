@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * The environment, made visible.
  *

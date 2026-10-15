@@ -1,5 +1,9 @@
 # Deploying Presentation Buddy on Vercel
 
+> **3.1:** Vercel now detects Next.js. The build command is `npm run build`, the output
+> directory is whatever the framework says, and the redirects, headers and CSP that used to
+> live in `vercel.json` live in `next.config.ts`. The environment variables are unchanged.
+
 Everything you need to put this site live, and everything you must set for it
 to be safe once it is.
 

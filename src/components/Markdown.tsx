@@ -1,3 +1,5 @@
+'use client';
+
 import { Fragment, type CSSProperties, type ReactNode } from 'react';
 import { isUncommon } from '../services/dictionary';
 

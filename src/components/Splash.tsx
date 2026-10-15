@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useState } from 'react';
 /** Entry (2.6): empty screen → the stairs of "The Rise" draw themselves up,
  * step by step → the dot blinks awake above the top step → wordmark fades in.

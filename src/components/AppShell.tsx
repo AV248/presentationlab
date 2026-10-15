@@ -1,5 +1,7 @@
+'use client';
+
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from '@/lib/router';
 import {
   BookMarked,
   Clapperboard,

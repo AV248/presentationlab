@@ -17,7 +17,7 @@
  * and the app stays fully readable; nothing here throws.
  */
 
-const env = import.meta.env ?? ({} as ImportMetaEnv);
+import { env } from '../lib/env';
 
 const RAW_KEY = (env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined)?.trim() ?? '';
 

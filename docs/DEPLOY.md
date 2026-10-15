@@ -1,5 +1,9 @@
 # Deploying Presentation Buddy
 
+> **3.1:** the framework is Next.js and the build command is `npm run build` again. See
+> [NEXTJS.md](NEXTJS.md) for the deploy changes, and for the build-command trick that still
+> works when you would rather not use a terminal.
+
 The build output in `dist/` is a pile of static files. Any static host will
 serve it. What follows is everything the host has to get right.
 

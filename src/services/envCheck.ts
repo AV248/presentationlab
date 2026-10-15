@@ -16,13 +16,13 @@
  *     UI to print them. The audit reports `set` / `missing` / `placeholder`,
  *     plus a short fingerprint where it helps tell two keys apart.
  *
- *   • **Every read is written out literally.** Vite inlines `import.meta.env.*`
- *     at build time by textual substitution — a loop over `import.meta.env`
+ *   • **Every read is written out literally.** Next.js inlines `process.env.*`
+ *     at build time by textual substitution — a loop over `process.env`
  *     would see nothing. So each variable below names itself, exactly once,
  *     which also makes this file the canonical list of what the app needs.
  */
 
-const env = import.meta.env ?? ({} as ImportMetaEnv);
+import { env } from '../lib/env';
 
 type Status = 'set' | 'missing' | 'placeholder' | 'danger';
 

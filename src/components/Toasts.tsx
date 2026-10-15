@@ -1,3 +1,5 @@
+'use client';
+
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react';
 import { useUi, type ToastTone } from '../store/ui';
 

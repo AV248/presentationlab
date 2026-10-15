@@ -10,23 +10,13 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /**
- * `import.meta.env` only exists inside Vite. The build scripts run in plain
- * node, so each VITE_ value the app reads is substituted at bundle time —
- * which is how VITE_SITE_URL set in Vercel reaches the generated sitemap and
- * robots.txt.
+ * Nothing to substitute any more.
  *
- * Each key is defined individually (`import.meta.env.VITE_SITE_URL`) rather
- * than defining the whole `import.meta.env` object: esbuild only rewrites
- * the literal member expression, and building an object for it produces an
- * empty shim instead.
+ * 2.x had to rewrite `import.meta.env.VITE_SITE_URL` at bundle time here,
+ * because that expression only exists inside Vite. The app reads
+ * `process.env.VITE_SITE_URL` now — a plain node read — so a script bundles
+ * `src/` and gets the same value the deployment gets, with no shim in between.
  */
-function envDefine() {
-  const define = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith('VITE_')) define[`import.meta.env.${key}`] = JSON.stringify(value);
-  }
-  return define;
-}
 
 async function bundleModule(rootDir, entry, name) {
   const dir = await mkdtemp(join(tmpdir(), `pb-${name}-`));
@@ -39,7 +29,6 @@ async function bundleModule(rootDir, entry, name) {
       platform: 'node',
       target: 'node20',
       jsx: 'automatic',
-      define: envDefine(),
       outfile,
       logLevel: 'error',
     });

@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ClerkProvider,
@@ -94,6 +96,10 @@ function mapClerkUser(user: ClerkUserLike): AuthUser {
  * visitor has not opened the theme studio to set.
  */
 function readScheme(): 'light' | 'dark' {
+  // The App Router renders this component on the server as well as in the
+  // browser, and there is no document there. The effect below corrects the
+  // guess on mount, before Clerk's modal can be opened.
+  if (typeof document === 'undefined') return 'light';
   return document.documentElement.dataset.scheme === 'dark' ? 'dark' : 'light';
 }
 
@@ -169,7 +175,7 @@ function ClerkAuthBridge() {
   useEffect(() => {
     if (isLoaded) return undefined;
     const timer = window.setTimeout(() => {
-      if (import.meta.env.DEV) {
+      if (process.env.NODE_ENV !== 'production') {
         console.warn(
           `[clerk] Clerk did not load within ${CLERK_LOAD_TIMEOUT_MS / 1000}s — continuing signed out.`,
         );
@@ -317,7 +323,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   if (!CLERK_ENABLED) {
     // A misconfigured key is caught at startup rather than manifesting as a
     // sign-in button that silently does nothing.
-    if (CLERK_KEY_ERROR && import.meta.env.DEV) {
+    if (CLERK_KEY_ERROR && process.env.NODE_ENV !== 'production') {
       console.error(`[clerk] ${CLERK_KEY_ERROR}`);
     }
     return <>{children}</>;

@@ -3,7 +3,13 @@
  * page points at with og:image / twitter:image, rasterised from SVG with
  * the "Voices Rising" mark, a per-card palette, and the page's own title.
  *
- *   node scripts/cards/run.mjs     (after `vite build`; writes dist/cards/)
+ *   node scripts/cards/run.mjs     (writes public/cards/)
+ *
+ * It runs *before* `next build` for one reason: the framework copies
+ * public/ into the deployment as it builds, so a card written afterwards
+ * would be missing from the deployment while still existing on your disk.
+ * `npm run build` orders the two correctly; running this by hand writes the
+ * same files.
  */
 import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +20,7 @@ import { glyph } from '../lib/mark.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
-const outDir = resolve(root, 'dist', 'cards');
+const outDir = resolve(root, 'public', 'cards');
 
 /* handsome duos, one per card, cycled deterministically */
 const DUOS = [
@@ -131,4 +137,4 @@ for (const page of pages) {
   written += 1;
 }
 
-console.log(`${written} share cards written to dist/cards/`);
+console.log(`${written} share cards written to public/cards/`);
