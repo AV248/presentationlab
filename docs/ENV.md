@@ -141,3 +141,44 @@ the same list as this file. If they ever disagree, the code is right.
 | Publishing works, but the person who just published sees a stale library | The reading room is a copy. It refreshes on publish through `POST /api/sync-library`; `npm run sync:turso` forces it |
 | Reads work immediately after a deploy, then break a week later | The Supabase free project paused after no traffic. Open the dashboard once; a weekly visit keeps it awake |
 | `/api/library` answers `503 library_not_configured` | Deliberate, and harmless: Turso is optional and reads fall back to Postgres. The site's environment check labels it "not set up (harmless)" for that reason |
+
+---
+
+## Checking it, rather than trusting it
+
+Presence is not behaviour. A key that is present and *wrong* — truncated, from
+another project, rotated in one place but not the other — looks identical to a
+correct one on the dashboard, and the only way to tell them apart is to ask.
+
+`GET /api/health` does exactly that. It runs on the server, over the same
+credentials the app uses, and contacts each service in turn:
+
+| check | what it does | critical? |
+| --- | --- | --- |
+| Clerk | checks both keys are present, and that the public one really is a `pk_…` | yes |
+| Postgres | performs a real public read with the anon key and reads the status code | yes |
+| Turso | opens the reading room and counts the rows in it | no — Postgres answers instead |
+| Convex | asks the deployment for its version | no — the live layer is quiet |
+| The site's address | compares the canonical URL with the domain serving the request | no |
+
+The answer is a verdict — `ready`, `degraded` or `broken` — and a line per
+check saying what it found and, when something must be fixed, what to do.
+`missing` and `missing but fine` are reported differently on purpose: no
+Postgres means the site cannot keep its promise, while no reading room means
+reads take one hop more.
+
+**It never returns a value.** No URL, no token, no key — a caller learns
+`configured` or `absent`. The one exception is the last four characters of the
+Clerk publishable key, which ships in every browser anyway and is the only way
+to tell two projects apart at a glance.
+
+- **In the browser:** Admin → Setup → *Test the deployment*, or the sign-in
+  sheet when sign-in is not configured.
+- **From a terminal:** `curl -s https://presentationbuddy.aavrit.dedyn.io/api/health | jq`
+- **For an uptime monitor:** `HEAD /api/health` answers `200` ready/degraded,
+  `503` broken, with the verdict in the `X-Health` header. It is `noindex` and
+  `no-store`, and nothing monitors it by default.
+
+The panel above it reports *presence* — what the browser can see of its own
+configuration. This one reports *behaviour*. When something is wrong, the two
+together say which variable and which service.

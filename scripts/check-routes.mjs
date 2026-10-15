@@ -20,9 +20,9 @@
  * Every check is written as the *promise*, not the implementation: "a speech
  * page carries its own canonical", never "the file exists".
  */
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { ROOT } from './lib/env.mjs';
@@ -171,6 +171,74 @@ try {
   const syncPost = await fetch(`${BASE}/api/sync-library`, { method: 'POST' });
   expect('the rebuild endpoint requires a session', syncPost.status === 401 || syncPost.status === 503, `status ${syncPost.status}`);
 
+  /*
+   * The deployment's self-test.
+   *
+   * With nothing configured it must say so plainly — and, the part that
+   * matters, it must not leak anything while doing it. A health endpoint is
+   * the most tempting place in a codebase to print an environment variable.
+   */
+  const health = await get('/api/health');
+  expect('the health check answers', health.status === 200, `status ${health.status}`);
+
+  const bare = JSON.parse(health.body);
+  const bareCheck = (id) => bare.checks.find((check) => check.id === id);
+
+  expect(
+    'and reports itself as not set up, rather than pretending',
+    bare.verdict === 'broken' && /not working/i.test(bare.summary),
+    `${bare.verdict}: ${bare.summary}`,
+  );
+  expect(
+    'naming Postgres as a missing critical piece',
+    bareCheck('postgres')?.status === 'missing' && bareCheck('postgres')?.critical === true,
+    JSON.stringify(bareCheck('postgres')),
+  );
+  expect(
+    'and Clerk as the other one',
+    bareCheck('clerk')?.status === 'missing' && bareCheck('clerk')?.critical === true,
+    JSON.stringify(bareCheck('clerk')),
+  );
+  expect(
+    'while the reading room is reported as optional, not as a fault',
+    bareCheck('reading-room')?.status === 'optional' && bareCheck('reading-room')?.critical === false,
+    JSON.stringify(bareCheck('reading-room')),
+  );
+  /*
+   * The contract about advice: anything that *must* be fixed says how, and
+   * anything optional is allowed to have no next step — telling someone to
+   * configure a piece they may not want would be noise.
+   */
+  expect(
+    'every check that must be fixed says what to do about it',
+    bare.checks
+      .filter((check) => check.status === 'broken' || (check.critical && check.status !== 'ok'))
+      .every((check) => typeof check.fix === 'string' && check.fix.length > 10),
+    'a check that must be fixed has no next step',
+  );
+  expect(
+    'and the optional ones explain what their absence costs instead',
+    bare.checks.filter((check) => !check.critical).every((check) => check.detail.length > 20),
+    'an optional piece is missing without saying what that means',
+  );
+  expect(
+    'a health report never carries a secret',
+    !/sk_[a-zA-Z0-9]|eyJ[A-Za-z0-9_-]{6}|Bearer [A-Za-z0-9]/i.test(health.body),
+    'something key-shaped is in the response',
+  );
+  expect('and it is never cached', (health.headers.get('cache-control') ?? '').includes('no-store'));
+  expect('nor indexed', (health.headers.get('x-robots-tag') ?? '').includes('noindex'));
+
+  const healthHead = await fetch(`${BASE}/api/health`, { method: 'HEAD' });
+  expect(
+    'the one-line form agrees with the report',
+    healthHead.status === 503 && healthHead.headers.get('x-health') === 'broken',
+    `${healthHead.status} ${healthHead.headers.get('x-health')}`,
+  );
+
+  const healthPost = await fetch(`${BASE}/api/health`, { method: 'POST' });
+  expect('and a write is refused with an explanation', healthPost.status === 405, `status ${healthPost.status}`);
+
   const usernamePost = await fetch(`${BASE}/api/clerk-set-username`, { method: 'POST' });
   expect(
     'the username endpoint answers without Clerk configured, and says which variable is missing',
@@ -272,6 +340,19 @@ try {
   });
   await new Promise((listen) => stub.listen(STUB_PORT, '127.0.0.1', listen));
 
+  /*
+   * A reading room to go with the stub Postgres — built by the project's own
+   * schema applier, so the health check's Turso probe reports on a real
+   * database rather than on a mock of one.
+   */
+  const READING_DB = resolve(ROOT, 'node_modules/.pb-check-routes/reading-room.db');
+  mkdirSync(dirname(READING_DB), { recursive: true });
+  rmSync(READING_DB, { force: true });
+  execFileSync(process.execPath, [resolve(ROOT, 'scripts/turso/apply.mjs')], {
+    env: { ...process.env, TURSO_DATABASE_URL: `file:${READING_DB}`, TURSO_AUTH_TOKEN: '' },
+    stdio: 'pipe',
+  });
+
   // A fresh process must not read a cached "there is no database" answer.
   rmSync(resolve(ROOT, '.next/cache/fetch-cache'), { recursive: true, force: true });
 
@@ -285,6 +366,13 @@ try {
         NODE_ENV: 'production',
         VITE_SUPABASE_URL: STUB_BASE,
         VITE_SUPABASE_ANON_KEY: 'stub-anon-key',
+        TURSO_DATABASE_URL: `file:${READING_DB}`,
+        TURSO_AUTH_TOKEN: '',
+        // Shaped like the real thing, so the Clerk check inspects them the way
+        // it would inspect a live deployment's.
+        VITE_CLERK_PUBLISHABLE_KEY: 'pk_test_c3R1Yi1wdWJsaXNoYWJsZS1rZXk',
+        CLERK_SECRET_KEY: 'sk_test_stub-secret-not-a-real-key',
+        CLERK_AUTHORIZED_PARTIES: 'http://127.0.0.1:5199',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
@@ -376,6 +464,37 @@ try {
       'a speech that is genuinely not there is a 404, not a page saying so',
       deleted.status === 404,
       `status ${deleted.status}`,
+    );
+
+    /*
+     * The self-test, on a deployment where everything critical is in place.
+     * Each service has to have been *contacted* — the reading room is a real
+     * SQLite database, Postgres is the stub, Clerk's keys are shaped like the
+     * real ones — so a check that merely counts variables cannot pass this.
+     */
+    const health = await get('/api/health');
+    const report = JSON.parse(health.body);
+    const statusOf = (id) => report.checks.find((check) => check.id === id)?.status;
+
+    expect('the health check reports a configured deployment as working', statusOf('postgres') === 'ok', String(statusOf('postgres')));
+    expect('it reached the reading room and looked at its tables', statusOf('reading-room') === 'ok', `${statusOf('reading-room')} — ${report.checks.find((c) => c.id === 'reading-room')?.detail}`);
+    expect('it saw both halves of the Clerk setup', statusOf('clerk') === 'ok', String(statusOf('clerk')));
+    expect(
+      'the verdict counts the optional pieces without calling them faults',
+      report.verdict === 'degraded' && /optional/i.test(report.summary),
+      `${report.verdict}: ${report.summary}`,
+    );
+    expect(
+      'and it says how long each service took',
+      report.checks.some((check) => typeof check.ms === 'number'),
+      'no timings reported',
+    );
+    expect(
+      'the configured report leaks no secret either',
+      !health.body.includes('stub-anon-key') &&
+        !health.body.includes('sk_test_stub-secret') &&
+        !health.body.includes(`file:${READING_DB}`),
+      'a configured value is in the response',
     );
 
     const deep = await get('/aavrit/a-quiet-room');

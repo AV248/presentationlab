@@ -12,8 +12,8 @@
  * verdict — which is the only way to see the server-only variables, since
  * those never enter the browser bundle.
  */
-import { useEffect, useState } from 'react';
-import { CheckCircle2, CircleDashed, RefreshCw, ServerCog, TriangleAlert } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { CheckCircle2, CircleDashed, RefreshCw, ServerCog, Stethoscope, TriangleAlert } from 'lucide-react';
 import {
   CLIENT_VARIABLE_NAMES,
   SERVER_VARIABLE_NAMES,
@@ -32,10 +32,59 @@ function StatusMark({ status }: { status: 'set' | 'missing' | 'placeholder' | 'd
   return <CircleDashed size={13} style={{ color: 'var(--c-ink-muted)', flex: '0 0 auto' }} aria-label="missing" />;
 }
 
+/** One line of the deployment check, as `/api/health` reports it. */
+interface HealthCheck {
+  id: string;
+  title: string;
+  status: 'ok' | 'optional' | 'missing' | 'broken';
+  detail: string;
+  vars: string[];
+  fix?: string;
+  ms?: number;
+}
+
+interface Health {
+  verdict: 'ready' | 'degraded' | 'broken';
+  summary: string;
+  checks: HealthCheck[];
+  at: string;
+}
+
 export function EnvCheckPanel({ compact = false }: { compact?: boolean }) {
   const [groups, setGroups] = useState(() => auditEnvironment());
   const [probe, setProbe] = useState<ServerProbe | null>(null);
   const [checking, setChecking] = useState(false);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [healthBusy, setHealthBusy] = useState(false);
+  const [healthError, setHealthError] = useState('');
+
+  /**
+   * Ask the deployment to test itself.
+   *
+   * The panel above this one reports *presence* — what the browser can see of
+   * its own configuration. This asks the server to actually contact Clerk,
+   * Postgres, Turso and Convex and report what answered. A key that is present
+   * and wrong looks identical to a key that is present and right; only asking
+   * tells them apart.
+   */
+  const runHealth = useCallback(async () => {
+    setHealthBusy(true);
+    setHealthError('');
+    try {
+      const response = await fetch('/api/health', { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(`the endpoint answered ${response.status}`);
+      setHealth((await response.json()) as Health);
+    } catch (error) {
+      setHealth(null);
+      setHealthError(
+        (error as Error).message === 'the endpoint answered 404'
+          ? 'This build has no /api/health route — the deployment is older than the page you are reading.'
+          : `Could not run the check: ${(error as Error).message}`,
+      );
+    } finally {
+      setHealthBusy(false);
+    }
+  }, []);
 
   const runProbe = async () => {
     setChecking(true);
@@ -153,6 +202,88 @@ export function EnvCheckPanel({ compact = false }: { compact?: boolean }) {
               ? `${probe.label}: ${probe.detail}`
               : `${probe.label}${probe.reachable ? '' : ' (or the API is not deployed)'}: ${probe.detail}`}
         </p>
+      </div>
+
+      {/* ── The deployment's own answer ───────────────────────────────────
+          Presence above; behaviour here. Five probes, each one a real request
+          to a real service with this deployment's credentials. */}
+      <div className="pb-well" style={{ padding: compact ? '10px 12px' : 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          <strong style={{ fontSize: '0.86rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Stethoscope size={14} aria-hidden="true" /> Does it actually work?
+          </strong>
+          <button
+            type="button"
+            className="pb-btn"
+            onClick={() => void runHealth()}
+            disabled={healthBusy}
+            style={{ fontSize: '0.78rem', padding: '4px 10px' }}
+          >
+            <RefreshCw size={13} className={healthBusy ? 'pb-spin' : undefined} aria-hidden="true" />
+            {healthBusy ? 'Testing…' : health ? 'Test again' : 'Test the deployment'}
+          </button>
+        </div>
+
+        <p className="pb-muted" style={{ fontSize: '0.74rem', lineHeight: 1.6, marginTop: 6 }}>
+          Contacts Clerk, Postgres, Turso and Convex with this deployment&rsquo;s own credentials and reports what
+          answered. No value is ever shown.
+        </p>
+
+        {healthError && (
+          <p className="pb-muted" style={{ fontSize: '0.74rem', lineHeight: 1.6, marginTop: 8, color: 'var(--c-bad)' }}>
+            {healthError}
+          </p>
+        )}
+
+        {health && (
+          <div aria-live="polite" style={{ marginTop: 10 }}>
+            <p
+              style={{
+                fontSize: '0.8rem',
+                lineHeight: 1.6,
+                margin: '0 0 8px',
+                color:
+                  health.verdict === 'ready'
+                    ? 'var(--c-ok)'
+                    : health.verdict === 'degraded'
+                      ? 'var(--c-ink-muted)'
+                      : 'var(--c-bad)',
+              }}
+            >
+              {health.summary}
+            </p>
+            <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 8 }}>
+              {health.checks.map((check) => (
+                <li key={check.id} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 8 }}>
+                  <StatusMark
+                    status={
+                      check.status === 'ok'
+                        ? 'set'
+                        : check.status === 'broken' || check.status === 'missing'
+                          ? 'danger'
+                          : 'missing'
+                    }
+                  />
+                  <div>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>{check.title}</span>
+                    <p className="pb-muted" style={{ fontSize: '0.74rem', lineHeight: 1.6, margin: '2px 0 0' }}>
+                      {check.detail}
+                      {typeof check.ms === 'number' && check.ms > 900 ? ` (${check.ms} ms)` : ''}
+                    </p>
+                    {check.fix && (
+                      <p className="pb-muted" style={{ fontSize: '0.74rem', lineHeight: 1.6, margin: '3px 0 0' }}>
+                        <strong>Next:</strong> {check.fix}
+                      </p>
+                    )}
+                    <p className="pb-mono pb-muted" style={{ fontSize: '0.66rem', margin: '3px 0 0', wordBreak: 'break-all' }}>
+                      {check.vars.join(' · ')}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <details className="pb-well" style={{ padding: '10px 12px' }}>
