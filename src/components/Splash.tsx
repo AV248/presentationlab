@@ -18,17 +18,23 @@ const LEAVES = [
 ];
 
 export function Splash() {
-  const [show, setShow] = useState(() => { try { return !sessionStorage.getItem('pb.splash.seen'); } catch { return true; } });
+  const [show, setShow] = useState(false);
   const [leaving, setLeaving] = useState(false);
   useEffect(() => {
-    if (!show) return undefined;
+    try {
+      if (sessionStorage.getItem('pb.splash.seen')) return undefined;
+    } catch {
+      // Keep the splash available when session storage is disabled.
+    }
+
+    setShow(true);
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const done = window.setTimeout(() => setLeaving(true), reduced ? 250 : 1750);
     const gone = window.setTimeout(() => { setShow(false); try { sessionStorage.setItem('pb.splash.seen', '1'); } catch { /* ignore */ } }, reduced ? 450 : 2150);
     const skip = () => { setLeaving(true); window.setTimeout(() => setShow(false), 120); try { sessionStorage.setItem('pb.splash.seen', '1'); } catch { /* ignore */ } };
     window.addEventListener('pointerdown', skip); window.addEventListener('keydown', skip);
     return () => { window.clearTimeout(done); window.clearTimeout(gone); window.removeEventListener('pointerdown', skip); window.removeEventListener('keydown', skip); };
-  }, [show]);
+  }, []);
   if (!show) return null;
   return (
     <div className={`pb-splash${leaving ? ' pb-splash-leave' : ''}`} role="img" aria-label="Presentation Buddy">

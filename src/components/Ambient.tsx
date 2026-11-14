@@ -1,7 +1,7 @@
 'use client';
 
 import { useSettings } from '../store/settings';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 /**
  * Ambient light field behind the app. It reacts to the colour theme and the
@@ -13,9 +13,15 @@ export function Ambient() {
   const motion = useSettings((s) => s.theme.motion);
   const reduced = useSettings((s) => s.reducedMotion);
 
-  const reducedBySystem =
-    typeof window !== 'undefined' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const [reducedBySystem, setReducedBySystem] = useState(false);
+
+  useEffect(() => {
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updatePreference = () => setReducedBySystem(preference.matches);
+    updatePreference();
+    preference.addEventListener('change', updatePreference);
+    return () => preference.removeEventListener('change', updatePreference);
+  }, []);
 
   const frozen = reduced === 'on' || (reduced === 'auto' && reducedBySystem) || motion === 'still';
 
