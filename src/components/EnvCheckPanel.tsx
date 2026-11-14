@@ -62,8 +62,8 @@ export function EnvCheckPanel({ compact = false }: { compact?: boolean }) {
    * Ask the deployment to test itself.
    *
    * The panel above this one reports *presence* — what the browser can see of
-   * its own configuration. This asks the server to actually contact Clerk,
-   * Postgres, Turso and Convex and report what answered. A key that is present
+   * its own configuration. This asks the server to contact Clerk, Supabase,
+   * Turso and Convex and report what answered. A key that is present
    * and wrong looks identical to a key that is present and right; only asking
    * tells them apart.
    */
@@ -225,7 +225,7 @@ export function EnvCheckPanel({ compact = false }: { compact?: boolean }) {
         </div>
 
         <p className="pb-muted" style={{ fontSize: '0.74rem', lineHeight: 1.6, marginTop: 6 }}>
-          Contacts Clerk, Postgres, Turso and Convex with this deployment&rsquo;s own credentials and reports what
+          Contacts Clerk, Supabase, Turso and Convex with this deployment&rsquo;s own credentials and reports what
           answered. No value is ever shown.
         </p>
 

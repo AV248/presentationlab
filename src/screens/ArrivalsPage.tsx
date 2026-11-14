@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from '@/lib/router';
 import {
   BookmarkCheck,
@@ -8,13 +8,13 @@ import {
   ExternalLink,
   Globe,
   Mic2,
-  RefreshCw,
   Search,
   Target,
 } from 'lucide-react';
 import { useLibrary } from '../store/library';
 import { useUi } from '../store/ui';
 import { useArrivals } from '../store/arrivals';
+import { AuthorCorner } from '../components/AuthorCorner';
 import {
   ARRIVALS_GOAL,
   SOURCES,
@@ -60,9 +60,21 @@ export function ArrivalsPage() {
   const [searching, setSearching] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // The session goal runs itself the first time this page is opened.
+  // Arrivals begin automatically when the page is opened. A failed first
+  // request is retried when the browser regains a connection; there is no
+  // manual replenishment button to maintain.
+  const autoStarted = useRef(false);
   useEffect(() => {
-    if (status === 'idle') void gather();
+    if (autoStarted.current) return;
+    autoStarted.current = true;
+    if (status === 'idle' || status === 'offline') void gather();
+  }, [status, gather]);
+
+  useEffect(() => {
+    if (status !== 'offline') return undefined;
+    const retryWhenOnline = () => void gather();
+    window.addEventListener('online', retryWhenOnline);
+    return () => window.removeEventListener('online', retryWhenOnline);
   }, [status, gather]);
 
   const onShelf = useMemo(() => new Set(shelf.map((item) => item.id)), [shelf]);
@@ -101,11 +113,21 @@ export function ArrivalsPage() {
     const source = SOURCES[speech.sourceId] ?? SOURCES.wikisource;
     const saved = onShelf.has(speech.id);
     return (
-      <article key={speech.id} className="pb-card pb-arrival anim-enter" style={{ ['--i' as string]: index }}>
+      <article key={speech.id} className="pb-card pb-arrival pb-archive-sheet anim-enter" style={{ ['--i' as string]: index }}>
         <div className="pb-arrival-source">
           <span className="pb-source-dot" data-source={speech.sourceId} aria-hidden="true" />
           <span className="pb-source-name">{source.name}</span>
           <span className="pb-source-licence">{speech.licence}</span>
+        </div>
+        <div className="pb-arrival-author-corner">
+          <AuthorCorner
+            author={speech.author}
+            sourceType="archive"
+            sourceName={source.name}
+            sourceURL={speech.sourceUrl}
+            badges={['grey']}
+            compact
+          />
         </div>
 
         <h3 className="pb-card-title">{speech.title}</h3>
@@ -157,9 +179,9 @@ export function ArrivalsPage() {
   };
 
   return (
-    <div className="pb-page">
+    <div className="pb-page anim-arrivals-arrival">
       {/* ---- the goal ---- */}
-      <section className="pb-panel pb-arrivals-hero anim-enter">
+      <section className="pb-panel pb-arrivals-hero pb-archive-door anim-enter">
         <div className="pb-arrivals-hero-text">
           <span className="pb-eyebrow">Arrivals</span>
           <h1 className="pb-page-title">Five new speeches, every session</h1>
@@ -183,28 +205,15 @@ export function ArrivalsPage() {
               <span key={index} className="pb-goal-pip" data-filled={index < landed} />
             ))}
           </div>
-          <p className="pb-goal-note">
+          <p className="pb-goal-note" role="status" aria-live="polite">
             {status === 'loading'
               ? 'Reaching the archives…'
               : complete
-                ? `Goal met${theme ? ` — gathered under “${theme}”` : ''}. Press below for five more.`
+                ? `Arrived${theme ? ` under “${theme}”` : ''}. The next batch will gather automatically.`
                 : status === 'offline'
-                  ? 'No archive answered. Your shelf still works offline.'
-                  : `${ARRIVALS_GOAL - landed} to go.`}
+                  ? 'The archives are quiet. We will try again when a connection returns.'
+                  : `${ARRIVALS_GOAL - landed} still on their way.`}
           </p>
-          <button
-            type="button"
-            className="pb-btn pb-btn-primary pb-btn-block"
-            onClick={() => void gather()}
-            disabled={status === 'loading'}
-          >
-            {status === 'loading' ? (
-              <span className="pb-spinner" aria-hidden="true" />
-            ) : (
-              <RefreshCw size={15} />
-            )}
-            {complete ? 'Bring five more' : 'Gather arrivals'}
-          </button>
         </div>
       </section>
 
@@ -259,8 +268,10 @@ export function ArrivalsPage() {
         ) : (
           <p className="pb-muted-note">
             {status === 'loading'
-              ? 'Gathering five speeches from three archives…'
-              : 'Nothing has landed yet. Press “Gather arrivals” above.'}
+              ? 'Gathering speeches from the open archives…'
+              : status === 'offline'
+                ? 'Nothing has landed yet. The archives will be checked again when a connection returns.'
+                : 'The archives returned no new presentations in this batch.'}
           </p>
         )}
       </section>

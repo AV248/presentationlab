@@ -27,7 +27,8 @@ import {
   useRouter,
   useParams as useNextParams,
 } from 'next/navigation';
-import { useEffect, type AnchorHTMLAttributes, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, type AnchorHTMLAttributes, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
+import { startSpatialTransition } from './motion';
 
 /** What `to` accepts, as 2.x code already uses it. */
 export type To = string | { pathname?: string; search?: string; hash?: string };
@@ -55,8 +56,12 @@ interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'
  * becomes a plain anchor; handing a remote URL to the framework router would
  * make it try to navigate to a route that does not exist.
  */
+type LinkNavigateHandler = NonNullable<ComponentProps<typeof NextLink>['onNavigate']>;
+
 export function Link({ to, replace, children, ...rest }: LinkProps) {
   const href = hrefOf(to);
+  const router = useRouter();
+  const pathname = usePathname() ?? '/';
 
   if (isExternal(href)) {
     return (
@@ -66,8 +71,19 @@ export function Link({ to, replace, children, ...rest }: LinkProps) {
     );
   }
 
+  const onNavigate: LinkNavigateHandler = (event) => {
+    const update = () => {
+      if (replace) router.replace(href);
+      else router.push(href);
+    };
+    // Prevent Next's own push only when immediately replacing it with either
+    // the native spatial transition or the same ordinary router update.
+    event.preventDefault();
+    if (!startSpatialTransition(pathname, href, update)) update();
+  };
+
   return (
-    <NextLink href={href || '/'} replace={replace} {...rest}>
+    <NextLink href={href || '/'} replace={replace} onNavigate={onNavigate} {...rest}>
       {children}
     </NextLink>
   );
@@ -112,6 +128,7 @@ export function NavLink({ to, end, className, ...rest }: NavLinkProps) {
  */
 export function useNavigate() {
   const router = useRouter();
+  const pathname = usePathname() ?? '/';
 
   return (to: To | number, options?: { replace?: boolean }) => {
     if (typeof to === 'number') {
@@ -120,8 +137,11 @@ export function useNavigate() {
     }
     const href = hrefOf(to);
     if (!href) return;
-    if (options?.replace) router.replace(href);
-    else router.push(href);
+    const update = () => {
+      if (options?.replace) router.replace(href);
+      else router.push(href);
+    };
+    if (!startSpatialTransition(pathname, href, update)) update();
   };
 }
 

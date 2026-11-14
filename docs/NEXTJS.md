@@ -1,190 +1,87 @@
-# 3.0 — the move to Next.js
+# Next.js runtime (3.1)
 
-Version 3.1 runs on the **Next.js App Router**. Everything that made the
-site work — Clerk for identity, Postgres for the truth, Turso for the reading
-room, Convex for the live layer — is unchanged, and so are the environment
-variable names. This file records what moved, what did not, and what has to
-change in Vercel.
+Presentation Buddy 3.1 runs on the **Next.js App Router**. The application is a
+Node.js server, not a Vite static export. Vercel should detect Next.js from
+`package.json`; for another host, build with `npm run build` and run
+`npm run start` on Node 22.
 
----
+## Framework ownership
 
-## What did not change
+- `app/` contains App Router pages, metadata, sitemap/robots handlers and API
+  route handlers.
+- `src/screens/` holds the product screens. The existing route bridge in
+  `src/lib/router.tsx` translates their navigation into Next.js navigation.
+- `next.config.ts` owns redirects, CSP/security headers, cache headers and the
+  public environment-variable allowlist.
+- `public/` contains static assets, the PWA manifest and service worker.
+- `npm run build` generates share cards, then runs `next build`. Use the
+  framework-managed `.next/` output; do not upload a `dist/` directory or
+  configure a static-export host.
 
-| | |
-| --- | --- |
-| **Environment variables** | The same nine, under the same names. `next.config.ts` reads the five public ones at build time and inlines them under their `VITE_` names, so `process.env.VITE_SUPABASE_URL` is valid in browser code even though Next.js would normally only inline `NEXT_PUBLIC_*`. Renaming a production variable is a manual step that fails silently; it was not worth the risk. |
-| **Identity** | Clerk, and only Clerk. The session token still goes straight to Postgres (third-party auth) and to Convex (the `convex` JWT template). No middleware, no second auth path. |
-| **The three databases** | Supabase is the truth, Turso the reading room, Convex the live layer. One writer per entity. |
-| **The screens** | All of them, unchanged: the same components, the same stylesheet, the same theme engine. |
+The public variables keep their established `VITE_` names. `next.config.ts`
+passes only the five public identifiers/URLs through at build time. Never add a
+secret to that allowlist. Server code reads the same `VITE_` names through
+`src/server/env.ts` bracket access so the build-time substitution cannot pin a
+server process to a different database than its runtime environment.
 
-## What moved
+## Data and request ownership
 
-| 2.x | 3.1 |
-| --- | --- |
-| `index.html` | `app/layout.tsx` — the document, the metadata, the structured data |
-| `src/App.tsx` + `AppRoutes.tsx` | `app/providers.tsx` + one `page.tsx` per route |
-| `src/pages/*` | `src/screens/*` (Next.js reserves `pages/` for its own router) |
-| `api/*.ts` (Node `req`/`res`) | `app/api/*/route.ts` (`Request` → `Response`) |
-| `scripts/prerender` | `generateStaticParams` + `generateMetadata` |
-| `scripts/sitemap`, `scripts/robots` | `app/sitemap.ts`, `app/robots.ts` |
-| `scripts/smoke` (jsdom) | `next build` — it renders every route, and fails if one throws |
-| `scripts/check-api-trace.mjs` | Retired: the Next.js compiler traces dependencies itself |
-| `vercel.json` | `next.config.ts` (redirects, headers, the CSP) |
-| `src/lib/seo.ts` (constants *and* a hook) | Split: `seo.ts` (server) and `usePageMeta.ts` (client) — a server component may not import a hook |
+| Concern | Owner |
+|---|---|
+| Sign-in, session and identity subject | Clerk |
+| Profiles, usernames, account/social/badge/admin records | Supabase / Postgres |
+| Published presentation bodies, version history, moderation, provenance, views and FTS | Turso |
+| Optional bounded safety snapshots | Convex |
+| Drafts before Share | This device |
 
-`src/lib/router.tsx` is the bridge that made the port a port rather than a
-rewrite: 21 screens still say `<Link to=…>`, `useNavigate()`, `useParams()`.
-That module is the only place that knows the framework's router exists.
+Publishing is Turso-native: Clerk verifies the session, Supabase resolves the
+author profile, and the Turso transaction records the canonical presentation
+and its first version. Changed edits append a version with the current-row
+update. Supabase is not a full-text or presentation-body fallback. Drafts stay
+local until Share.
 
-## Why the router is not a second router
+Convex is optional and safety-only. Turso marks a global cohort capped at
+`floor(published presentations / 100)` personal works; each stored body slice
+is capped at 1% of that source body's UTF-8 bytes. The public Convex action
+accepts an id and Clerk session, fetches a bounded owner-checked slice from the
+canonical app endpoint, and writes only through an internal mutation. Static
+checks and local tests cover the intended boundary; no deployed Convex/direct-
+caller test has verified the production trust boundary. The reader never
+queries Convex.
 
-`src/lib/router.tsx` has no history stack and no context. Every function in it
-is a translation into `next/link` and `next/navigation`; two routers in one app
-is how a URL ends up disagreeing with the page on screen. One consequence
-worth knowing: `useParams()` flattens a repeated segment to its first value,
-which is what the old call sites want, and `useRouteParams()` leaves arrays
-intact for the one catch-all route that needs them
-(`/[username]/[[...rest]]` — the handle tree).
+Current live source search is distinct from the requested scheduled,
+admin-triggered and curator-reviewed arrivals pipeline. That prepared ingestion
+workflow remains a tracked gap; deploying this Next.js app does not make a
+scheduler or review queue exist.
 
-## What improved
+## Environment variables
 
-- **Real server rendering.** Every page that can be known at build time is
-  static HTML produced by the framework: 32 speeches, 14 guides, and every
-  section page (66 routes in total). The 2.x pipeline rendered the app in jsdom
-  *after* bundling, which meant the tags and the text could drift apart.
-- **One source of truth for metadata.** `src/data/routes.ts` already held the
-  title, description, share card and JSON-LD for every page — it now feeds the
-  `<head>`, the sitemap and `generateStaticParams` as well.
-- **The deploy is the test.** A page that throws during render fails the build.
-- **Fewer build steps.** Four scripts (prerender, sitemap, robots, smoke) and
-  one (cards) remain.
+The nine Vercel variable names are frozen. See [ENV.md](ENV.md) for the complete
+list and correct visibility. `VITE_CONVEX_URL` is optional; it is not a live
+presence or activity feature. The two optional local import values
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` must not be added to Vercel.
 
-## What has not been done yet
+## Build, run and verify
 
-- `POST /api/sync-library` exists and is tested, but **nothing in the app calls
-  it**: publishing does not yet refresh the reading room. Until that is wired,
-  new speeches appear in the fast copy only after `npm run sync:turso`.
-- **The app does not create its Turso table.** `turso/schema.sql` is applied by
-  `npm run db:turso`, or by the temporary Vercel build trick in `docs/DEPLOY.md`.
-- **`src/index.html`-era service worker** is still the 2.x file in `public/`.
-  It caches the shell; its cache names have not been revisited for the new
-  asset paths (`/_next/static/...`).
-- The screens are client components, which means they hydrate. Server
-  components for the reading path (library, speech, guide) are the next step,
-  and the metadata scaffolding is already in place for them.
-
----
-
-## Deploying 3.1 to Vercel
-
-1. **Framework preset.** Vercel detects Next.js from `package.json` on the next
-   deploy. Nothing to set.
-2. **Build command.** Back to `npm run build` (which now runs the share cards,
-   then `next build`). If you had the temporary Turso or Convex command in
-   **Settings → Build and Deployment → Build Command**, remove it unless you
-   are still using the Turso bootstrap trick below.
-3. **Environment variables.** Unchanged — the same nine. Nothing to rename and
-   nothing to re-paste.
-4. **Redeploy.** As always for a build-time change.
-
-### Still running Turso without a terminal
-
-The one-time trick from `docs/DEPLOY.md` still works, because the scripts are
-still scripts:
-
-```
-npm run db:turso && npm run sync:turso && npm run build
+```bash
+npm ci
+npm run typecheck
+npm run verify
+npm run build
+npm run start
 ```
 
-Set `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `SUPABASE_URL` and
-`SUPABASE_SERVICE_ROLE_KEY` for that build, then remove the last two and reset
-the build command to `npm run build`. Rotate the service key afterwards.
+`npm run verify:all` runs the local verification suite, production build and
+served-route checks. It does not configure or validate remote provider
+accounts, a production Convex deployment, scheduled arrivals, or browser motion.
 
----
+The build output includes Next.js route metadata and runtime chunks. Serve it
+through `next start` or a compatible Next.js host; do not copy only static HTML
+and expect API routes, Turso writes or Clerk verification to work.
 
-## The production pass — what the port actually turned up
+## Migration history
 
-The migration above is the shape. This is what running it in anger found — each
-of these was a real fault or a real trap, not a tidy-up.
-
-### 1. A `loading.tsx` on a route that calls `notFound()` turns 404s into 200s
-
-The most expensive one. Adding `app/[username]/[[...rest]]/loading.tsx` makes
-the framework flush the page shell — with a 200 — and stream the page into it
-afterwards. By the time the page decides the handle does not exist and throws
-`notFound()`, the status code has already gone out over the wire. `/nobody-here`
-answered **200** with a "not found" body: exactly the thing the server-rendered
-handle page was built to stop, wearing a spinner.
-
-No `loading.tsx` exists anywhere in this project now. The trade — a spinner for
-a second on a slow cold start against every typo and dead link claiming to be a
-working page — is not close. The screens keep their own in-component loading
-states, which cost nothing.
-
-### 2. Server code must not read the inlined `VITE_*` variables
-
-`next.config.ts` inlines the five public variables at build time so the
-dashboard never changes. That substitution also lands in **server** bundles, so
-`process.env.VITE_SUPABASE_URL` inside `src/server/reading.ts` resolved to
-whatever the build saw — not what the running deployment was given. A preview,
-a local run or a test pointed at another database would silently keep talking to
-the one baked into the build, and the only symptom would be an empty page.
-
-`src/server/env.ts` reads the same names by bracket access, which the inliner
-does not rewrite, so the server sees its real environment. Client code is
-unchanged: inlining is exactly right there.
-
-### 3. The statement splitter was sending prose to the database
-
-Both schemas are applied by splitting the file on semicolons. The first version
-dropped the `--` that begins a comment but kept the comment's text, so
-`-- Handles: the site's address book` became SQL. `supabase/schema.sql` "applied"
-as 84 errors — and the same class of bug would have corrupted a *working*
-database silently.
-
-There is now one splitter, `src/server/sql.ts`, used by the runtime and by the
-checks, and it understands what a semicolon is inside: a string (with `''` and
-`E'\''`), a dollar-quoted body, a line comment, a nested block comment — and a
-`create trigger … begin … end;`, which is where the first fix broke SQLite.
-
-### 4. A copy that was never filled is not an empty library
-
-The reader asks the reading room first and Postgres second. "Empty" used to fall
-through correctly, but `source` was guessed from *configuration* rather than
-from who answered, so a misconfigured deployment reported itself as a healthy
-one and `npm run check:routes` believed it. `read()` now returns what happened.
-
-Related: `GET /api/library` used to answer `503 library_not_configured`
-whenever Turso was missing, even with a perfectly good Postgres configured —
-the endpoint contradicting the page it loads. With either database configured,
-it now serves; only with neither is it a 503.
-
-### 5. Publishing now rebuilds the reading room
-
-Publish and delete called nothing, so the projection was only as fresh as the
-last terminal run. Both call `/api/sync-library` on the way out (fire and
-forget — the publish has already succeeded). The endpoint also applies
-`turso/schema.sql` itself, so an empty reading room fills on first publish
-instead of needing LibSQL Studio first, and the Control Room has a **Rebuild
-reading room** button for the case where something was changed straight in
-Postgres.
-
-### 6. Pages that are cached must be able to refresh
-
-`/` and `/read/<id>` are prerendered, which is what makes them fast, but a
-prerendered page with no revalidation is frozen at build time: a speech
-published this morning would not appear on the front page until the next
-deploy. Both carry `export const revalidate = 60`.
-
-`/read/<id>` also answers a real **404** for a speech that is genuinely gone —
-and deliberately does *not* when the database could not be reached, because
-"this speech does not exist" and "nobody could check" are different sentences.
-
-### What is verified now
-
-`npm run verify:all` — 19 schema assertions against a real Postgres (PGlite),
-34 against the server reader (a real SQLite reading room, a stub PostgREST, and
-all four configured/unconfigured combinations), 17 against the projection and
-`/api/library`, and 48 against the running build, including a second phase that
-starts the same server with a database behind it and checks that a writer's name
-and work are in the HTML a crawler receives.
+The move from the earlier Vite application retained the existing public
+variable names, product routes and account links. Current data ownership is
+specified in [ARCHITECTURE.md](ARCHITECTURE.md), and the remaining product gaps
+are tracked in [CANONICAL-REBUILD-GAP-ANALYSIS.md](CANONICAL-REBUILD-GAP-ANALYSIS.md).

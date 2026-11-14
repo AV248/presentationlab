@@ -124,9 +124,10 @@ function useColorScheme(): 'light' | 'dark' {
  * The bridge. Renders nothing; it exists to move identity from Clerk's React
  * context into the zustand store every other component already reads.
  *
- * It also connects the session: once Clerk has signed somebody in, the Clerk
- * session token is handed to Postgres and Convex, and one authenticated read
- * proves both accept it. That step is best-effort — browsing the library never
+ * It also connects the session: once Clerk has signed somebody in, its regular
+ * session token is handed to Supabase and one authenticated read proves that
+ * account connection. A separate template token is requested only when a
+ * Turso share asks for its optional Convex safety snapshot. Browsing never
  * required it, so a failure leaves the visitor signed in to Clerk with writes
  * unavailable, recorded on the store rather than thrown.
  */
@@ -155,6 +156,7 @@ function ClerkAuthBridge() {
       // Needed by /claim: our server sets the username with the secret key,
       // which is the only path that works while Clerk restricts changes.
       getSessionToken: () => latest.current.getToken(),
+      getConvexToken: () => latest.current.getToken({ template: 'convex' }),
       updateUsername: async (username: string) => {
         const current = latest.current.user;
         if (!current) throw new Error('Clerk is still loading — try again in a moment.');
@@ -259,19 +261,14 @@ function ClerkAuthBridge() {
     }
 
     // "Exchange" is a word from when a second identity had to be minted. What
-    // happens now is a handshake: the Clerk session is given to Postgres and
-    // Convex, and one authenticated read proves they accept it.
+    // happens now is a handshake: the Clerk session is given to Supabase and
+    // one authenticated read proves the account database accepts it.
     const runExchange = () =>
       connectSession(clerkUser.id, () => latest.current.getToken()).then((outcome) => {
         useAuth.getState().setBridge(outcome);
         // Only once the database accepts the token can a handle be written,
         // so only now can the name they already own in Clerk be recorded.
-        if (outcome.ok) {
-          void claimClerkHandle(authUser);
-          void import('./../services/backend').then(({ live }) =>
-            live.logActivity('visit', window.location.pathname, '', authUser.displayName ?? ''),
-          );
-        }
+        if (outcome.ok) void claimClerkHandle(authUser);
         return outcome.ok;
       });
 

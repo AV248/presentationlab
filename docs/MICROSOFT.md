@@ -131,10 +131,11 @@ codes above — instead of a silent bounce.
 Nothing about Microsoft is configured in this repository's env. There is no
 `MICROSOFT_CLIENT_ID` or secret to add, ever: those live only in Clerk and
 Entra. The only related change here is the Content Security Policy in
-`vercel.json` and `public/_headers`, which now allows Microsoft's identity
-hosts (`*.msftauth.net`, `*.msauth.net`, `login.microsoftonline.com`,
-`login.live.com`, `aadcdn.msftauth.net`, `logincdn.msauth.net`) so the
-consent screen and its assets are not blocked.
+`next.config.ts`, which allows Microsoft's identity hosts (`*.msftauth.net`,
+`*.msauth.net`, `login.microsoftonline.com`, `login.live.com`,
+`aadcdn.msftauth.net`, `logincdn.msauth.net`) so the consent screen and its
+assets are not blocked. Keep that as the active CSP source; do not add a
+conflicting policy in a second host configuration.
 
 ## The one error almost everybody hits: `unauthorized_client … not enabled for consumers`
 

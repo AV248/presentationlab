@@ -2,20 +2,18 @@
 --  Presentation Buddy — the truth (Supabase / Postgres)
 -- ============================================================================
 --
---  This file is the source of truth for every durable record on the site:
---  people, handles, roles, ads, speeches, reactions, feedback, settings.
+--  Supabase owns account-side durable records: profiles, usernames, social
+--  actions, badge ownership/audit, official source accounts and admin flags.
 --
---  Two other databases work alongside it, each with one job:
+--  Content ownership is deliberately separate:
+--    • Turso    — canonical shared presentations, full bodies, versions,
+--                 reading counts, moderation and curated source arrivals.
+--    • Convex   — a tiny safety slice of each presentation body (at most 1%);
+--                 never a live read/write path.
 --
---    • Turso   — a derived, read-only projection of *published* writing, with
---                full-text search, served to readers from close to them.
---                It is rebuilt from this database, never written by the app.
---    • Convex  — the live layer: who is here now, what just happened. Its
---                contents are ephemeral on purpose and are never the
---                authoritative copy of anything.
---
---  One writer per entity is the rule that keeps three databases honest. The
---  app writes durable facts *here*; everything else is derived or ephemeral.
+--  Clerk owns identity. A Clerk `sub` is the uid recorded here. The old
+--  `speeches` table remains for one-time additive import/compatibility only;
+--  new presentation writes do not target it.
 --
 --  ── Identity ───────────────────────────────────────────────────────────────
 --  Clerk owns sign-in. Supabase trusts Clerk as a third-party auth provider
@@ -237,6 +235,74 @@ create table if not exists public.site_settings (
 
 
 -- ============================================================================
+--  Author identity, badges and verified source accounts
+-- ============================================================================
+
+-- A source is an editorial identity, not a synthetic Clerk person. Logos may
+-- be a compact data URL uploaded by an administrator or an HTTPS image URL.
+create table if not exists public.official_accounts (
+  slug          text primary key,
+  display_name  text not null,
+  logo_url      text not null default '',
+  bio           text not null default '',
+  canonical_url text not null default '',
+  active        boolean not null default true,
+  created_by    text not null default '',
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+  constraint official_accounts_slug_shape check (slug ~ '^[a-z0-9-]{2,60}$')
+);
+
+-- Current badge ownership is separate from the append-only audit. The three
+-- allowed codes are the entire public badge vocabulary.
+create table if not exists public.badge_assignments (
+  principal_type text not null check (principal_type in ('person', 'official')),
+  principal_id   text not null,
+  badge          text not null check (badge in ('quintal', 'sole', 'grey')),
+  active         boolean not null default true,
+  reason         text not null default '',
+  granted_by     text not null default '',
+  granted_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  primary key (principal_type, principal_id, badge),
+  constraint badge_principal_kind check (
+    (badge = 'grey' and principal_type = 'official')
+    or (badge in ('quintal', 'sole') and principal_type = 'person')
+  )
+);
+create index if not exists badge_assignments_active_idx
+  on public.badge_assignments (principal_type, principal_id) where active = true;
+
+create table if not exists public.badge_audit (
+  id             uuid primary key default gen_random_uuid(),
+  principal_type text not null check (principal_type in ('person', 'official')),
+  principal_id   text not null,
+  badge          text not null check (badge in ('quintal', 'sole', 'grey')),
+  action         text not null check (action in ('grant', 'revoke')),
+  reason         text not null default '',
+  actor_uid      text not null,
+  created_at     timestamptz not null default now(),
+  constraint badge_audit_principal_kind check (
+    (badge = 'grey' and principal_type = 'official')
+    or (badge in ('quintal', 'sole') and principal_type = 'person')
+  )
+);
+create index if not exists badge_audit_recent_idx on public.badge_audit (created_at desc);
+
+-- One person can complete a read or a full rehearsal for a shared work once.
+-- This is account-side activity evidence; drafts and private notes never leave
+-- the writer's device. The source presentation body remains in Turso.
+create table if not exists public.presentation_actions (
+  uid            text not null references public.profiles(uid) on delete cascade,
+  presentation_id text not null,
+  action         text not null check (action in ('read', 'rehearse')),
+  created_at     timestamptz not null default now(),
+  primary key (uid, presentation_id, action)
+);
+create index if not exists presentation_actions_quintal_idx
+  on public.presentation_actions (uid, action, created_at desc);
+
+-- ============================================================================
 --  Identity helpers
 -- ============================================================================
 
@@ -323,6 +389,65 @@ security definer
 set search_path = public
 as $$
   select exists (select 1 from public.handles where username = p_username)
+$$;
+
+-- Badge changes go through one audited operation. The routine is callable only
+-- by admins; client-provided actor IDs are never trusted.
+create or replace function public.admin_set_badge(
+  p_principal_type text,
+  p_principal_id text,
+  p_badge text,
+  p_action text,
+  p_reason text default ''
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor text := public.current_uid();
+  v_reason text := left(trim(coalesce(p_reason, '')), 500);
+begin
+  if not public.is_admin() or v_actor is null then
+    raise exception 'administrator access required';
+  end if;
+  if p_principal_type not in ('person', 'official')
+    or p_badge not in ('quintal', 'sole', 'grey')
+    or p_action not in ('grant', 'revoke')
+    or p_principal_id is null or length(trim(p_principal_id)) < 2 then
+    raise exception 'invalid badge operation';
+  end if;
+  if (p_badge = 'grey' and p_principal_type <> 'official')
+    or (p_badge in ('quintal', 'sole') and p_principal_type <> 'person') then
+    raise exception 'that badge is not available for this account type';
+  end if;
+  if p_action = 'grant' and p_badge = 'grey' and not exists (
+    select 1 from public.official_accounts where slug = p_principal_id and active = true
+  ) then
+    raise exception 'Grey is only available to an active official account';
+  end if;
+
+  if p_action = 'grant' then
+    insert into public.badge_assignments
+      (principal_type, principal_id, badge, active, reason, granted_by, granted_at, updated_at)
+    values
+      (p_principal_type, trim(p_principal_id), p_badge, true, v_reason, v_actor, now(), now())
+    on conflict (principal_type, principal_id, badge) do update
+      set active = true, reason = excluded.reason, granted_by = excluded.granted_by,
+          granted_at = now(), updated_at = now();
+  else
+    update public.badge_assignments
+       set active = false, reason = v_reason, updated_at = now()
+     where principal_type = p_principal_type and principal_id = trim(p_principal_id)
+       and badge = p_badge;
+  end if;
+
+  insert into public.badge_audit
+    (principal_type, principal_id, badge, action, reason, actor_uid)
+  values
+    (p_principal_type, trim(p_principal_id), p_badge, p_action, v_reason, v_actor);
+end;
 $$;
 
 
@@ -486,7 +611,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['profiles', 'handles', 'speeches', 'ads', 'admin_private']
+  foreach t in array array['profiles', 'handles', 'speeches', 'ads', 'admin_private', 'official_accounts', 'badge_assignments']
   loop
     execute format('drop trigger if exists touch_%1$s on public.%1$s', t);
     execute format(
@@ -533,6 +658,10 @@ alter table public.sponsors       enable row level security;
 alter table public.posts          enable row level security;
 alter table public.feedback       enable row level security;
 alter table public.site_settings  enable row level security;
+alter table public.official_accounts enable row level security;
+alter table public.badge_assignments enable row level security;
+alter table public.badge_audit enable row level security;
+alter table public.presentation_actions enable row level security;
 
 -- ── profiles ────────────────────────────────────────────────────────────────
 -- Reading stays free: /:username has to be able to show a person's page.
@@ -674,6 +803,34 @@ create policy settings_read on public.site_settings for select using (true);
 drop policy if exists settings_write on public.site_settings;
 create policy settings_write on public.site_settings for all
   using (public.is_admin()) with check (public.is_admin());
+
+-- ── vetted source accounts ──────────────────────────────────────────────────
+drop policy if exists official_accounts_read on public.official_accounts;
+create policy official_accounts_read on public.official_accounts for select
+  using (active = true or public.is_admin());
+drop policy if exists official_accounts_write on public.official_accounts;
+create policy official_accounts_write on public.official_accounts for all
+  using (public.is_admin()) with check (public.is_admin());
+
+-- ── three badge codes, current ownership and an admin-only audit ─────────────
+drop policy if exists badge_assignments_read on public.badge_assignments;
+create policy badge_assignments_read on public.badge_assignments for select
+  using (active = true or public.is_admin());
+drop policy if exists badge_assignments_write on public.badge_assignments;
+create policy badge_assignments_write on public.badge_assignments for all
+  using (public.is_admin()) with check (public.is_admin());
+drop policy if exists badge_audit_read on public.badge_audit;
+create policy badge_audit_read on public.badge_audit for select using (public.is_admin());
+drop policy if exists badge_audit_write on public.badge_audit;
+create policy badge_audit_write on public.badge_audit for insert with check (public.is_admin());
+
+-- ── private, deduplicated activity evidence for Quintal ─────────────────────
+drop policy if exists presentation_actions_read on public.presentation_actions;
+create policy presentation_actions_read on public.presentation_actions for select
+  using (uid = public.current_uid() or public.is_admin());
+drop policy if exists presentation_actions_insert on public.presentation_actions;
+create policy presentation_actions_insert on public.presentation_actions for insert
+  with check (uid = public.current_uid());
 
 
 -- ============================================================================

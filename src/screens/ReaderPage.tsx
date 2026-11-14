@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { Markdown } from '../components/Markdown';
 import { ReactionBar } from '../components/ReactionBar';
+import { AuthorCorner } from '../components/AuthorCorner';
 import { AdSlot } from '../components/AdSlot';
 import { useSpeech, useSpeeches } from '../hooks/useCollection';
 import { useLibrary } from '../store/library';
@@ -40,6 +41,7 @@ import { useGate } from '../components/SignIn';
 import { pageMetaFor } from '../data/routes';
 import { SITE_URL, absoluteUrl } from '../lib/seo';
 import { usePageMeta } from '../lib/usePageMeta';
+import { presentationViewName } from '../lib/motion';
 import type { CloudSpeech } from '../lib/speech';
 
 /**
@@ -245,7 +247,7 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div className="pb-page anim-read-arrival" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div
         style={{
           position: 'fixed',
@@ -286,16 +288,35 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
       </div>
 
       <header className="pb-panel anim-enter" style={{ padding: 'clamp(18px, 3vw, 30px)' }}>
+        <div className="pb-reader-author-row">
+          <AuthorCorner
+            author={item.author}
+            username={item.username}
+            photoURL={item.authorPhotoURL}
+            sourceType={item.sourceType}
+            sourceName={item.sourceName}
+            sourceURL={item.sourceURL}
+            badges={item.authorBadges}
+            arrival
+          />
+        </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
           <div style={{ flex: '1 1 420px', minWidth: 0 }}>
             <span className="pb-eyebrow">
               {item.category} · {item.occasion}
             </span>
-            <h1 style={{ fontSize: 'clamp(1.5rem, 3.4vw, 2.2rem)', margin: '8px 0 10px' }}>{item.title}</h1>
+            <h1
+              style={{
+                fontSize: 'clamp(1.5rem, 3.4vw, 2.2rem)',
+                margin: '8px 0 10px',
+                viewTransitionName: presentationViewName(item.id),
+              }}
+            >
+              {item.title}
+            </h1>
             <p className="pb-soft" style={{ fontSize: '0.98rem', lineHeight: 1.7 }}>{item.preview}</p>
 
             <div className="pb-muted" style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: '0.8rem', marginTop: 12 }}>
-              <span>{item.author}</span>
               <span>{formatDate(item.createdAt)}</span>
               <span>{stats.minutes} min read</span>
               <span>{formatCount(item.words)} words</span>
@@ -679,12 +700,24 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
                 <span className="pb-eyebrow">More in {item.category}</span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 12 }}>
                   {related.map((speech) => (
-                    <Link key={speech.id} to={`/read/${encodeURIComponent(speech.id)}`} style={{ fontSize: '0.88rem', fontWeight: 600 }}>
-                      {speech.title}
+                    <div key={speech.id} className="pb-reader-related-link">
+                      <AuthorCorner
+                        author={speech.author}
+                        username={speech.username}
+                        photoURL={speech.authorPhotoURL}
+                        sourceType={speech.sourceType}
+                        sourceName={speech.sourceName}
+                        sourceURL={speech.sourceURL}
+                        badges={speech.authorBadges}
+                        compact
+                      />
+                      <Link to={`/read/${encodeURIComponent(speech.id)}`} className="pb-reader-related-title" style={{ fontSize: '0.88rem', fontWeight: 600 }}>
+                        {speech.title}
+                      </Link>
                       <span className="pb-muted" style={{ display: 'block', fontSize: '0.72rem', fontWeight: 400 }}>
-                        {speech.minutes} min · {speech.author}
+                        {speech.minutes} min
                       </span>
-                    </Link>
+                    </div>
                   ))}
                 </div>
               </div>

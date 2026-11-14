@@ -1,31 +1,30 @@
-/**
- * Presentation Buddy — the live layer (Convex).
- *
- * What this database is for: the things that are true *right now* and stop
- * being interesting ten seconds later —
- *
- *   • who is on the site at this moment
- *   • what just happened (a speech published, a reaction given, feedback sent)
- *   • counters that move while you are looking at them
- *
- * What it is not: the truth. Nothing here is authoritative. If this data
- * vanished, no record would be lost — the durable copy lives in Supabase, and
- * the reading library in Turso. That is deliberate: it is what lets three
- * databases coexist without ever disagreeing about a fact.
- *
- * Identity: Clerk. `convex/auth.config.ts` trusts the Clerk JWT template named
- * `convex`, so `ctx.auth.getUserIdentity()` returns the same uid the Postgres
- * policies use.
- */
-
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
+/**
+ * Convex is a repair/safety mirror only. It is not the home of shared work,
+ * drafts, social metrics, presence or live activity. For each published
+ * globally sampled personal presentation it may keep a tiny recovery slice
+ * (no more than 1% of UTF-8 body bytes), plus identifiers and a checksum.
+ *
+ * The three `legacy*` tables describe documents written by the retired live
+ * feature. They remain schema-valid during rollout so a deployment with old
+ * rows can accept this schema; no current function reads or writes them. Purge
+ * those historical rows before removing their definitions in a later deploy.
+ */
 export default defineSchema({
-  /**
-   * Who is here. One row per person, refreshed by a heartbeat; rows go stale
-   * on their own (`lastSeen` in the past means they left).
-   */
+  presentationSafety: defineTable({
+    presentationId: v.string(),
+    ownerUid: v.string(),
+    checksum: v.string(),
+    sourceBytes: v.number(),
+    recoverySlice: v.string(),
+    recoveryBytes: v.number(),
+    updatedAt: v.string(),
+  })
+    .index('by_presentationId', ['presentationId'])
+    .index('by_ownerUid', ['ownerUid']),
+
   presence: defineTable({
     uid: v.string(),
     name: v.string(),
@@ -36,10 +35,6 @@ export default defineSchema({
     .index('by_uid', ['uid'])
     .index('by_lastSeen', ['lastSeen']),
 
-  /**
-   * The activity stream. Append-only, capped, and cheap to read — the admin
-   * dashboard shows the last few minutes of the site while it happens.
-   */
   activity: defineTable({
     kind: v.union(
       v.literal('publish'),
@@ -50,7 +45,6 @@ export default defineSchema({
     ),
     uid: v.string(),
     name: v.string(),
-    /** What it happened to: a speech id, a handle, a path. */
     subject: v.string(),
     detail: v.string(),
     at: v.number(),
@@ -58,11 +52,6 @@ export default defineSchema({
     .index('by_at', ['at'])
     .index('by_uid', ['uid']),
 
-  /**
-   * Live counters — a *view* of the durable numbers, not their home. The app
-   * increments these so a page can show a number ticking up; Supabase remains
-   * the record, and a sync reconciles the two (see `reconcile` in activity.ts).
-   */
   counters: defineTable({
     speechId: v.string(),
     views: v.number(),

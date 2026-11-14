@@ -3,106 +3,30 @@ import { resolve } from 'node:path';
 import {
   mapSpeechRow,
   speechRowFromLibrary,
-  speechRowFromPostgres,
   type CloudSpeech,
   type SpeechRow,
 } from '@/lib/speech';
-import { libraryTableExists, toMatchQuery, turso, TURSO_CONFIGURED } from './turso';
+import { ensureLibraryColumns, toMatchQuery, turso, TURSO_CONFIGURED } from './turso';
 import { serverEnvAny } from './env';
 import { splitSql } from './sql';
 
 /**
- * Reading, on the server.
+ * Public presentation reads, on the server.
  *
- * ── What this is for ────────────────────────────────────────────────────────
- * Everything a visitor can read without signing in — the published library,
- * one speech, one writer's page — should exist as HTML before the browser runs.
- * That is what makes a shared link open instantly, what lets a crawler read the
- * actual text, and what means a slow phone on a bad connection still sees the
- * speech rather than a spinner.
- *
- * Before this module the browser did all of it: the page arrived empty and the
- * text appeared once JavaScript had fetched it. The browser still fetches —
- * that is how the app stays live — but it no longer *has* to.
- *
- * ── Two sources, one answer ─────────────────────────────────────────────────
- *   • **Turso** (the reading room) is asked first: it is a copy of published
- *     rows, built for exactly this read, and it is close to the reader.
- *   • **Postgres** (the truth) answers when Turso is not configured, or is
- *     unreachable, or does not have its schema yet.
- *
- * A reader never learns which one answered, and never gets a partial answer:
- * a failed read returns null or an empty list, and the screen renders the
- * honest empty state.
- *
- * ── Caching ─────────────────────────────────────────────────────────────────
- * `REVALIDATE_SECONDS` is how long a page of the library may be reused before
- * the read happens again. It is deliberately short (a minute): publishing is
- * meant to be visible almost at once, and one minute of staleness on a *list*
- * is invisible to a reader who can already open the speech itself.
+ * Turso is the authoritative store for every explicitly shared presentation.
+ * Supabase is consulted only to enrich the public author corner with profile
+ * data; it is never a content fallback. If Turso is unavailable, the library
+ * reports that honestly instead of silently reading a second source of truth.
  */
-
 const REVALIDATE_SECONDS = 60;
-
-/** Nothing on this path may hold a page hostage. */
 const READ_TIMEOUT_MS = 3000;
-
-/**
- * The public Postgres read: the anon key, which the policies already allow.
- *
- * Read through `serverEnv` rather than directly, because this file runs on the
- * server while those variables are inlined at build time for the browser — see
- * `src/server/env.ts` for why that distinction decides whether a deployment
- * talks to the database it was actually given.
- */
 const SUPABASE_URL = serverEnvAny('VITE_SUPABASE_URL', 'SUPABASE_URL').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = serverEnvAny('VITE_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY');
 
+/** Kept as a Supabase/profile readiness flag for handle and author lookups. */
 export const POSTGRES_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
-/* ------------------------------------------------------------------ */
-/* Postgres, over the REST API the app already uses                    */
-/* ------------------------------------------------------------------ */
-
-/**
- * One PostgREST read of `speeches`, filtered to published work.
- *
- * `select=*` deliberately: naming columns here would mean a second field
- * mapping to keep in step with `src/lib/speech.ts`, and a column added to the
- * schema would silently vanish from the site until somebody remembered this
- * file.
- */
-async function postgresSpeeches(
-  params: Record<string, string>,
-  signal: AbortSignal,
-): Promise<CloudSpeech[] | null> {
-  if (!POSTGRES_CONFIGURED) return null;
-
-  const url = new URL('/rest/v1/speeches', SUPABASE_URL);
-  url.searchParams.set('select', '*');
-  url.searchParams.set('status', 'eq.published');
-  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-
-  const response = await fetch(url, {
-    headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      Accept: 'application/json',
-    },
-    signal,
-    next: { revalidate: REVALIDATE_SECONDS },
-  });
-
-  if (!response.ok) return null;
-  const rows = (await response.json()) as SpeechRow[];
-  return rows.map((row) => mapSpeechRow(String(row.id ?? ''), speechRowFromPostgres(row)));
-}
-
-/* ------------------------------------------------------------------ */
-/* Turso                                                              */
-/* ------------------------------------------------------------------ */
-
-type LibraryQuery =
+export type LibraryQuery =
   | { kind: 'one'; id: string }
   | { kind: 'writer'; username: string; max: number }
   | { kind: 'search'; term: string; max: number }
@@ -112,168 +36,148 @@ async function tursoRead(query: LibraryQuery): Promise<CloudSpeech[] | null> {
   if (!TURSO_CONFIGURED) return null;
   const db = await turso();
   if (!db) return null;
-
   try {
     let sql: string;
     let args: (string | number)[];
-
     switch (query.kind) {
       case 'one':
-        sql = 'select * from library where id = ?';
+        sql = "select * from library where id = ? and moderation_status = 'published'";
         args = [query.id];
         break;
       case 'writer':
-        sql = 'select * from library where lower(username) = ? order by published_at desc limit ?';
+        sql = "select * from library where lower(username) = ? and moderation_status = 'published' order by published_at desc limit ?";
         args = [query.username, query.max];
         break;
       case 'search': {
         const match = toMatchQuery(query.term);
         if (!match) return [];
-        sql = `select library.* from library_fts
-                 join library on library.rowid = library_fts.rowid
-                where library_fts match ?
-                order by bm25(library_fts)
-                limit ?`;
+        sql = `select library.* from library_fts join library on library.rowid = library_fts.rowid
+               where library_fts match ? and library.moderation_status = 'published'
+               order by bm25(library_fts) limit ?`;
         args = [match, query.max];
         break;
       }
       default:
-        sql = 'select * from library order by published_at desc limit ? offset ?';
+        sql = "select * from library where moderation_status = 'published' order by published_at desc limit ? offset ?";
         args = [query.max, query.offset];
         break;
     }
-
     const result = await db.execute({ sql, args });
-    return (result.rows as unknown as SpeechRow[]).map((row) =>
-      mapSpeechRow(String(row.id ?? ''), speechRowFromLibrary(row)),
-    );
+    const rows = result.rows as unknown as SpeechRow[];
+    const items = rows.map((row) => mapSpeechRow(String(row.id ?? ''), speechRowFromLibrary(row)));
+    return await enrichAuthors(items, db);
   } catch {
-    // A missing table, a revoked token, a database asleep: all of it means the
-    // same thing to a reader — ask the other source.
     return null;
   } finally {
     db.close();
   }
 }
 
-/** Postgres equivalent of each Turso query, so the two can never differ. */
-async function postgresFor(query: LibraryQuery, signal: AbortSignal): Promise<CloudSpeech[] | null> {
-  switch (query.kind) {
-    case 'one':
-      return postgresSpeeches({ id: `eq.${query.id}`, limit: '1' }, signal);
-    case 'writer':
-      return postgresSpeeches(
-        {
-          username: `eq.${query.username.toLowerCase()}`,
-          order: 'published_at.desc',
-          limit: String(query.max),
-        },
-        signal,
-      );
-    case 'search': {
-      // No full-text index outside Turso, so this is a substring match on the
-      // three fields a reader searches. Slower and simpler, and honest: it can
-      // only ever return something the reader could have opened anyway.
-      const term = query.term.replace(/[%_,()]/g, ' ').trim();
-      if (!term) return [];
-      return postgresSpeeches(
-        {
-          or: `(title.ilike.*${term}*,preview.ilike.*${term}*,content.ilike.*${term}*)`,
-          limit: String(query.max),
-        },
-        signal,
-      );
-    }
-    default:
-      return postgresSpeeches(
-        { order: 'published_at.desc', limit: String(query.max), offset: String(query.offset) },
-        signal,
-      );
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* The public API of this module                                      */
-/* ------------------------------------------------------------------ */
-
 /**
- * Ask the copy, then the truth — and report which one answered.
- *
- * The order and the fallbacks, in one place:
- *
- *   1. the reading room, because it was built for this read and it is close;
- *   2. Postgres, whenever the copy failed *or* came back empty. Empty matters:
- *      a copy that was never filled answers an empty list perfectly happily,
- *      and reporting that as "the library is empty" would be the exact lie
- *      this module exists to avoid;
- *   3. and whichever of those answered is named honestly in `source`, because
- *      the environment panel and `npm run check:routes` read it — a guess here
- *      would make a real failure look like a working setup.
+ * Profile data lives in Supabase. Fetch it in one public read for this page and
+ * merge it into the content rows; Turso keeps only a display cache as fallback.
  */
-async function read(query: LibraryQuery): Promise<{ items: CloudSpeech[]; source: LibrarySource }> {
-  const signal = AbortSignal.timeout(READ_TIMEOUT_MS);
+async function enrichAuthors(items: CloudSpeech[], db?: Awaited<ReturnType<typeof turso>>): Promise<CloudSpeech[]> {
+  const uids = [...new Set(items.map((item) => item.uid).filter(Boolean))];
+  if (!uids.length) return items;
+  const directory = new Map<string, { displayName?: string; username?: string; photoURL?: string; badges?: string[] }>();
 
-  const fromCopy = await tursoRead(query);
-  if (fromCopy && fromCopy.length) return { items: fromCopy, source: 'turso' };
-
-  try {
-    const fromTruth = await postgresFor(query, signal);
-    if (fromTruth && fromTruth.length) return { items: fromTruth, source: 'postgres' };
-    // Both answered and both were empty: the copy answered first, so it is the
-    // one to name. If it never answered at all, `fromCopy` is null and the
-    // honest answer is "nothing was able to answer".
-    if (fromTruth) return { items: [], source: fromCopy ? 'turso' : 'postgres' };
-  } catch {
-    /* a timeout or a refused read: fall through */
+  if (POSTGRES_CONFIGURED) {
+    try {
+      const url = new URL('/rest/v1/profiles', SUPABASE_URL);
+      url.searchParams.set('select', 'uid,display_name,username,photo_url');
+      url.searchParams.set('uid', `in.(${uids.map((uid) => `\"${uid.replaceAll('\"', '')}\"`).join(',')})`);
+      const response = await fetch(url, {
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, Accept: 'application/json' },
+        signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+        next: { revalidate: REVALIDATE_SECONDS },
+      });
+      if (response.ok) {
+        const profiles = (await response.json()) as SpeechRow[];
+        for (const profile of profiles) {
+          const uid = String(profile.uid ?? '');
+          directory.set(uid, {
+            displayName: String(profile.display_name ?? '') || undefined,
+            username: String(profile.username ?? '') || undefined,
+            photoURL: String(profile.photo_url ?? '') || undefined,
+            badges: [],
+          });
+        }
+      }
+    } catch {
+      // The published row carries a last-known public author corner.
+    }
   }
 
-  return { items: fromCopy ?? [], source: fromCopy ? 'turso' : 'none' };
+  // Sole is awarded and retained with the Turso view record, so it remains
+  // available even when Supabase is having a quiet moment.
+  if (db) {
+    try {
+      const result = await db.execute({
+        sql: `select uid, badge from author_badges where uid in (${uids.map(() => '?').join(',')})`,
+        args: uids,
+      });
+      for (const row of result.rows as unknown as SpeechRow[]) {
+        const uid = String(row.uid ?? '');
+        const current = directory.get(uid) ?? {};
+        const badges = new Set([...(current.badges ?? []), String(row.badge ?? '')].filter(Boolean));
+        directory.set(uid, { ...current, badges: [...badges] });
+      }
+    } catch {
+      /* older/local schemas may not have the optional awards table yet */
+    }
+  }
+
+  return items.map((item) => {
+    const profile = directory.get(item.uid);
+    return profile ? {
+      ...item,
+      author: profile.displayName || item.author,
+      username: profile.username || item.username,
+      authorPhotoURL: profile.photoURL || item.authorPhotoURL,
+      authorBadges: [...new Set([...(item.authorBadges ?? []), ...(profile.badges ?? [])])],
+    } : item;
+  });
 }
 
-export type LibrarySource = 'turso' | 'postgres' | 'none';
+async function read(query: LibraryQuery): Promise<{ items: CloudSpeech[]; source: LibrarySource }> {
+  const items = await tursoRead(query);
+  return items === null ? { items: [], source: 'none' } : { items, source: 'turso' };
+}
+
+export type LibrarySource = 'turso' | 'none';
 
 export interface LibraryPage {
   items: CloudSpeech[];
-  /** Which database answered. Read by the environment panel, not by readers. */
   source: LibrarySource;
 }
 
-/** The published library, newest first. */
+/** Published presentations, newest first. */
 export async function readLibrary(options: { max?: number; offset?: number } = {}): Promise<LibraryPage> {
   const max = Math.min(Math.max(options.max ?? 24, 1), 200);
   const offset = Math.max(options.offset ?? 0, 0);
   return read({ kind: 'list', max, offset });
 }
 
-/** One speech, by id — what a shared link opens. */
+/** One presentation by stable id. */
 export async function readSpeech(id: string): Promise<CloudSpeech | null> {
   return (await readSpeechResult(id)).speech;
 }
 
-/**
- * The same read, with the answer to "did anyone actually look?".
- *
- * The distinction is the difference between a 404 and an outage. A caller that
- * needs to know whether a speech is genuinely absent — the `/read/<id>` route,
- * so that a deleted shared link stops answering 200 — asks for this. Everyone
- * else can keep asking for `readSpeech` and get a speech or nothing.
- */
-export async function readSpeechResult(
-  id: string,
-): Promise<{ speech: CloudSpeech | null; source: LibrarySource }> {
+export async function readSpeechResult(id: string): Promise<{ speech: CloudSpeech | null; source: LibrarySource }> {
   if (!id) return { speech: null, source: 'none' };
   const { items, source } = await read({ kind: 'one', id });
   return { speech: items[0] ?? null, source };
 }
 
-/** One writer's published work, for their own page at /username. */
+/** One writer's published work. */
 export async function readWriter(username: string, max = 60): Promise<CloudSpeech[]> {
   const handle = username.trim().toLowerCase();
   if (!handle) return [];
   return (await read({ kind: 'writer', username: handle, max })).items;
 }
 
-/** Full-text search, with the same terms the search box sends. */
+/** Full-text search over Turso's FTS5 index. */
 export async function searchLibrary(term: string, max = 50): Promise<CloudSpeech[]> {
   const trimmed = term.trim();
   if (!trimmed) return [];
@@ -394,6 +298,7 @@ export async function readProfile(username: string): Promise<PublicProfile | nul
 /* ------------------------------------------------------------------ */
 
 let schemaChecked = false;
+let schemaPromise: Promise<{ ok: boolean; applied: number; note: string }> | null = null;
 
 /**
  * Make sure the reading room has its tables, then say whether it does.
@@ -405,33 +310,41 @@ let schemaChecked = false;
  * that needs a terminal on somebody's laptop, and a reading room that stays
  * empty until they find one.
  *
- * It runs at most once per process, and only from a path that already required
- * a signed-in caller (`POST /api/sync-library`). A public read never creates
- * anything.
+ * It runs at most once per process, and only while handling a verified,
+ * explicit share or edit. A public read never creates or mutates anything.
  */
 export async function ensureLibrarySchema(): Promise<{ ok: boolean; applied: number; note: string }> {
   if (!TURSO_CONFIGURED) return { ok: false, applied: 0, note: 'turso_not_configured' };
+  if (schemaChecked) return { ok: true, applied: 0, note: 'already_present' };
+  if (schemaPromise) return schemaPromise;
 
-  const db = await turso();
-  if (!db) return { ok: false, applied: 0, note: 'turso_unreachable' };
-
-  try {
-    if (await libraryTableExists(db)) {
-      schemaChecked = true;
-      return { ok: true, applied: 0, note: 'already_present' };
+  schemaPromise = (async () => {
+    const db = await turso();
+    if (!db) {
+      schemaPromise = null;
+      return { ok: false, applied: 0, note: 'turso_unreachable' };
     }
 
-    const file = resolve(process.cwd(), 'turso/schema.sql');
-    const statements = splitSql(readFileSync(file, 'utf8'));
-    for (const statement of statements) await db.execute(statement);
+    try {
+      const file = resolve(process.cwd(), 'turso/schema.sql');
+      const statements = splitSql(readFileSync(file, 'utf8'));
+      // The statements are idempotent. Running them also creates auxiliary
+      // tables (read de-duplication and permanent awards) on older installations.
+      for (const statement of statements) await db.execute(statement);
+      // CREATE TABLE IF NOT EXISTS does not add columns to an existing table.
+      // These ALTERs are additive and preserve all existing presentation rows.
+      const columnsAdded = await ensureLibraryColumns(db);
 
-    schemaChecked = true;
-    return { ok: true, applied: statements.length, note: 'applied' };
-  } catch (error) {
-    return { ok: false, applied: 0, note: (error as Error).message };
-  } finally {
-    db.close();
-  }
+      schemaChecked = true;
+      return { ok: true, applied: statements.length + columnsAdded, note: 'applied' };
+    } catch (error) {
+      return { ok: false, applied: 0, note: (error as Error).message };
+    } finally {
+      db.close();
+      schemaPromise = null;
+    }
+  })();
+  return schemaPromise;
 }
 
 export const schemaReady = () => schemaChecked;

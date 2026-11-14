@@ -23,9 +23,7 @@ import { useSettings, type ContrastBoost, type ReducedMotionPref } from '../stor
 import { useCloud } from '../store/cloud';
 import { useAuth } from '../store/auth';
 import { useUi } from '../store/ui';
-import { BACKEND_ENABLED, BACKEND_PROJECT } from '../services/backend';
-import { deleteSpeechDoc, publishSpeech, refreshReadingRoom } from '../services/data';
-import { clerkSessionToken } from '../services/clerk';
+import { deleteSpeechDoc, publishSpeech } from '../services/data';
 import { formatCount } from '../lib/text';
 import { pageMetaFor } from '../data/routes';
 import { SITE_URL } from '../lib/seo';
@@ -145,59 +143,6 @@ export function ControlPage() {
     }
   };
 
-  /**
-   * Rebuild the reading room by hand.
-   *
-   * Publishing and deleting already refresh it. This is here for the two cases
-   * that cannot: a change made straight in the database, and a copy that has
-   * drifted for any other reason. It is the same server endpoint the app calls
-   * after a publish — one implementation, two triggers.
-   */
-  const [rebuild, setRebuild] = useState<{ state: 'idle' | 'busy' | 'done' | 'failed'; detail: string }>(
-    { state: 'idle', detail: '' },
-  );
-
-  const rebuildReadingRoom = async () => {
-    setRebuild({ state: 'busy', detail: '' });
-    const token = await clerkSessionToken();
-    if (!token) {
-      setRebuild({ state: 'failed', detail: 'Sign in first — the rebuild reads the library as you.' });
-      return;
-    }
-    try {
-      const response = await fetch('/api/sync-library', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: '{}',
-      });
-      const payload = (await response.json().catch(() => ({}))) as {
-        synced?: number;
-        schema?: string;
-        error?: string;
-        message?: string;
-      };
-      if (!response.ok) {
-        setRebuild({
-          state: 'failed',
-          detail:
-            payload.error === 'library_not_configured'
-              ? 'The reading room is not set up on this deployment. Reads are served from Postgres.'
-              : payload.message ?? payload.error ?? `HTTP ${response.status}`,
-        });
-        return;
-      }
-      setRebuild({
-        state: 'done',
-        detail:
-          payload.schema === 'applied'
-            ? `Reading room created and filled: ${payload.synced ?? 0} speeches.`
-            : `${payload.synced ?? 0} speeches are in the reading room.`,
-      });
-    } catch (error) {
-      setRebuild({ state: 'failed', detail: (error as Error).message });
-    }
-  };
-
   const publishDraft = async (id: string) => {
     const draft = mine.find((speech) => speech.id === id);
     if (!draft || !user) return;
@@ -218,7 +163,6 @@ export function ControlPage() {
       useLibrary.getState().updateSpeech(id, { cloudId, status: 'published' });
       toast('Published to the shared library', 'success');
       void cloud.connect(true);
-      void refreshReadingRoom(clerkSessionToken);
     } catch (error) {
       toast((error as Error)?.message ?? 'Publish failed', 'error');
     }
@@ -316,7 +260,7 @@ export function ControlPage() {
                     onClick={() => {
                       if (!window.confirm(`Remove “${item.title}”?`)) return;
                       if (item.source === 'cloud') {
-                        void deleteSpeechDoc(item.id).then(() => refreshReadingRoom(clerkSessionToken))
+                        void deleteSpeechDoc(item.id)
                           .then(() => {
                             void cloud.connect(true);
                             toast('Removed from the shared library', 'success');
@@ -399,7 +343,7 @@ export function ControlPage() {
       {tab === 'cloud' && (
         <section className="pb-panel" style={{ padding: '18px 20px' }}>
           <h2 style={{ fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <Cloud size={17} /> Cloud {BACKEND_ENABLED ? '' : '(not configured)'}
+            <Cloud size={17} /> Shared library
           </h2>
           <div className="pb-well" style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span
@@ -411,7 +355,7 @@ export function ControlPage() {
             <div style={{ flex: '1 1 240px' }}>
               <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
                 {cloud.status === 'online'
-                  ? `Connected · ${cloud.items.length} shared speeches`
+                  ? `Connected · ${cloud.items.length} shared presentations`
                   : cloud.status === 'connecting'
                     ? 'Connecting…'
                     : cloud.status === 'error'
@@ -419,31 +363,17 @@ export function ControlPage() {
                       : 'Local only'}
               </div>
               <div className="pb-muted" style={{ fontSize: '0.76rem' }}>
-                {BACKEND_PROJECT ? `Database: ${BACKEND_PROJECT}` : 'Add VITE_SUPABASE_URL to enable sync.'}
-                {cloud.error ? ` · ${cloud.error}` : ''}
+                {cloud.status === 'online'
+                  ? 'Published presentations live in Turso; drafts stay on this device until shared.'
+                  : cloud.status === 'connecting'
+                    ? 'Checking the shared presentation library…'
+                    : cloud.error ?? 'The shared Turso library could not be reached.'}
               </div>
             </div>
-            <button type="button" className="pb-btn pb-btn-sm" onClick={() => void cloud.connect(true)} disabled={!BACKEND_ENABLED}>
-              <RefreshCw size={14} /> Sync now
-            </button>
-            <button
-              type="button"
-              className="pb-btn pb-btn-sm pb-btn-outline"
-              onClick={() => void rebuildReadingRoom()}
-              disabled={rebuild.state === 'busy'}
-            >
-              <Database size={14} /> {rebuild.state === 'busy' ? 'Rebuilding…' : 'Rebuild reading room'}
+            <button type="button" className="pb-btn pb-btn-sm" onClick={() => void cloud.connect(true)}>
+              <RefreshCw size={14} /> Refresh library
             </button>
           </div>
-
-          {rebuild.state !== 'idle' && (
-            <p
-              className="pb-muted"
-              style={{ fontSize: '0.78rem', marginTop: 10, lineHeight: 1.6, color: rebuild.state === 'failed' ? 'var(--c-warn)' : undefined }}
-            >
-              {rebuild.detail}
-            </p>
-          )}
 
           <h3 style={{ fontSize: '0.95rem', margin: '18px 0 8px' }}>Sign in</h3>
           {user ? (

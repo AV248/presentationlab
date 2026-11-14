@@ -280,6 +280,53 @@ await db.exec(`
   values ('s1', '${AMA}', 'ama', 'a-speech', 'A Speech', 'The room is decided before you speak.', 'published')
   on conflict do nothing;`);
 
+await db.query(`select public.admin_set_badge('person', '${AMA}', 'quintal', 'grant', 'criteria met')`);
+const quintal = await db.query(`select active, reason from public.badge_assignments where principal_id = '${AMA}' and badge = 'quintal'`);
+const badgeGrantAudit = await db.query(`select count(*)::int as n from public.badge_audit where principal_id = '${AMA}' and badge = 'quintal' and action = 'grant'`);
+expect(
+  'an administrator can grant a person badge and keep an audit record',
+  quintal.rows[0]?.active === true && quintal.rows[0]?.reason === 'criteria met' && badgeGrantAudit.rows[0]?.n === 1,
+  JSON.stringify({ assignment: quintal.rows[0], audit: badgeGrantAudit.rows[0] }),
+);
+
+await db.exec(`insert into public.official_accounts (slug, display_name) values ('wikisource', 'Wikisource') on conflict do nothing;`);
+await db.query(`select public.admin_set_badge('official', 'wikisource', 'grey', 'grant', 'vetted source')`);
+await db.exec(`update public.official_accounts set active = false where slug = 'wikisource';`);
+let greyRevoked = true;
+try {
+  await db.query(`select public.admin_set_badge('official', 'wikisource', 'grey', 'revoke', 'source retired')`);
+} catch {
+  greyRevoked = false;
+}
+const grey = await db.query(`select active from public.badge_assignments where principal_type = 'official' and principal_id = 'wikisource' and badge = 'grey'`);
+expect(
+  'Grey belongs only to official accounts and can be revoked after a source retires',
+  greyRevoked && grey.rows[0]?.active === false,
+  JSON.stringify(grey.rows[0]),
+);
+
+await signIn(BHIM, 'bhim@example.test');
+let nonAdminBadgeBlocked = false;
+try {
+  await db.query(`select public.admin_set_badge('person', '${AMA}', 'sole', 'grant', 'forged')`);
+} catch {
+  nonAdminBadgeBlocked = true;
+}
+expect('a regular member cannot grant badges or write the audit', nonAdminBadgeBlocked);
+await signIn(AMA, 'ama@example.test');
+
+await db.exec(`insert into public.presentation_actions (uid, presentation_id, action) values ('${AMA}', 's1', 'read'), ('${AMA}', 's1', 'rehearse');`);
+const actions = await db.query(`select count(*)::int as n from public.presentation_actions where uid = '${AMA}' and presentation_id = 's1'`);
+const duplicateActionBlocked = await db
+  .exec(`insert into public.presentation_actions (uid, presentation_id, action) values ('${AMA}', 's1', 'read')`)
+  .then(() => false)
+  .catch(() => true);
+expect(
+  'read and rehearsal evidence are distinct and each is deduplicated per work',
+  actions.rows[0]?.n === 2 && duplicateActionBlocked,
+  JSON.stringify({ rows: actions.rows[0]?.n, duplicateActionBlocked }),
+);
+
 await db.query(`select public.bump_counter('s1', 'views')`);
 const counted = await db.query(`select views from public.speeches where id = 's1'`);
 expect('a view is counted', Number(counted.rows[0].views) >= 1, `views=${counted.rows[0]?.views}`);

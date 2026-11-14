@@ -13,8 +13,14 @@ export interface Speech {
   preview: string;
   content: string;
   createdAt: string;
-  /** 2.6 — handle publishing. All optional; built-ins predate them. */
+  /** Public author/source metadata, all optional for the bundled offline library. */
   username?: string;
+  authorPhotoURL?: string;
+  authorBadges?: string[];
+  sourceType?: 'person' | 'archive' | 'admin';
+  sourceName?: string;
+  sourceURL?: string;
+  license?: string;
   slug?: string;
   credits?: string;
   signature?: string;

@@ -4,6 +4,7 @@ import { LIBRARY } from '../data/speeches';
 import { useLibrary, type StoredSpeech } from '../store/library';
 import { useCloud } from '../store/cloud';
 import { useAuth } from '../store/auth';
+import { useProfile } from '../store/profile';
 import { wordCount, readingMinutes } from '../lib/text';
 import type { WebSpeech } from '../services/webSources';
 import type { CloudSpeech } from '../lib/speech';
@@ -20,6 +21,13 @@ export interface CollectionItem extends Speech {
   shares: number | null;
   ad: boolean;
   uid?: string;
+  username?: string;
+  authorPhotoURL?: string;
+  authorBadges?: string[];
+  sourceType?: 'person' | 'archive' | 'admin';
+  sourceName?: string;
+  sourceURL?: string;
+  license?: string;
   myReaction: 'like' | 'dislike' | null;
   bookmarked: boolean;
   progress: number;
@@ -49,6 +57,7 @@ function decorate(
     reactions: Record<string, 'like' | 'dislike'>;
     bookmarks: string[];
     progress: Record<string, number>;
+    author?: { uid: string; username: string; displayName: string; photoURL: string };
   },
 ): CollectionItem {
   const { speech, source, stored, web } = seed;
@@ -68,6 +77,13 @@ function decorate(
     shares?: number;
     ad?: boolean;
     uid?: string;
+    username?: string;
+    authorPhotoURL?: string;
+    authorBadges?: string[];
+    sourceType?: 'person' | 'archive' | 'admin';
+    sourceName?: string;
+    sourceURL?: string;
+    license?: string;
   };
 
   const hasCounters = source === 'cloud' && typeof base.views === 'number';
@@ -82,7 +98,15 @@ function decorate(
     dislikes: hasCounters ? (base.dislikes ?? 0) : null,
     shares: hasCounters ? (base.shares ?? 0) : null,
     ad: Boolean(base.ad),
-    uid: base.uid,
+    uid: base.uid ?? (source === 'user' ? ctx.author?.uid : undefined),
+    username: base.username ?? stored?.username ?? (source === 'user' ? ctx.author?.username : undefined),
+    authorPhotoURL: base.authorPhotoURL ?? (source === 'user' ? ctx.author?.photoURL : undefined),
+    authorBadges: base.authorBadges ?? [],
+    sourceType: base.sourceType,
+    sourceName: base.sourceName,
+    sourceURL: base.sourceURL,
+    license: base.license,
+    ...(source === 'user' && ctx.author?.displayName ? { author: ctx.author.displayName } : {}),
     myReaction: ctx.reactions[speech.id] ?? null,
     bookmarked: ctx.bookmarks.includes(speech.id),
     progress: ctx.progress[speech.id] ?? 0,
@@ -118,10 +142,24 @@ export function useSpeeches(seed?: CloudSpeech[]): CollectionItem[] {
   const fetched = useCloud((s) => s.items);
   const cloudItems = fetched.length ? fetched : (seed ?? []);
   const reactions = useAuth((s) => s.reactions);
+  const user = useAuth((s) => s.user);
+  const profileUsername = useProfile((s) => s.username);
 
   return useMemo(() => {
     const hiddenSet = new Set(hidden);
-    const ctx = { reactions, bookmarks, progress };
+    const ctx = {
+      reactions,
+      bookmarks,
+      progress,
+      ...(user ? {
+        author: {
+          uid: user.uid,
+          username: profileUsername || user.username || '',
+          displayName: user.displayName || profileUsername || user.username || '',
+          photoURL: user.photoURL || '',
+        },
+      } : {}),
+    };
 
     const seeds: Seed[] = [
       ...mine.map((item) => ({ speech: item as Speech, source: 'user' as ItemSource, stored: item })),
@@ -136,9 +174,14 @@ export function useSpeeches(seed?: CloudSpeech[]): CollectionItem[] {
           title: item.title,
           author: item.author,
           category: 'From the web',
-          occasion: 'Public domain library',
+          occasion: 'Public archive',
           level: 'Standard' as const,
-          tags: ['public domain', 'wikisource'],
+          tags: ['public domain', item.sourceId],
+          sourceType: 'archive' as const,
+          sourceName: item.source,
+          sourceURL: item.sourceUrl,
+          license: item.licence,
+          authorBadges: ['grey'],
           preview: item.preview,
           content: item.content,
           createdAt: item.fetchedAt.slice(0, 10),
@@ -156,7 +199,7 @@ export function useSpeeches(seed?: CloudSpeech[]): CollectionItem[] {
         if (a.rank !== b.rank) return a.rank - b.rank;
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
-  }, [mine, cloudItems, shelf, hidden, bookmarks, progress, reactions]);
+  }, [mine, cloudItems, shelf, hidden, bookmarks, progress, reactions, user, profileUsername]);
 }
 
 export function useSpeech(id: string | undefined, seed?: CloudSpeech[]): CollectionItem | undefined {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Apply `turso/schema.sql` to the reading room.
+ * Apply `turso/schema.sql` to Turso's authoritative presentation store.
  *
  * `npm run db:turso`
  *
@@ -114,9 +114,77 @@ const db = createClient({ url, authToken: authToken || undefined });
 
 try {
   // Sequential, not batched: a failure should name the statement that caused it
-  // rather than the batch it was in.
-  for (const statement of statements) {
-    await db.execute(statement);
+  // rather than the batch it was in. Every schema statement is idempotent.
+  for (const statement of statements) await db.execute(statement);
+
+  // Additive upgrades for databases created before the Turso-first content
+  // model. Never drop or replace existing presentation rows.
+  const current = await db.execute('pragma table_info(library)');
+  const present = new Set(current.rows.map((row) => String(row.name ?? '')));
+  const needsSafetySampleUpgrade = !present.has('safety_sampled');
+  const additions = [
+    ['author_photo_url', "text not null default ''"],
+    ['author_badges', "text not null default ''"],
+    ['source_type', "text not null default 'person'"],
+    ['source_name', "text not null default ''"],
+    ['source_url', "text not null default ''"],
+    ['source_title', "text not null default ''"],
+    ['source_fetched_at', "text not null default ''"],
+    ['license', "text not null default ''"],
+    ['official_slug', "text not null default ''"],
+    ['source_item_id', "text not null default ''"],
+    ['moderation_status', "text not null default 'published'"],
+    ['moderation_note', "text not null default ''"],
+    ['featured', 'integer not null default 0'],
+    ['safety_sampled', 'integer not null default 0'],
+  ];
+  let upgraded = 0;
+  for (const [name, declaration] of additions) {
+    if (present.has(name)) continue;
+    await db.execute(`alter table library add column ${name} ${declaration}`);
+    upgraded += 1;
+  }
+  // The indexes depend on additive fields, so they are created only after old
+  // installations have been upgraded successfully.
+  await db.execute('create index if not exists library_public_recent_idx on library (moderation_status, published_at desc)');
+  await db.execute('create index if not exists library_official_idx on library (official_slug, published_at desc)');
+  if (needsSafetySampleUpgrade) {
+    await db.execute("insert into library_fts (library_fts) values ('rebuild')");
+  }
+
+  // Replace older same-name cohort triggers once; CREATE IF NOT EXISTS alone
+  // would leave their previous selection algorithm in place. The trigger DDL,
+  // deterministic backfill and schema-version marker commit atomically.
+  const triggerNames = [
+    'library_safety_sample_ai',
+    'library_safety_sample_au',
+    'library_safety_sample_ad',
+  ];
+  const samplingSql = readFileSync(resolve(ROOT, 'turso/safety-sampling.sql'), 'utf8');
+  const samplingTx = await db.transaction('write');
+  try {
+    const currentVersion = await samplingTx.execute({
+      sql: 'select count(*) as n from turso_schema_migrations where version = 2',
+    });
+    const installedTriggers = await samplingTx.execute({
+      sql: `select count(*) as n from sqlite_master where type = 'trigger' and name in (${triggerNames.map(() => '?').join(', ')})`,
+      args: triggerNames,
+    });
+    const versionApplied = Number(currentVersion.rows[0]?.n ?? 0) === 1;
+    const triggersComplete = Number(installedTriggers.rows[0]?.n ?? 0) === triggerNames.length;
+    if (!versionApplied || !triggersComplete) {
+      for (const name of triggerNames) await samplingTx.execute(`drop trigger if exists ${name}`);
+      for (const statement of splitStatements(samplingSql)) await samplingTx.execute(statement);
+      await samplingTx.execute({
+        sql: `insert into turso_schema_migrations (version, applied_at) values (2, ?)
+              on conflict (version) do update set applied_at = excluded.applied_at`,
+        args: [new Date().toISOString()],
+      });
+    }
+    await samplingTx.commit();
+  } catch (error) {
+    await samplingTx.rollback();
+    throw error;
   }
 
   const tables = await db.execute(
@@ -135,7 +203,7 @@ try {
     process.exitCode = 1;
   } else {
     console.log('  Full-text search is in place (library_fts).');
-    console.log('\n  Next: npm run sync:turso   (fill it from Postgres)\n');
+    console.log('\n  Turso is ready. To import existing Supabase presentations, use the reviewed migration command; ordinary shares now write directly here.\n');
   }
 } catch (error) {
   console.error(`\n  Failed: ${error.message}\n`);

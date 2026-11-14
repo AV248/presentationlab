@@ -7,7 +7,7 @@
  *
  *   • Postgres, through Supabase's third-party auth, where `auth.jwt()->>'sub'`
  *     is the Clerk user id and the row policies in supabase/schema.sql read it
- *   • Convex, through the `convex` JWT template, for presence and activity
+ *   • Convex, through its `convex` JWT template, only for an optional safety slice
  *
  * Turso needs no token at all: it is a read-only copy of published work, served
  * by /api/library, and it never learns who is asking.
@@ -185,6 +185,8 @@ interface ClerkHandlers {
   updateUsername?: (username: string) => Promise<void>;
   /** The current Clerk session token, for calls to our own API. */
   getSessionToken?: () => Promise<string | null>;
+  /** Optional Clerk JWT-template token, used only for Convex safety snapshots. */
+  getConvexToken?: () => Promise<string | null>;
   /** Present the Clerk session to the databases again. */
   retryExchange?: () => Promise<boolean>;
 }
@@ -231,6 +233,16 @@ export async function clerkSessionToken(): Promise<string | null> {
   if (!handlers?.getSessionToken) return null;
   try {
     return await handlers.getSessionToken();
+  } catch {
+    return null;
+  }
+}
+
+/** JWT for the optional Convex safety mirror; never used for other services. */
+export async function clerkConvexToken(): Promise<string | null> {
+  if (!handlers?.getConvexToken) return null;
+  try {
+    return await handlers.getConvexToken();
   } catch {
     return null;
   }

@@ -225,8 +225,8 @@ export function AdminPage() {
   /* ------------------------------------------------------------ */
 
   return (
-    <div className="pb-page pb-narrow">
-      <header className="pb-page-head">
+    <div className="pb-page pb-narrow anim-admin-arrival">
+      <header className="pb-page-head pb-admin-signature">
         <span className="pb-eyebrow">{isOwner ? 'Owner' : 'Admin'} workspace</span>
         <h1 className="pb-page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Shield size={22} style={{ color: 'var(--c-accent)' }} /> Workspace

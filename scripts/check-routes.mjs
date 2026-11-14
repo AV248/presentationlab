@@ -26,10 +26,15 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { ROOT } from './lib/env.mjs';
+import { createClient } from '@libsql/client';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PB_CHECK_PORT ?? 5199);
 const STUB_PORT = PORT + 1;
+// Unknown-path responses are cached by Next's incremental route cache. Give
+// each run a fresh, safely routable id so a previous test's negative cache
+// cannot hide the newly seeded Turso row.
+const STUB_SPEECH_ID = `route-check-${process.pid}-${Date.now().toString(36)}`;
 const BASE = `http://127.0.0.1:${PORT}`;
 const STUB_BASE = `http://127.0.0.1:${STUB_PORT}`;
 
@@ -158,8 +163,8 @@ try {
   const libraryGet = await get('/api/library?max=1');
   expect(
     'the library endpoint answers, and says so plainly when the reading room is not configured',
-    libraryGet.status === 200 || (libraryGet.status === 503 && libraryGet.body.includes('library_not_configured')),
-    `${libraryGet.status} ${libraryGet.body.slice(0, 80)}`,
+    libraryGet.status === 200 || (libraryGet.status === 503 && libraryGet.body.includes('library_unavailable')),
+    `${libraryGet.status} ${libraryGet.body.slice(0, 100)}`,
   );
 
   const libraryPost = await fetch(`${BASE}/api/library`, { method: 'POST' });
@@ -169,7 +174,7 @@ try {
   expect('the rebuild endpoint refuses GET with an explanation', syncGet.status === 405 && syncGet.body.includes('method_not_allowed'), `status ${syncGet.status}`);
 
   const syncPost = await fetch(`${BASE}/api/sync-library`, { method: 'POST' });
-  expect('the rebuild endpoint requires a session', syncPost.status === 401 || syncPost.status === 503, `status ${syncPost.status}`);
+  expect('the old rebuild endpoint is retired', syncPost.status === 410, `status ${syncPost.status}`);
 
   /*
    * The deployment's self-test.
@@ -190,18 +195,18 @@ try {
     `${bare.verdict}: ${bare.summary}`,
   );
   expect(
-    'naming Postgres as a missing critical piece',
-    bareCheck('postgres')?.status === 'missing' && bareCheck('postgres')?.critical === true,
-    JSON.stringify(bareCheck('postgres')),
+    'naming Supabase profiles as a missing critical piece',
+    bareCheck('profiles')?.status === 'missing' && bareCheck('profiles')?.critical === true,
+    JSON.stringify(bareCheck('profiles')),
   );
   expect(
-    'and Clerk as the other one',
+    'and Clerk as another critical piece',
     bareCheck('clerk')?.status === 'missing' && bareCheck('clerk')?.critical === true,
     JSON.stringify(bareCheck('clerk')),
   );
   expect(
-    'while the reading room is reported as optional, not as a fault',
-    bareCheck('reading-room')?.status === 'optional' && bareCheck('reading-room')?.critical === false,
+    'and Turso as the authoritative library, not an optional fallback',
+    bareCheck('reading-room')?.status === 'missing' && bareCheck('reading-room')?.critical === true,
     JSON.stringify(bareCheck('reading-room')),
   );
   /*
@@ -282,9 +287,10 @@ try {
    * in production is the one a database makes possible: a writer's page
    * rendered on the server, and a handle nobody holds answering a real 404.
    *
-   * A stub PostgREST stands in for Postgres here, speaking the same protocol
-   * the reader uses. Then the server is restarted with it configured, and the
-   * *same* server that just answered "I cannot check that" is asked again.
+   * A stub PostgREST stands in for Supabase's identity/profile directory,
+   * while a real local Turso database holds the presentation. Then the server
+   * is restarted with both configured, and the *same* server that just
+   * answered "I cannot check that" is asked again.
    * ═══════════════════════════════════════════════════════════════════════ */
 
   server.kill('SIGTERM');
@@ -300,39 +306,22 @@ try {
       return;
     }
     if (table === 'profiles') {
-      const wanted = (url.searchParams.get('username') ?? '').replace('eq.', '');
+      const wantedName = (url.searchParams.get('username') ?? '').replace('eq.', '');
+      const wantedUid = url.searchParams.get('uid') ?? '';
+      const asksForU1 = wantedUid.includes('u1');
+      const probesDirectory = !wantedName && !wantedUid;
       res.end(
         JSON.stringify(
-          wanted === 'aavrit'
+          wantedName === 'aavrit' || asksForU1 || probesDirectory
             ? [{
                 uid: 'u1', username: 'aavrit', display_name: 'Aavrit Kumal',
                 bio: 'Writes for rooms that have to be won', location: 'Kathmandu',
-                website: '', signature: '— A', photo_url: '', points: 4,
+                website: '', signature: '— A', photo_url: 'https://example.test/aavrit.jpg', points: 4,
                 likes_received: 4, dislikes_received: 0, created_at: '2025-12-01T00:00:00.000Z',
               }]
             : [],
         ),
       );
-      return;
-    }
-    if (table === 'speeches') {
-      const wanted = (url.searchParams.get('username') ?? '').replace('eq.', '');
-      const byId = (url.searchParams.get('id') ?? '').replace('eq.', '');
-      const row = {
-        id: 'stub-1', uid: 'u1', username: 'aavrit', folder: '', slug: 'a-quiet-room',
-        title: 'The Quiet Room', author: 'Aavrit Kumal', category: 'General',
-        occasion: 'Conference', tags: ['craft'], preview: 'What a room does before you speak',
-        content: 'The room is decided before you open your mouth.', credits: '', signature: '',
-        allow_copy: true, ad: false, status: 'published', views: 7, likes: 3, dislikes: 0, shares: 1,
-        created_at: '2026-02-10T09:00:00.000Z', updated_at: '2026-02-10T09:00:00.000Z',
-        published_at: '2026-02-10T09:00:00.000Z',
-      };
-      if (byId) {
-        res.end(JSON.stringify(byId === 'stub-1' ? [row] : []));
-        return;
-      }
-      const rows = !wanted || wanted === 'aavrit' ? [row] : [];
-      res.end(JSON.stringify(rows));
       return;
     }
     res.statusCode = 404;
@@ -341,7 +330,7 @@ try {
   await new Promise((listen) => stub.listen(STUB_PORT, '127.0.0.1', listen));
 
   /*
-   * A reading room to go with the stub Postgres — built by the project's own
+   * A reading room to go with the Supabase stub — built by the project's own
    * schema applier, so the health check's Turso probe reports on a real
    * database rather than on a mock of one.
    */
@@ -352,6 +341,23 @@ try {
     env: { ...process.env, TURSO_DATABASE_URL: `file:${READING_DB}`, TURSO_AUTH_TOKEN: '' },
     stdio: 'pipe',
   });
+  const routeDb = createClient({ url: `file:${READING_DB}` });
+  await routeDb.execute({
+    sql: `insert into library (
+      id, uid, username, folder, slug, title, author, author_photo_url, author_badges,
+      preview, content, category, occasion, tags, credits, signature, allow_copy,
+      source_type, source_name, source_url, license, views, likes, dislikes, shares,
+      published_at, updated_at
+    ) values (${Array.from({ length: 27 }, () => '?').join(', ')})`,
+    args: [
+      STUB_SPEECH_ID, 'u1', 'aavrit', '', 'a-quiet-room', 'The Quiet Room', 'Aavrit Kumal',
+      'https://example.test/aavrit.jpg', '', 'What a room does before you speak',
+      'The room is decided before you open your mouth.', 'General', 'Conference', 'craft',
+      '', '— A', 1, 'person', '', '', '', 7, 3, 0, 1,
+      '2026-02-10T09:00:00.000Z', '2026-02-10T09:00:00.000Z',
+    ],
+  });
+  await routeDb.close();
 
   // A fresh process must not read a cached "there is no database" answer.
   rmSync(resolve(ROOT, '.next/cache/fetch-cache'), { recursive: true, force: true });
@@ -441,7 +447,7 @@ try {
     );
 
     /* A shared link: the strongest statement this site makes about a speech. */
-    const shared = await get('/read/stub-1');
+    const shared = await get(`/read/${STUB_SPEECH_ID}`);
     expect('a shared speech answers 200', shared.status === 200, `status ${shared.status}`);
     expect(
       'with its own title, not the site’s',
@@ -468,15 +474,15 @@ try {
 
     /*
      * The self-test, on a deployment where everything critical is in place.
-     * Each service has to have been *contacted* — the reading room is a real
-     * SQLite database, Postgres is the stub, Clerk's keys are shaped like the
-     * real ones — so a check that merely counts variables cannot pass this.
+     * Each service has to have been *contacted* — Turso is a real SQLite
+     * database, Supabase profiles use a stub PostgREST, and Clerk's keys are
+     * shaped like the real ones — so presence alone cannot pass this.
      */
     const health = await get('/api/health');
     const report = JSON.parse(health.body);
     const statusOf = (id) => report.checks.find((check) => check.id === id)?.status;
 
-    expect('the health check reports a configured deployment as working', statusOf('postgres') === 'ok', String(statusOf('postgres')));
+    expect('the health check reaches the Supabase profile store', statusOf('profiles') === 'ok', String(statusOf('profiles')));
     expect('it reached the reading room and looked at its tables', statusOf('reading-room') === 'ok', `${statusOf('reading-room')} — ${report.checks.find((c) => c.id === 'reading-room')?.detail}`);
     expect('it saw both halves of the Clerk setup', statusOf('clerk') === 'ok', String(statusOf('clerk')));
     expect(

@@ -2,7 +2,7 @@ import { loadBackend, BACKEND_ENABLED } from './backend';
 import { validateUsername } from '../lib/identity';
 async function fs() { return loadBackend(); }
 const str = (v: unknown, f = '') => typeof v === 'string' ? v : f;
-export interface PublicProfile { username: string; uid: string; displayName: string; bio: string; location: string; website: string; signature: string; createdAt: string }
+export interface PublicProfile { username: string; uid: string; displayName: string; bio: string; location: string; website: string; signature: string; createdAt: string; photoURL: string }
 /** Claim /username: the `handles` row is the uniqueness lock, and it is
  * create-only — the database has a real unique index on `handles.username`, so
  * two people racing for the same name cannot both win. `profiles` mirrors the
@@ -125,7 +125,7 @@ export async function fetchProfile(username: string): Promise<PublicProfile | nu
     const uid = str((h.data() ?? {}).uid); if (!uid) return null;
     const u = await f.getDoc(f.doc(db, 'users', uid));
     const d = u.exists() ? u.data() ?? {} : {};
-    return { username, uid, displayName: str(d.displayName, username), bio: str(d.bio), location: str(d.location), website: str(d.website), signature: str(d.signature), createdAt: str(d.createdAt) };
+    return { username, uid, displayName: str(d.displayName, username), bio: str(d.bio), location: str(d.location), website: str(d.website), signature: str(d.signature), createdAt: str(d.createdAt), photoURL: str(d.photoURL) };
   } catch { return null; }
 }
 export async function fetchOwnProfile(uid: string): Promise<PublicProfile | null> {
@@ -136,7 +136,7 @@ export async function fetchOwnProfile(uid: string): Promise<PublicProfile | null
     if (!u.exists()) return null;
     const d = u.data() ?? {};
     if (!str(d.username)) return null;
-    return { username: str(d.username), uid, displayName: str(d.displayName), bio: str(d.bio), location: str(d.location), website: str(d.website), signature: str(d.signature), createdAt: str(d.createdAt) };
+    return { username: str(d.username), uid, displayName: str(d.displayName), bio: str(d.bio), location: str(d.location), website: str(d.website), signature: str(d.signature), createdAt: str(d.createdAt), photoURL: str(d.photoURL) };
   } catch { return null; }
 }
 /** Is this name reserved (and, if so, is it reserved for me)? */

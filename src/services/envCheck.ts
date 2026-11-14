@@ -3,8 +3,8 @@
  *
  * Deleting and re-adding environment variables is the one operation where a
  * single typo produces a site that looks broken in a dozen unrelated ways — a
- * library with no cloud speeches, a sign-in sheet that says "not switched on",
- * a reading room answering 503 and naming nothing. This module turns all of
+ * public profiles missing, a sign-in sheet that says "not switched on", or a
+ * Turso reading room answering 503 without saying what is missing. This module turns all of
  * that into one
  * honest list: every variable the app reads, whether this build actually has
  * it, what it powers, and what stops working without it.
@@ -164,14 +164,14 @@ function anonKeyReport(): VarReport {
   return { name, status: 'set', what, breaks, hint: keyFingerprint(value) };
 }
 
-/** Postgres — where everything durable lives, and the only critical group. */
+/** Supabase — profiles, usernames and account-backed data. */
 function dataGroup(): GroupReport {
   const vars: VarReport[] = [
     report(
       'VITE_SUPABASE_URL',
       env.VITE_SUPABASE_URL as string | undefined,
-      'The Postgres project this site reads and writes.',
-      'Publishing, reacting, profiles and ads stay local-only.',
+      'The Supabase project that owns profiles, usernames and account-backed data.',
+      'Profile and username features cannot work; presentations remain in Turso.',
       keyFingerprint,
     ),
     anonKeyReport(),
@@ -188,7 +188,7 @@ function dataGroup(): GroupReport {
   }
   return {
     id: 'data',
-    title: 'Postgres — everything durable',
+    title: 'Supabase — profiles and account data',
     weight: 'critical',
     vars,
     ok: vars.every((v) => v.status === 'set'),
@@ -196,23 +196,22 @@ function dataGroup(): GroupReport {
 }
 
 /**
- * Prettiness, not plumbing. The live layer shows who else is reading and what
- * just happened; without it the site is exactly as useful, so its absence is
- * reported and never treated as a fault.
+ * Convex is an optional, bounded safety mirror. Its absence never blocks a
+ * read, write or rehearsal, so the environment panel treats it as optional.
  */
 function liveGroup(): GroupReport {
   const vars: VarReport[] = [
     report(
       'VITE_CONVEX_URL',
       env.VITE_CONVEX_URL as string | undefined,
-      'The live layer: who is here now, and what just happened.',
-      'Presence and live activity go quiet. Everything else is unaffected.',
+      'The optional Convex mirror for a capped sample of public presentations.',
+      'No secondary safety snapshot is available; Turso remains the only canonical store.',
       keyFingerprint,
     ),
   ];
   return {
     id: 'live',
-    title: 'Convex — the live layer (optional)',
+    title: 'Convex — bounded safety mirror (optional)',
     weight: 'optional',
     vars,
     ok: vars.every((v) => v.status === 'set'),
@@ -276,16 +275,14 @@ export interface ServerProbe {
 /**
  * Ask the reading room to describe itself.
  *
- * `/api/library` is the only endpoint that holds a secret, so it is also the
- * only way to see the server-only variables from a browser. A plain GET is the
- * perfect probe: a *configured* deployment answers `200` with rows, a
- * deployment that has not been given a Turso database answers `503
- * library_not_configured` and names what it lacks, and a missing function
- * answers `404`.
+ * `/api/library` is the server-only Turso read path, so it is also how the
+ * browser learns whether the authoritative presentation store is working. A
+ * plain GET answers `200` when the library schema is available, `503
+ * library_unavailable` with an actionable reason when it is not, and `404` if
+ * the endpoint itself has not been deployed.
  *
- * That 503 is deliberately *not* treated as broken: reading falls back to
- * Postgres, which holds the same rows, so the site is whole without Turso and
- * the panel says so instead of calling it a failure.
+ * Turso is the sole presentation-content store: an unavailable library is a
+ * real issue, never a signal to silently read a second database.
  *
  * Never throws. This runs on pages anyone can open.
  */
@@ -321,21 +318,24 @@ export async function probeServerEnv(): Promise<ServerProbe> {
       return {
         reachable: true,
         ok: true,
-        label: 'Reading room ready',
+        label: 'Turso library ready',
         detail:
-          'The SQLite copy answered, so TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are both in place on the server.',
+          'The authoritative presentation library answered on the server.',
         missing: [],
       };
     }
 
-    if (response.status === 503 && code === 'library_not_configured') {
+    if (response.status === 503 && code === 'library_unavailable') {
+      const message = payload.message ?? 'Turso could not answer the library query.';
+      const notConfigured = /not configured/i.test(message);
       return {
         reachable: true,
         ok: false,
-        label: 'Reading room not set up (harmless)',
-        detail:
-          'No Turso database is attached, so reading is served from Postgres — the same rows, one hop further away. Add TURSO_DATABASE_URL and TURSO_AUTH_TOKEN when you want the faster and searchable copy.',
-        missing: ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN'],
+        label: notConfigured ? 'Turso not configured' : 'Turso library unavailable',
+        detail: `Turso is the authoritative presentation store. ${message}`,
+        missing: notConfigured
+          ? ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN'].filter((name) => message.includes(name))
+          : named ? [named] : [],
       };
     }
 
@@ -343,8 +343,8 @@ export async function probeServerEnv(): Promise<ServerProbe> {
       return {
         reachable: true,
         ok: false,
-        label: 'Reading room unreachable',
-        detail: payload.message ?? 'The endpoint is configured but could not reach its database.',
+        label: 'Turso library unavailable',
+        detail: payload.message ?? 'The endpoint could not reach the authoritative presentation store.',
         missing: named ? [named] : [],
       };
     }
@@ -370,7 +370,7 @@ export async function probeServerEnv(): Promise<ServerProbe> {
         label: response.status === 404 ? 'Not deployed' : `HTTP ${response.status}`,
         detail:
           response.status === 404
-            ? 'No function answered at /api/library. Reading still works — it falls back to Postgres — but search and the faster copy do not exist on this deployment.'
+            ? 'No function answered at /api/library. Shared presentations cannot be read until the Turso API is deployed.'
             : 'The endpoint answered something other than JSON. Check the deployment logs.',
         missing: [],
       };

@@ -1,184 +1,104 @@
 # Environment variables
 
-The complete list. Nine variables, in the order to paste them, and nothing else
-is read by anything in this repository. `.env.example` is the same list with the
-commentary; this file says where each value comes from and what breaks without
-it.
+This deployment keeps the same nine Vercel variable names. Do not rename them,
+add a replacement dashboard variable, or put server credentials in the browser.
+`.env.example` contains placeholders; copy it to `.env` for local development.
 
-`.env.example` → copy to `.env` for local development. Vercel → **Project →
-Settings → Environment Variables** for production.
+## Visibility and timing
 
----
+`VITE_` values are public and are included in the browser bundle by
+`next.config.ts`. Changing one in Vercel requires a redeploy. The four names
+without that prefix are server-only and are read by server code at runtime.
+Exactly two of the nine are credentials that should be marked **Sensitive** in
+Vercel: `CLERK_SECRET_KEY` and `TURSO_AUTH_TOKEN`.
 
-## The rule
+## The five public variables
 
-Vite inlines **every** variable beginning with `VITE_` into the JavaScript
-bundle that ships to the browser. So:
+| Name | Use | If missing |
+|---|---|---|
+| `VITE_SITE_URL` | Canonical site origin, including `https://` and no trailing slash. The current production value is `https://presentationbuddy.aavrit.dedyn.io`. | Canonicals and share metadata use the configured/default origin; set this to the real production host. |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Clerk's browser-safe publishable key (`pk_live_…` in production). | Browser sign-in cannot start. |
+| `VITE_SUPABASE_URL` | Supabase project URL for profiles, usernames and account data. | Profile- and account-backed operations are unavailable. |
+| `VITE_SUPABASE_ANON_KEY` | Supabase's public anon/publishable key. RLS and the signed Clerk session govern access. | Same: Supabase-backed profile/account operations are unavailable. |
+| `VITE_CONVEX_URL` | Optional Convex safety deployment URL. | No optional safety mirror; canonical Turso reads and writes are unaffected. |
 
-| Prefix | Visibility | Vercel type |
-| --- | --- | --- |
-| `VITE_` | in the browser bundle — public by design | **Plain** |
-| no prefix | read only by functions in `api/` | Plain, except where marked **Sensitive** |
+The Supabase anon key is public by design. Never place a Supabase service-role
+or secret key in a `VITE_` variable. `npm run audit:secrets` checks the client
+bundle for server credentials.
 
-Exactly two names on this list are secrets, and they are the only two that need
-masking. `npm run audit:secrets` fails the build if a secret ends up in a
-`VITE_` variable.
+## The four server-only variables
 
----
+| Name | Vercel type | Use | If missing |
+|---|---|---|---|
+| `CLERK_SECRET_KEY` | **Sensitive** | Verifies Clerk sessions on server routes and supports server-side username operations. | Authenticated share/session verification cannot work. |
+| `CLERK_AUTHORIZED_PARTIES` | Plain | Comma-separated allowed origins, without trailing slashes. Set the production origin, e.g. `https://presentationbuddy.aavrit.dedyn.io`. | Session verification lacks the expected origin restriction; set it for production. |
+| `TURSO_DATABASE_URL` | Plain | URL for the authoritative presentation database (`libsql://…` in production). | Shared presentation reads and writes are unavailable. There is no Supabase content fallback. |
+| `TURSO_AUTH_TOKEN` | **Sensitive** | Credential for the remote Turso database. A local `file:` database does not need it. | A remote Turso database cannot be reached. |
 
-## Step 1 — the five public variables
+For a production site, configure both Turso values. The app can apply its
+idempotent schema on an authenticated write; operators can also run
+`npm run db:turso` from a trusted environment.
 
-Vercel type **Plain** for all five. Paste them in this order.
+## Local-only migration credentials
 
-| # | Name | Where the value comes from | Without it |
-| --- | --- | --- | --- |
-| 1 | `VITE_SITE_URL` | `https://presentationbuddy.aavrit.dedyn.io` — your own canonical origin | Canonical tags, the sitemap and Open Graph point somewhere unintended, so search engines may index every page as a duplicate |
-| 2 | `VITE_CLERK_PUBLISHABLE_KEY` | Clerk Dashboard → **API keys** → *Publishable key* (`pk_live_…` in production) | No sign-in at all. Reading still works |
-| 3 | `VITE_SUPABASE_URL` | Supabase → **Project Settings → Data API** → *Project URL* | Nothing can be published, reacted to or saved. Reading falls back to local-only |
-| 4 | `VITE_SUPABASE_ANON_KEY` | Supabase → **Project Settings → API keys** → *anon / public* | Same as above: the request is refused before a policy is even consulted |
-| 5 | `VITE_CONVEX_URL` | `npx convex deploy` prints it (Dashboard → Settings → URL) | Presence and the live activity ticker go quiet. **Optional** — everything else is unaffected |
-
-> **`VITE_SUPABASE_ANON_KEY` is not a secret.** It unlocks nothing on its own:
-> every request is checked against the policies in `supabase/schema.sql`, which
-> ask Postgres *who is asking* using the Clerk session token. A `service_role`
-> or `sb_secret_` key here would be a real mistake, because that one bypasses
-> every policy — and the app's own environment check turns red and says so.
-
-Two other things belong to this step, and neither is an environment variable:
-
-- **Clerk domains.** Dashboard → **Configure → Domains** → add
-  `presentationbuddy.aavrit.dedyn.io`. Without it, live keys are refused on your
-  own domain.
-- **Canonical share host.** `VITE_SITE_URL` is the canonical origin; shared links
-  are always `https://pb.devs.surf/<path>`, which is built into the app.
-
----
-
-## Step 2 — the four server-only variables
-
-No `VITE_` prefix. Read by the functions in `api/` at run time, so a change
-takes effect on the next request — no redeploy needed.
-
-| # | Name | Vercel type | Where the value comes from | Without it |
-| --- | --- | --- | --- | --- |
-| 6 | `CLERK_SECRET_KEY` | **Sensitive** | Clerk Dashboard → **API keys** → *Secret key* (`sk_live_…`) | `/api/clerk-set-username` cannot write a username into Clerk, so `/claim` stops working while "Restrict changes" is on. Everything else is unaffected |
-| 7 | `CLERK_AUTHORIZED_PARTIES` | Plain | `https://presentationbuddy.aavrit.dedyn.io` — comma-separated, no trailing slashes | The username endpoint refuses sessions from your own origin. Not optional: Clerk accepts cross-origin requests from **any** subdomain of a configured root domain by default |
-| 8 | `TURSO_DATABASE_URL` | Plain | turso.tech → your database → the `libsql://` URL | Reading is served from Postgres — the same rows, one hop further away. **Optional**: the site is complete without it, just not the fast one |
-| 9 | `TURSO_AUTH_TOKEN` | **Sensitive** | turso.tech → your database → *Create token* | Same as above. A real credential: it reads the reading room, and the sync writes it |
-
-The two Turso names are read at request time, not baked in, so they can be added
-later without touching the build. Variables 1–5 are **baked in at build time** —
-saving one in Vercel changes nothing until you redeploy. That single difference
-explains most of the "I set it and it did nothing" reports.
-
----
-
-## Step 3 — local only, never in Vercel
-
-The one-time Firestore import needs three things, and the running site needs
-none of them. Keep them in `.env`; do not add them to Vercel.
+The optional, reviewed legacy import is not part of ordinary publishing and
+these credentials are **not** Vercel variables:
 
 | Name | Use |
-| --- | --- |
-| `GOOGLE_APPLICATION_CREDENTIALS` | path to the Firebase service account JSON |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | the same JSON inline, on one line (either one, not both) |
-| `SUPABASE_SERVICE_ROLE_KEY` | lets the importer write other people's rows — it bypasses the row policies on purpose |
+|---|---|
+| `SUPABASE_URL` | Legacy Supabase source URL used by `npm run sync:turso`. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Local CLI-only key used to read legacy rows for the additive Turso import. Never expose it to client code or add it to Vercel. |
 
-```bash
-npm run migrate:firestore              # plan only
-npm run migrate:firestore -- --apply
-```
+Preview an import without writing with `npm run sync:turso -- --check`. The
+importer adds only missing rows and does not overwrite existing Turso rows.
+Keep migration credentials in the local `.env` and revoke/rotate them when no
+longer needed.
 
-Then revoke the Firebase service account and retire the project. Full order:
-[ARCHITECTURE.md § Setting it up](ARCHITECTURE.md#2-setting-it-up-in-order).
+## Copy/paste template
 
----
+Use actual values from the relevant provider dashboards; this block preserves
+the existing names and current canonical site value.
 
-## The whole list, in one block
-
-```bash
-# ── Public (VITE_) — Vercel: Plain ───────────────────────────────────────────
+```dotenv
+# Public; bundled into browser code
 VITE_SITE_URL=https://presentationbuddy.aavrit.dedyn.io
 VITE_CLERK_PUBLISHABLE_KEY=pk_live_…
 VITE_SUPABASE_URL=https://<project>.supabase.co
-VITE_SUPABASE_ANON_KEY=…
-VITE_CONVEX_URL=https://<deployment>.convex.cloud        # optional
+VITE_SUPABASE_ANON_KEY=<anon-or-publishable-key>
+VITE_CONVEX_URL=https://<deployment>.convex.cloud
 
-# ── Server only — Vercel: Sensitive for the two marked ✓ ─────────────────────
-CLERK_SECRET_KEY=sk_live_…                                ✓ Sensitive
+# Server-only
+CLERK_SECRET_KEY=sk_live_…
 CLERK_AUTHORIZED_PARTIES=https://presentationbuddy.aavrit.dedyn.io
 TURSO_DATABASE_URL=libsql://<database>.turso.io
-TURSO_AUTH_TOKEN=…                                        ✓ Sensitive
+TURSO_AUTH_TOKEN=<database-token>
 ```
 
----
+Convex is optional. If enabled, deploy the safety functions and configure the
+Clerk JWT template named `convex`; it is not a presence/activity service.
 
-## Checking it from inside the app
+## Check a deployment
 
-You do not have to guess. The app audits itself:
+`GET /api/health` performs server-side checks for Clerk configuration,
+Supabase profile reads, Turso reachability/schema, the optional Convex URL and
+the canonical origin. It returns a `ready`, `degraded` or `broken` verdict with
+variable names and actionable detail; it never returns secret values. `HEAD
+/api/health` returns `503` only for a broken deployment, otherwise `200`, with
+the verdict in `X-Health`.
 
-- **Sign-in sheet → Environment** — every variable above, marked `set`,
-  `missing` or `placeholder`, with a short fingerprint (never a value). It also
-  asks the server for its own verdict, which is the only way to see the
-  server-only variables from a browser.
-- **Admin → Setup** — the same panel, plus the server-only half.
-- **Control Room → Cloud** — the database it is actually talking to, and whether
-  the connection is up.
-
-`src/services/envCheck.ts` is the list those panels are built from, and it is
-the same list as this file. If they ever disagree, the code is right.
-
----
+The in-app Environment panel reports browser-visible variable presence. Its
+server probe asks `/api/library` whether the authoritative Turso library is
+available. Neither check proves an external service is configured for the
+correct production account; confirm the deployed host and a real Share → public
+read flow after configuration.
 
 ## Troubleshooting
 
-| Symptom | What it is |
-| --- | --- |
-| Nothing publishes; the library shows only local work | Variables 3–4 are missing or wrong, **or** the build predates them. `VITE_` values are inlined at build time: redeploy |
-| Sign-in returns to the site and nothing happens | `pk_test_` keys in production, or the domain is not added under Clerk → Configure → Domains |
-| Everything works, no presence | Variable 5 is unset, or the Clerk JWT template is not named exactly `convex` |
-| "That name is already taken" for a name nobody holds | A previous claim left a `handles` row. Admin → Handles releases it |
-| Publishing works, but the person who just published sees a stale library | The reading room is a copy. It refreshes on publish through `POST /api/sync-library`; `npm run sync:turso` forces it |
-| Reads work immediately after a deploy, then break a week later | The Supabase free project paused after no traffic. Open the dashboard once; a weekly visit keeps it awake |
-| `/api/library` answers `503 library_not_configured` | Deliberate, and harmless: Turso is optional and reads fall back to Postgres. The site's environment check labels it "not set up (harmless)" for that reason |
-
----
-
-## Checking it, rather than trusting it
-
-Presence is not behaviour. A key that is present and *wrong* — truncated, from
-another project, rotated in one place but not the other — looks identical to a
-correct one on the dashboard, and the only way to tell them apart is to ask.
-
-`GET /api/health` does exactly that. It runs on the server, over the same
-credentials the app uses, and contacts each service in turn:
-
-| check | what it does | critical? |
-| --- | --- | --- |
-| Clerk | checks both keys are present, and that the public one really is a `pk_…` | yes |
-| Postgres | performs a real public read with the anon key and reads the status code | yes |
-| Turso | opens the reading room and counts the rows in it | no — Postgres answers instead |
-| Convex | asks the deployment for its version | no — the live layer is quiet |
-| The site's address | compares the canonical URL with the domain serving the request | no |
-
-The answer is a verdict — `ready`, `degraded` or `broken` — and a line per
-check saying what it found and, when something must be fixed, what to do.
-`missing` and `missing but fine` are reported differently on purpose: no
-Postgres means the site cannot keep its promise, while no reading room means
-reads take one hop more.
-
-**It never returns a value.** No URL, no token, no key — a caller learns
-`configured` or `absent`. The one exception is the last four characters of the
-Clerk publishable key, which ships in every browser anyway and is the only way
-to tell two projects apart at a glance.
-
-- **In the browser:** Admin → Setup → *Test the deployment*, or the sign-in
-  sheet when sign-in is not configured.
-- **From a terminal:** `curl -s https://presentationbuddy.aavrit.dedyn.io/api/health | jq`
-- **For an uptime monitor:** `HEAD /api/health` answers `200` ready/degraded,
-  `503` broken, with the verdict in the `X-Health` header. It is `noindex` and
-  `no-store`, and nothing monitors it by default.
-
-The panel above it reports *presence* — what the browser can see of its own
-configuration. This one reports *behaviour*. When something is wrong, the two
-together say which variable and which service.
+| Symptom | Check |
+|---|---|
+| Sign-in will not start | Confirm `VITE_CLERK_PUBLISHABLE_KEY` belongs to the production Clerk instance and redeploy. |
+| Share is refused or profile setup is missing | Confirm both Supabase public variables, the Clerk session, a profile row and a claimed username. |
+| `/api/library` cannot serve shared work | Confirm `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, then check that the additive Turso schema is applied. Do not configure a Supabase presentation fallback. |
+| Canonical pages point to a preview or wrong host | Set `VITE_SITE_URL` to the production origin and redeploy. |
+| Convex reports unavailable | Optional safety snapshots are not being written. Turso remains authoritative and the reader is unaffected. |
+| Server reports Clerk token rejection | Check `CLERK_SECRET_KEY` and the exact production origin in `CLERK_AUTHORIZED_PARTIES`. |

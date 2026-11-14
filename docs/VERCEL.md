@@ -1,287 +1,110 @@
 # Deploying Presentation Buddy on Vercel
 
-> **3.1:** Vercel now detects Next.js. The build command is `npm run build`, the output
-> directory is whatever the framework says, and the redirects, headers and CSP that used to
-> live in `vercel.json` live in `next.config.ts`. The environment variables are unchanged.
+Presentation Buddy 3.1 is a Next.js App Router application. Vercel should detect
+Next.js; use the repository's `npm run build` command and the framework-managed
+output directory. Security headers, CSP, caching and redirects are in
+`next.config.ts`. Do not configure it as a Vite static build.
 
-Everything you need to put this site live, and everything you must set for it
-to be safe once it is.
+## Data flow
 
-Read the two warnings in [Before anything else](#before-anything-else) first —
-one of them is about a credential that has already been exposed.
+- Clerk owns identity and issues the session.
+- Supabase owns profiles, usernames, social/badge records and admin flags.
+- `/api/presentations` verifies Clerk and writes published work and versions to
+  Turso. `/api/library` and server-rendered readers read from Turso only.
+- Convex is optional. It stores only a globally sampled safety slice. The
+  public Convex action fetches selected content from the canonical app/Turso
+  endpoint; no browser-submitted body is trusted or mirrored.
+- Drafts remain local until Share.
 
----
-
-## Before anything else
-
-### 1. Rotate your Clerk secret key
-
-You pasted `sk_test_…` into a chat message to get here. Treat that key as
-public: anything written in a conversation should be assumed readable by more
-people than you intend.
-
-1. Clerk Dashboard → **API keys** → rotate the secret key.
-2. Put the new value straight into Vercel. Never paste it into a chat, a
-   ticket, or a screenshot again.
-
-The publishable key (`pk_test_…`) is fine — it is designed to sit in the
-browser.
-
-### 2. Switch to live keys before real users arrive
-
-`pk_test_` / `sk_test_` are development keys. Clerk rate-limits them and
-actively blocks them in production once you pass a handful of users. For
-launch you need `pk_live_` / `sk_live_`, and your production domain added
-under **Configure → Domains**.
-
----
-
-## Architecture in one paragraph
-
-Clerk signs people in, and its session token is presented **directly** to the
-two databases that need one: Postgres (Supabase) trusts Clerk as a third-party
-issuer, and Convex trusts the same token through a JWT template named `convex`.
-There is no token exchange, no Firebase, and no second identity. Ads are rows in
-the same Postgres database as everything else. Turso serves reading.
-
-```
-Browser                    Vercel                  Databases
-────────                   ──────                  ─────────
-Clerk modal ─────────────► Clerk (sign-in)
-   │
-   ├─ session token ─────────────────────────────►  Supabase: Postgres + RLS
-   │                                                  ↳ the truth
-   │
-   ├─ session token ─────────────────────────────►  Convex: presence, activity
-   │                                                  ↳ ephemeral
-   │
-   └─ GET /api/library ────► /api/library ───────►  Turso: published copy + FTS5
-                              (holds the token)       ↳ derived
-```
-
-The full picture, the three schemas and the order to set them up:
+For schema ownership and recovery guarantees, see
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
----
+## Environment variables
 
+In Vercel, open **Project → Settings → Environment Variables**. Preserve these
+existing names and values; no new Vercel variable is required by the rebuild.
+The authoritative list and exact notes are in [ENV.md](ENV.md).
 
+### Public — `VITE_` values are bundled into the browser
 
+| Name | Use |
+|---|---|
+| `VITE_SITE_URL` | Canonical origin for the deployed site, including `https://` and no trailing slash |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Clerk's public publishable key (`pk_live_…` in production) |
+| `VITE_SUPABASE_URL` | Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | Supabase public anon key; row-level security is the protection |
+| `VITE_CONVEX_URL` | Optional Convex safety deployment URL |
 
-In Vercel: **Project → Settings → Environment Variables**. Set each for
-Production, Preview and Development as appropriate. The complete list, with
-where each value comes from, is in [ENV.md](ENV.md) — this is the same list.
+### Server-only — never prefix these with `VITE_`
 
-### Public — bundled into the browser. Vercel type: Plain
+| Name | Use |
+|---|---|
+| `CLERK_SECRET_KEY` | Server-side Clerk verification and username operations |
+| `CLERK_AUTHORIZED_PARTIES` | Comma-separated allowed site origins; production should name the canonical origin |
+| `TURSO_DATABASE_URL` | Canonical presentation database URL |
+| `TURSO_AUTH_TOKEN` | Server-only Turso credential |
 
-| Variable | Value | Notes |
-| --- | --- | --- |
-| `VITE_SITE_URL` | `https://presentationbuddy.aavrit.dedyn.io` | **Set this first.** Canonicals, sitemap URLs, Open Graph URLs and structured data all derive from it. No trailing slash. |
-| `VITE_CLERK_PUBLISHABLE_KEY` | `pk_live_…` | Clerk Dashboard → API keys. |
-| `VITE_SUPABASE_URL` | `https://<project>.supabase.co` | Supabase → Project Settings → Data API. |
-| `VITE_SUPABASE_ANON_KEY` | the anon/public key | Supabase → Project Settings → API keys. Public by design: the row policies are what protect the data, and every request is checked against them. |
-| `VITE_CONVEX_URL` | `https://<deployment>.convex.cloud` | Optional. Without it, presence and the activity ticker are simply absent. |
+Never put a Clerk secret, Turso token, Supabase service-role key or any other
+credential in a `VITE_` variable. `npm run audit:secrets` checks the client
+bundle. Supabase service-role credentials are for local reviewed migration only
+and must not be added to Vercel.
 
-> **None of these is a secret.** They identify infrastructure in the browser.
-> What actually protects the data is `supabase/schema.sql`, which asks Postgres
-> who is asking. Putting the anon key behind a "secret" mechanism would be
-> theatre — and putting a *service_role* key under `VITE_` would be a genuine
-> incident, which is why `npm run audit:secrets` fails the build over it.
+`VITE_` values are inlined at build time, so redeploy after changing one.
+Server-only values are read by server routes at runtime. Do not rename the
+frozen variables or replace them with new dashboard settings.
 
-### Server-only — never prefix with `VITE_`
+## Clerk and Supabase
 
-| Variable | Vercel type | Value | Notes |
-| --- | --- | --- | --- |
-| `CLERK_SECRET_KEY` | **Sensitive** | `sk_live_…` | Used by `/api/clerk-set-username` to write a claimed username into Clerk. That is what keeps claiming working while "Restrict changes" is on. |
-| `CLERK_AUTHORIZED_PARTIES` | Plain | `https://presentationbuddy.aavrit.dedyn.io` | **Required** once the Clerk root domain is `aavrit.dedyn.io`: Clerk accepts cross-origin requests from any subdomain of a configured root domain by default, so without this a compromised subdomain on the shared root could replay a token. |
-| `TURSO_DATABASE_URL` | Plain | `libsql://…` | Optional. Reads fall back to Postgres without it. |
-| `TURSO_AUTH_TOKEN` | **Sensitive** | the database token | Optional, and a real credential: the functions read the reading room with it, and the sync writes it. |
+1. Add the production domain in Clerk and use live keys for real users.
+2. Configure Clerk's production Frontend API domain and the sign-in providers.
+3. Apply `supabase/schema.sql`; configure Clerk as Supabase's third-party auth
+   provider so Postgres policies receive Clerk's signed subject.
+4. Set `CLERK_AUTHORIZED_PARTIES` to the exact production origin, for example
+   `https://presentationbuddy.aavrit.dedyn.io`. Do not use a wildcard when the
+   app needs only one origin.
+5. Configure OAuth provider credentials in Clerk. Provider-specific setup is in
+   the linked `docs/` guides.
 
-Those four are read at **run time**, so changing one takes effect on the next
-request. The five above are inlined at **build time** — saving a new value does
-nothing until you redeploy. That single difference explains most of the "I set
-it and nothing changed" reports.
+The Supabase schema includes its own RLS and role checks. It does not store
+canonical presentation bodies; the legacy `speeches` table is retained only for
+compatibility and reviewed imports.
 
-**The rule:** Vite inlines every `VITE_`-prefixed variable into the browser
-bundle. Adding that prefix to `CLERK_SECRET_KEY` would publish it to every
-visitor who opens devtools.
+## Turso and Convex
 
-You do not have to remember this. `npm run verify` runs
-`scripts/check-secrets.mjs`, which fails the build if anything secret sits under
-a `VITE_` prefix, or if `.env` is still tracked in git:
-
-```
-✗ VITE_CLERK_SECRET_KEY is a Clerk secret key but starts with VITE_,
-  so it would be bundled into the browser JavaScript.
-```
-
-Add `npm run verify` as a CI check so this never reaches production.
-
-### Making the reading room fast (optional, five minutes)
-
-Turso is what makes reads cheap and search real. Skipping it costs nothing but
-speed — reading is served from Postgres, the same rows, one hop further away.
+Apply Turso schema locally or from a trusted operator environment:
 
 ```bash
-# once, with TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in .env
-npm run db:turso        # apply turso/schema.sql
-npm run sync:turso      # fill it from Postgres
+npm run db:turso
 ```
 
----
+The migration is additive. Legacy content can be imported with `npm run
+sync:turso` after setting local `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY`; those credentials are not client or Vercel values.
+Normal publishing is Turso-native and never runs the importer.
 
+Convex is optional. If enabled, deploy `convex/`, configure its Clerk JWT
+provider/template named `convex`, and set the existing `VITE_CONVEX_URL` in
+Vercel. The Convex auth configuration needs its issuer domain in the Convex
+deployment. The safety callback defaults to the current `VITE_SITE_URL`; if the
+canonical origin changes, update the fallback in `convex/safety.ts`. The mirror
+never blocks a share and never supplies reader content.
 
+The scheduled/admin-controlled arrivals pipeline is still a product gap. Do not
+claim scheduled ingestion is running simply because a Vercel deployment exists.
 
+## Deploy and verify
 
-One database, one schema file, and no way to deploy it to the wrong project.
+1. Import the repository into Vercel and leave the framework preset as Next.js.
+2. Add the nine frozen environment variables with the proper Production,
+   Preview and Development scopes.
+3. Apply the Supabase and Turso schemas; deploy Convex only if the optional
+   safety mirror is desired.
+4. Deploy, then check the canonical domain, `/api/health`, the library, sign-in,
+   and an explicit Share → public read flow.
+5. Run `npm run verify` for local checks. `npm run verify:all` also builds and
+   checks served routes. Neither verifies a remote Convex deployment or a real
+   browser's motion behavior; those need separate checks.
 
-**File: `supabase/schema.sql`.** Apply it in Supabase → **SQL Editor** →
-paste the whole file → **Run**. It is idempotent: running it twice changes
-nothing, and it is safe to re-paste after this repository adds a column.
-
-There is no CLI deploy step and no rules file to keep in sync, because the
-policies live *inside* the schema, next to the tables they guard. That is the
-whole reason Postgres replaced Firestore here: a rule that references a column
-that does not exist is a broken rule you find out about at 2am, and a foreign
-key is one you find out about in the editor.
-
-What it enforces, in short:
-
-| Table | Who may read | Who may write |
-| --- | --- | --- |
-| `profiles` | everyone | the person themselves |
-| `handles` | everyone | the person claiming it, **once** — and role-holders |
-| `admins` | everyone (a role is not a secret) | role-holders |
-| `admin_private` | the role-holder who owns it | the same |
-| `speeches` | everyone | the author, and role-holders |
-| `reactions` / `shares` | the person, and role-holders | the person, through the database function |
-| `ads` / `sponsors` | everyone | role-holders |
-| `posts` | everyone | the author, and role-holders |
-| `feedback` | role-holders | anyone |
-| `site_settings` | everyone | the owner |
-
-### Reacting and sharing are functions, not scripts
-
-`react_to_speech()` and `record_share()` do their work in a single transaction
-inside Postgres: the reaction row, the speech's counters, and the author's
-score all move together, or none of them do. Doing this in a browser tab — as
-the old Firestore version had to — means two people reacting at the same instant
-can lose a count. It also means the numbers can always be recomputed from the
-underlying rows, which is the property that makes them trustworthy.
-
-### The first owner, once
-
-There is no console to add yourself to. After applying the schema, run this in
-the SQL editor with your own Clerk user id (Clerk Dashboard → Users):
-
-```sql
-select public.bootstrap_owner('<clerk-user-id>', 'amaavrit@yahoo.com');
-```
-
-It grants the `owner` role exactly once: if a role already exists, it refuses.
-Every later role change happens in the site's own Admin workspace.
-
----
-
-
-
-1. **Domains** — Configure → Domains. Add **`aavrit.dedyn.io`** (the root, not
-   the subdomain). Because `dedyn.io` is a public suffix, `aavrit.dedyn.io` is
-   the registrable domain and `presentationbuddy.aavrit.dedyn.io` is a true
-   subdomain of it, so Clerk shares sessions across subdomains for free —
-   no satellite domains, no paid add-on. Add `*.vercel.app` for previews.
-2. **DNS** — Clerk needs exactly one new record: a CNAME at
-   `clerk.aavrit.dedyn.io` pointing at the target the Domains page shows you.
-   Nothing is required at the apex (`@`), and existing subdomain records are
-   untouched. Check that no CAA record blocks Let's Encrypt or Google Trust
-   Services, and do not proxy this host through Cloudflare — Clerk's DNS check
-   fails behind a proxy. Propagation can take up to 48h.
-3. **Providers** — Configure → SSO connections. Enable whichever you want
-   (Google, Microsoft, email). The sign-in sheet renders whatever is enabled
-   here; no code change needed to add one.
-4. **Allowed Subdomains** — enable it and allowlist only
-   `presentationbuddy.aavrit.dedyn.io`. Do this. By default the Frontend API
-   accepts cross-origin requests from *every* subdomain of your root domain,
-   which matters here because `aavrit.dedyn.io` carries other subdomains.
-5. **Authorized parties** — set `CLERK_AUTHORIZED_PARTIES` to
-   `https://presentationbuddy.aavrit.dedyn.io`. The second half of the same
-   lock: a compromised subdomain on the shared root then cannot replay a token
-   at the API. This is also the value the Clerk dashboard checks when a session
-   is presented from another origin.
-6. **Session token lifetime** — a short lifetime is fine. `connectSession()`
-   proves the session once per user id per tab and the token getters hand the
-   clients a fresh token whenever they ask, so nothing mints tokens in a loop.
-7. **JWT template for Convex** — Dashboard → **JWT Templates** → new template
-   named exactly `convex` (or copy Convex's own template from its dashboard
-   setup page). Without it, presence and the activity ticker stay empty; with a
-   differently-named template they do too, which is the one silent failure worth
-   knowing about here.
-
-> **The CSP must name the production Frontend API.** Development serves Clerk
-> from `suitable-bison-4886.clerk.accounts.dev`; with a production instance and
-> a root domain it becomes `clerk.aavrit.dedyn.io`. Both are now allowed in
-> `public/_headers` and `vercel.json`, in `script-src`, `connect-src` and
-> `frame-src`. If Clerk's script is blocked the app does **not** error visibly
-> — the 10-second load timeout falls back to signed-out. So if sign-in silently
-> does nothing in production, check the console for a CSP violation first.
-
----
-
-## Deploy
-
-1. Push to GitHub, then **Import Project** in Vercel.
-2. Framework preset: **Vite**. Build: `npm run build`. Output: `dist`.
-   (`vercel.json` already declares this.)
-3. Add every environment variable above.
-4. Deploy.
-
-`vercel.json` also sets the security headers — HSTS, CSP, `X-Frame-Options`,
-`Referrer-Policy`, `Permissions-Policy` — and the caching rules: hashed
-assets immutable for a year, HTML and the service worker always revalidated
-so a deploy actually reaches people.
-
-### One deliberate weakness in the CSP
-
-`script-src` includes `'unsafe-inline'`, because Clerk injects a small
-bootstrap script. It is the only real gap in the policy. If you want to close
-it, the route is a nonce-based CSP generated in Vercel Edge Middleware — which
-means moving the headers out of `vercel.json` and into middleware, so it is
-left as a follow-up rather than done badly here.
-
-The CSP also has to name your Clerk frontend host
-(`suitable-bison-4886.clerk.accounts.dev`). It appears in both `vercel.json`
-and `public/_headers`; if you ever move Clerk instances, change it in both.
-
----
-
-## After deploying
-
-- [ ] `https://your-domain.com/robots.txt` — check the `Sitemap:` line names your domain
-- [ ] `https://your-domain.com/sitemap.xml` — 56 URLs, all on your domain
-- [ ] Sign in end to end, then like something. If the like fails, either
-      Supabase does not yet trust Clerk as a third-party issuer (Dashboard →
-      Authentication → Third-party auth → Clerk), or the schema was not applied.
-      The app says which, in words — that is what the environment panel is for.
-- [ ] Search Console → add property → submit the sitemap
-- [ ] Confirm `curl -I https://your-domain.com` shows the security headers
-
-### On ranking
-
-No deploy can promise the top position. Indexing takes weeks, and ranking
-depends on backlinks and competition — things no build step controls. What
-this setup removes is every *technical* reason a page would be skipped or
-ranked down: real prerendered HTML per route, valid structured data
-(breadcrumbs on all 56 pages, `Article` on each speech, `FAQPage` and
-`HowTo` on the pages that can earn rich results), honest priority signals, and
-301s from the old route names so existing rankings carry over.
-
-The rest is content and promotion.
-
-
-## Short domain — pb.devs.surf (2.6)
-
-Share links are printed as `https://pb.devs.surf/<same path>`. To make them
-resolve: add `pb.devs.surf` under Vercel → Project → Settings → Domains,
-point its DNS at Vercel as instructed there, and add a domain-level redirect
-to `https://presentationbuddy.aavrit.dedyn.io` (301, preserve path). No code
-change is needed — the app already generates short links everywhere a link
-is shared or copied.
+The app retains the repository's CSP/security headers, SEO routes, PWA manifest
+and service worker. If a deployment changes domains or framework settings,
+recheck `next.config.ts` rather than adding a second header/redirect source.
