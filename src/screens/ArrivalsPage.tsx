@@ -113,7 +113,7 @@ export function ArrivalsPage() {
     const source = SOURCES[speech.sourceId] ?? SOURCES.wikisource;
     const saved = onShelf.has(speech.id);
     return (
-      <article key={speech.id} className="pb-card pb-arrival anim-enter" style={{ ['--i' as string]: index }}>
+      <article key={speech.id} className="pb-card pb-arrival pb-archive-sheet anim-enter" style={{ ['--i' as string]: index }}>
         <div className="pb-arrival-source">
           <span className="pb-source-dot" data-source={speech.sourceId} aria-hidden="true" />
           <span className="pb-source-name">{source.name}</span>
@@ -179,9 +179,9 @@ export function ArrivalsPage() {
   };
 
   return (
-    <div className="pb-page">
+    <div className="pb-page anim-arrivals-arrival">
       {/* ---- the goal ---- */}
-      <section className="pb-panel pb-arrivals-hero anim-enter">
+      <section className="pb-panel pb-arrivals-hero pb-archive-door anim-enter">
         <div className="pb-arrivals-hero-text">
           <span className="pb-eyebrow">Arrivals</span>
           <h1 className="pb-page-title">Five new speeches, every session</h1>

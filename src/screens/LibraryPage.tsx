@@ -360,7 +360,7 @@ export function LibraryPage({ initial }: { initial?: CloudSpeech[] } = {}) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--l-rhythm)' }}>
+    <div className="pb-page anim-library-arrival" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--l-rhythm)' }}>
       {!onboarded && <FirstRun />}
 
       {/* Hero */}

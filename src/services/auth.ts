@@ -1,16 +1,16 @@
 /**
  * Sessions.
  *
- * Clerk is the only identity provider. There is no second login, no token
- * bridging and no Firebase: the Clerk session token is presented directly to
- * Postgres (verified as a third-party issuer) and to Convex (whose Clerk
- * provider checks it the same way). One identity, three databases.
+ * Clerk is the only identity provider. The Clerk session token is presented
+ * directly to Supabase/Postgres, where row-level security checks it. Turso is
+ * accessed through same-origin server routes; Convex is an optional safety
+ * mirror, not a live session database.
  *
  * What used to be here — minting a Firebase custom token so Firestore rules
  * could match on `request.auth.uid` — is gone, and with it the endpoint, the
  * exchange, and a whole class of failure. What remains is `connectSession`,
- * which does the thing that is still worth doing: hand the token getter to both
- * clients and then *prove* the connection works with one authenticated read, so
+ * which does the thing that is still worth doing: hand the token getter to the
+ * Supabase client and then *prove* the connection works with one authenticated read, so
  * a broken session is a named, visible fact rather than a mysterious refusal
  * two screens later.
  */
@@ -20,8 +20,6 @@ import {
   BACKEND_ENABLED,
   NotConfiguredError,
   setAccessTokenGetter,
-  setLiveTokenGetter,
-  live,
 } from './backend';
 
 export type SignInProvider = 'google' | 'microsoft';
@@ -91,7 +89,7 @@ export interface ExchangeOutcome {
 let connectedFor: string | null = null;
 
 /**
- * Hand the Clerk session to Postgres and Convex, then check it.
+ * Hand the Clerk session to Supabase, then check the account connection.
  *
  * The check is one hostile read: select my own profile row. Postgres answers
  * 200 if the token is good, 401/403 if it is not, and the difference between
@@ -107,7 +105,6 @@ export async function connectSession(
   if (!clerkUserId) return { ok: false, reason: 'no-session' };
 
   setAccessTokenGetter(getToken);
-  setLiveTokenGetter(getToken);
 
   if (connectedFor === clerkUserId) return { ok: true };
 
@@ -142,13 +139,11 @@ export async function connectSession(
 export function disconnectSession(): void {
   connectedFor = null;
   setAccessTokenGetter(null);
-  setLiveTokenGetter(null);
 }
 
-/** Say goodbye to the live layer, so this browser stops counting as "here". */
+/** Drop the account session; no secondary live database retains it. */
 export async function signOut(): Promise<void> {
   disconnectSession();
-  void live;
 }
 
 /* ------------------------------------------------------------------ */

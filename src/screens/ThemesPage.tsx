@@ -65,8 +65,8 @@ export function ThemesPage() {
   const platform = detectPlatform();
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--l-rhythm)' }}>
-      <section className="pb-panel anim-enter" style={{ padding: 'clamp(20px, 3vw, 32px)' }}>
+    <div className="pb-page anim-themes-arrival" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--l-rhythm)' }}>
+      <section className="pb-panel pb-theme-dress anim-enter" style={{ padding: 'clamp(20px, 3vw, 32px)' }}>
         <span className="pb-eyebrow">Theme studio</span>
         <h1 style={{ fontSize: 'clamp(1.6rem, 3.4vw, 2.3rem)', margin: '10px 0 10px' }}>
           {COMBINATIONS.toLocaleString()} ways to make it yours

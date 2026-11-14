@@ -25,7 +25,7 @@
 
 import { loadBackend } from './backend';
 import { fetchLibrary, fetchOne } from './backend/library';
-import { clerkSessionToken } from './clerk';
+import { clerkConvexToken, clerkSessionToken } from './clerk';
 import { mapSpeechRow, str, num, isoTimestamp, type CloudSpeech } from '../lib/speech';
 
 export type CloudStatus = 'off' | 'connecting' | 'online' | 'error';
@@ -127,16 +127,58 @@ export interface PublishInput {
   allowCopy?: boolean;
 }
 
+async function optionalConvexToken(): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      clerkConvexToken(),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), 900);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function queueSafetyWork(token: string, operation: 'backup' | 'reconcile', presentationId?: string) {
+  // The primary share/delete request never waits for optional Convex token
+  // retrieval. Safety work starts in the background after Turso has replied.
+  void optionalConvexToken()
+    .then(async (convexToken) => {
+      if (!convexToken) return;
+      const response = await fetch('/api/presentations/safety', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-Convex-Token': convexToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ operation, ...(presentationId ? { presentationId } : {}) }),
+      });
+      if (!response.ok && response.status !== 204) {
+        // Optional backup failures must never undo a successful canonical write.
+        return;
+      }
+    })
+    .catch(() => { /* Convex is an optional mirror. */ });
+}
+
 async function writePresentation(method: 'POST' | 'PUT' | 'DELETE', payload: Record<string, unknown>) {
   const token = await clerkSessionToken();
   if (!token) throw new Error('Sign in again before sharing or changing a presentation.');
   const response = await fetch('/api/presentations', {
     method,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(payload),
   });
   const result = await response.json().catch(() => ({})) as { id?: string; error?: string; message?: string };
   if (!response.ok) throw new Error(result.message ?? result.error ?? `The presentation request failed (${response.status}).`);
+  if (method === 'DELETE') queueSafetyWork(token, 'reconcile');
+  else if (result.id) queueSafetyWork(token, 'backup', result.id);
   return result;
 }
 

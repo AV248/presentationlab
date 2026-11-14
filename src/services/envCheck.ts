@@ -196,23 +196,22 @@ function dataGroup(): GroupReport {
 }
 
 /**
- * Prettiness, not plumbing. The live layer shows who else is reading and what
- * just happened; without it the site is exactly as useful, so its absence is
- * reported and never treated as a fault.
+ * Convex is an optional, bounded safety mirror. Its absence never blocks a
+ * read, write or rehearsal, so the environment panel treats it as optional.
  */
 function liveGroup(): GroupReport {
   const vars: VarReport[] = [
     report(
       'VITE_CONVEX_URL',
       env.VITE_CONVEX_URL as string | undefined,
-      'The live layer: who is here now, and what just happened.',
-      'Presence and live activity go quiet. Everything else is unaffected.',
+      'The optional Convex mirror for a capped sample of public presentations.',
+      'No secondary safety snapshot is available; Turso remains the only canonical store.',
       keyFingerprint,
     ),
   ];
   return {
     id: 'live',
-    title: 'Convex — the live layer (optional)',
+    title: 'Convex — bounded safety mirror (optional)',
     weight: 'optional',
     vars,
     ok: vars.every((v) => v.status === 'set'),

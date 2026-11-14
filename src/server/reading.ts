@@ -41,23 +41,24 @@ async function tursoRead(query: LibraryQuery): Promise<CloudSpeech[] | null> {
     let args: (string | number)[];
     switch (query.kind) {
       case 'one':
-        sql = 'select * from library where id = ?';
+        sql = "select * from library where id = ? and moderation_status = 'published'";
         args = [query.id];
         break;
       case 'writer':
-        sql = 'select * from library where lower(username) = ? order by published_at desc limit ?';
+        sql = "select * from library where lower(username) = ? and moderation_status = 'published' order by published_at desc limit ?";
         args = [query.username, query.max];
         break;
       case 'search': {
         const match = toMatchQuery(query.term);
         if (!match) return [];
         sql = `select library.* from library_fts join library on library.rowid = library_fts.rowid
-               where library_fts match ? order by bm25(library_fts) limit ?`;
+               where library_fts match ? and library.moderation_status = 'published'
+               order by bm25(library_fts) limit ?`;
         args = [match, query.max];
         break;
       }
       default:
-        sql = 'select * from library order by published_at desc limit ? offset ?';
+        sql = "select * from library where moderation_status = 'published' order by published_at desc limit ? offset ?";
         args = [query.max, query.offset];
         break;
     }

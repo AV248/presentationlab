@@ -3609,7 +3609,7 @@ a:hover > .pb-underline::after,
 .pb-splash-stairs {
   stroke-dasharray: 44;
   stroke-dashoffset: 44;
-  animation: pb-stairs-draw 1.15s cubic-bezier(.35, 0, .2, 1) .2s forwards;
+  animation: pb-stairs-draw .82s cubic-bezier(.35, 0, .2, 1) .1s forwards;
 }
 @keyframes pb-stairs-draw { to { stroke-dashoffset: 0; } }
 .pb-splash-dot-motion { opacity: 0; animation: pb-dot-awake .35s ease .44s forwards; }
@@ -3629,9 +3629,11 @@ a:hover > .pb-underline::after,
   28%, 72% { opacity: .58; }
   50% { opacity: .74; transform: translate3d(0, -6px, 0) rotate(7deg); }
 }
-.pb-splash-word { position: relative; z-index: 1; color: #2d2a24; opacity: 0; animation: pb-fadeup .55s ease 1.95s forwards; }
+.pb-splash-word { position: relative; z-index: 1; color: #2d2a24; opacity: 0; animation: pb-fadeup .42s ease 1.05s forwards; }
 .pb-splash-word span { color: #a85e4f; }
-.pb-splash-tag { position: relative; z-index: 1; color: #706958; opacity: 0; animation: pb-fadeup .55s ease 2.22s forwards; }
+.pb-splash-tag { position: relative; z-index: 1; color: #706958; opacity: 0; animation: pb-fadeup .42s ease 1.28s forwards; }
+.pb-splash-skip { position: absolute; z-index: 2; top: max(18px, env(safe-area-inset-top)); right: max(18px, env(safe-area-inset-right)); padding: 7px 12px; border: 1px solid rgba(92, 78, 57, .22); border-radius: 999px; color: #625b50; background: rgba(255, 253, 248, .72); font-size: .78rem; cursor: pointer; }
+.pb-splash-skip:hover, .pb-splash-skip:focus-visible { border-color: #a85e4f; outline: 2px solid transparent; color: #2d2a24; }
 
 /* The writing desk: broad margins, paper warmth, and an honest pen line. */
 .pb-writing-space {
@@ -3794,44 +3796,35 @@ a:hover > .pb-underline::after,
 .pb-reader-related-title:hover { color: var(--c-accent); text-decoration: underline; text-underline-offset: 2px; }
 .pb-arrival-author-corner { display: flex; justify-content: flex-end; margin: 9px 0 10px; }
 
-/* Distinct arrivals: a cinema slate cuts to the rehearsal, a book opens to reading. */
-.pb-page.anim-rehearse-arrival, .pb-page.anim-read-arrival { position: relative; }
+/* Room signatures: a leaf settles into reading, the page lifts for writing,
+   and rehearsal gets one quiet line toward the stage. Nothing covers or traps
+   the room; each cue is short, interruptible and spatial. */
+.pb-main[data-room="read"] { --room-depth: 1; }
+.pb-main[data-room="write"] { --room-depth: 1; }
+.pb-main[data-room="rehearse"] { --room-depth: 1; }
+.pb-page.anim-read-arrival { animation: pb-read-settle 380ms cubic-bezier(.2,.65,.25,1) both; transform-origin: 50% 0; }
+@keyframes pb-read-settle {
+  from { opacity: .4; transform: translate3d(10px, 5px, 0) scale(.995); }
+  to { opacity: 1; transform: none; }
+}
+.pb-page.anim-rehearse-arrival { position: relative; }
 .pb-page.anim-rehearse-arrival::before {
   content: '';
-  position: fixed;
-  z-index: 90;
-  inset: 0;
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  inset-inline: 0;
+  height: 1px;
   pointer-events: none;
-  opacity: 0;
-  background:
-    linear-gradient(180deg, transparent 0 17%, color-mix(in srgb, var(--c-ink) 88%, #24312f) 17% 19%, transparent 19% 100%),
-    repeating-linear-gradient(90deg, transparent 0 20px, color-mix(in srgb, var(--c-ink) 66%, transparent) 20px 21px),
-    color-mix(in srgb, var(--c-canvas) 86%, var(--c-ink));
-  animation: pb-take-board-cut .52s cubic-bezier(.6, 0, .2, 1) both;
+  background: linear-gradient(90deg, transparent, var(--c-accent), transparent);
+  transform-origin: left center;
+  animation: pb-stage-mark 420ms cubic-bezier(.2,.65,.25,1) both;
 }
-@keyframes pb-take-board-cut {
-  0% { opacity: 0; clip-path: inset(0 0 100% 0); }
-  18% { opacity: .84; clip-path: inset(0 0 0 0); }
-  55% { opacity: .84; clip-path: inset(0 0 0 0); }
-  100% { opacity: 0; clip-path: inset(0 0 0 100%); }
+@keyframes pb-stage-mark {
+  0% { opacity: 0; transform: scaleX(.12); }
+  38% { opacity: .72; transform: scaleX(1); }
+  100% { opacity: 0; transform: scaleX(1); }
 }
-.pb-page.anim-read-arrival::before {
-  content: '';
-  position: fixed;
-  z-index: 90;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--c-surface) 96%, #efe1cc) 0 49.7%, color-mix(in srgb, var(--c-line) 72%, #bda98c) 50%, color-mix(in srgb, var(--c-surface) 96%, #efe1cc) 50.3% 100%);
-  transform-origin: 50% 50%;
-  animation: pb-book-pick-open .76s cubic-bezier(.25, .7, .2, 1) both;
-}
-@keyframes pb-book-pick-open {
-  0% { opacity: .76; transform: perspective(900px) rotateY(0) scaleX(.9); }
-  55% { opacity: .7; transform: perspective(900px) rotateY(-5deg) scaleX(1); }
-  100% { opacity: 0; transform: perspective(900px) rotateY(0) scaleX(1); }
-}
-
 /* Browsers that support document navigation transitions get a soft dissolve;
    unsupported clients keep normal Next.js navigation. */
 @view-transition { navigation: auto; }
@@ -3859,3 +3852,211 @@ a:hover > .pb-underline::after,
   .anim-read-arrival::before, .anim-rehearse-arrival::before { display: none !important; }
   ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }
 }
+html[data-reduced-motion='true'] .pb-splash-stairs,
+html[data-reduced-motion='true'] .pb-splash-dot-motion,
+html[data-reduced-motion='true'] .pb-splash-word,
+html[data-reduced-motion='true'] .pb-splash-tag,
+html[data-reduced-motion='true'] .pb-splash-petal,
+html[data-reduced-motion='true'] .anim-write-open,
+html[data-reduced-motion='true'] .anim-read-arrival,
+html[data-reduced-motion='true'] .anim-rehearse-arrival::before,
+html[data-reduced-motion='true'] ::view-transition-old(root),
+html[data-reduced-motion='true'] ::view-transition-new(root) { animation: none !important; }
+html[data-reduced-motion='true'] .pb-splash-stairs { stroke-dashoffset: 0 !important; }
+html[data-reduced-motion='true'] .pb-splash-word,
+html[data-reduced-motion='true'] .pb-splash-tag { opacity: 1 !important; }
+html[data-reduced-motion='true'] .pb-splash-petal,
+html[data-reduced-motion='true'] .anim-write-open .pb-writing-paper::before,
+html[data-reduced-motion='true'] .anim-write-open .pb-writing-paper::after { display: none !important; }
+html[data-reduced-motion='true'] .anim-read-arrival,
+html[data-reduced-motion='true'] .anim-rehearse-arrival { opacity: 1 !important; transform: none !important; }
+
+/* ========================= Phase I: the house has rooms ========================= */
+.pb-main { view-transition-name: pb-main; }
+
+::view-transition-group(pb-main) {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(.2, .7, .2, 1);
+}
+::view-transition-old(pb-main) { animation: 150ms ease both pb-room-out; }
+::view-transition-new(pb-main) { animation: 300ms cubic-bezier(.2, .7, .2, 1) both pb-room-in; }
+::view-transition-group(pb-stage-surface) {
+  animation-duration: 440ms;
+  animation-timing-function: cubic-bezier(.2, .72, .22, 1);
+}
+::view-transition-group(pb-work-card) { animation-duration: 320ms; }
+
+@keyframes pb-room-out {
+  to { opacity: .64; transform: translate3d(-4px, 0, 0) scale(.996); }
+}
+@keyframes pb-room-in {
+  from { opacity: .52; transform: translate3d(8px, 5px, 0) scale(.993); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pb-library-to-reader {
+  from { opacity: .48; transform: translate3d(13px, 2px, 0) scale(.992); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pb-reading-to-writing {
+  from { opacity: .56; transform: translate3d(0, 10px, 0) scale(.994); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pb-reading-to-stage {
+  from { opacity: .5; transform: translate3d(0, 12px, 0) scale(.99); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pb-stage-to-reading {
+  from { opacity: .55; transform: translate3d(0, -8px, 0) scale(.995); }
+  to { opacity: 1; transform: none; }
+}
+:root[data-route-transition='library-to-read']::view-transition-new(pb-main) { animation-name: pb-library-to-reader; }
+:root[data-route-transition='read-to-write']::view-transition-new(pb-main) { animation-name: pb-reading-to-writing; }
+:root[data-route-transition='read-to-rehearse']::view-transition-new(pb-main),
+:root[data-route-transition='library-to-rehearse']::view-transition-new(pb-main) { animation-name: pb-reading-to-stage; }
+:root[data-route-transition='rehearse-to-read']::view-transition-new(pb-main) { animation-name: pb-stage-to-reading; }
+
+/* Browser fallback: new rooms still arrive with a small material cue. */
+.pb-page.anim-library-arrival { animation: pb-library-settle 300ms cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes pb-library-settle {
+  from { opacity: .6; transform: translate3d(0, 5px, 0) scale(.997); }
+  to { opacity: 1; transform: none; }
+}
+.anim-library-arrival .pb-card:first-child .pb-card-title { animation: pb-book-title 300ms ease both; }
+@keyframes pb-book-title {
+  from { opacity: .7; transform: translateX(4px); }
+  to { opacity: 1; transform: none; }
+}
+.pb-page.anim-arrivals-arrival { animation: pb-archive-arrive 320ms cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes pb-archive-arrive {
+  from { opacity: .55; transform: translate3d(0, 7px, 0); }
+  to { opacity: 1; transform: none; }
+}
+.pb-archive-door { position: relative; }
+.pb-archive-door::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: clamp(18px, 4vw, 30px);
+  width: min(120px, 26%);
+  height: 2px;
+  background: var(--c-accent-2);
+  transform-origin: left center;
+  animation: pb-archive-drawer 460ms cubic-bezier(.2, .7, .2, 1) both;
+  pointer-events: none;
+}
+@keyframes pb-archive-drawer {
+  from { opacity: 0; transform: scaleX(.08); }
+  54% { opacity: .8; transform: scaleX(1); }
+  to { opacity: .35; transform: scaleX(1); }
+}
+.pb-archive-sheet .pb-arrival-source { animation: pb-archive-file 320ms ease both; }
+@keyframes pb-archive-file {
+  from { opacity: .45; transform: translateX(-5px); }
+  to { opacity: 1; transform: none; }
+}
+.pb-page.anim-themes-arrival { animation: pb-themes-arrive 340ms cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes pb-themes-arrive {
+  from { opacity: .6; transform: translate3d(0, 5px, 0) scale(.996); }
+  to { opacity: 1; transform: none; }
+}
+.pb-theme-dress {
+  background-image: linear-gradient(105deg, color-mix(in srgb, var(--c-accent) 9%, transparent), transparent 64%);
+  background-repeat: no-repeat;
+  background-size: 0% 100%;
+  animation: pb-theme-room-dress 440ms cubic-bezier(.2, .7, .2, 1) both;
+}
+@keyframes pb-theme-room-dress {
+  to { background-size: 100% 100%; }
+}
+.pb-page.anim-author-arrival { animation: pb-author-arrive 300ms cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes pb-author-arrive {
+  from { opacity: .58; transform: translate3d(0, 4px, 0); }
+  to { opacity: 1; transform: none; }
+}
+.pb-author-avatar-arrival { animation: pb-portrait-settle 380ms cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes pb-portrait-settle {
+  from { opacity: .72; transform: scale(.91); box-shadow: 0 0 0 4px color-mix(in srgb, var(--c-accent) 18%, transparent); }
+  to { opacity: 1; transform: none; box-shadow: 0 0 0 0 transparent; }
+}
+.pb-page.anim-admin-arrival { animation: pb-admin-seat 280ms cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes pb-admin-seat {
+  from { opacity: .62; transform: translate3d(0, 4px, 0) scale(.997); }
+  to { opacity: 1; transform: none; }
+}
+.pb-admin-signature { position: relative; overflow: hidden; }
+.pb-admin-signature::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 72px;
+  height: 1px;
+  background: var(--c-accent);
+  transform-origin: left center;
+  animation: pb-admin-register 320ms ease both;
+  pointer-events: none;
+}
+@keyframes pb-admin-register {
+  from { opacity: 0; transform: scaleX(.05); }
+  65% { opacity: .9; transform: scaleX(1); }
+  to { opacity: .35; transform: scaleX(1); }
+}
+.pb-rehearse-hero { position: relative; }
+.pb-rehearse-clapper {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+  color: var(--c-accent);
+  opacity: .62;
+  transform-origin: 18% 82%;
+  animation: pb-clapper-snap 360ms cubic-bezier(.2, .7, .2, 1) both;
+}
+@keyframes pb-clapper-snap {
+  from { opacity: 0; transform: rotate(-16deg) translateY(-3px); }
+  64% { opacity: .7; transform: rotate(4deg); }
+  to { opacity: .62; transform: none; }
+}
+.pb-stage[data-on-stage='true'] { animation: pb-stage-reveal 420ms cubic-bezier(.2, .72, .22, 1) both; }
+@keyframes pb-stage-reveal {
+  from { clip-path: inset(6% 4% round 16px); }
+  to { clip-path: inset(0 round 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(pb-main),
+  ::view-transition-new(pb-main),
+  ::view-transition-group(pb-main),
+  ::view-transition-old(pb-stage-surface),
+  ::view-transition-new(pb-stage-surface),
+  ::view-transition-group(pb-stage-surface) { animation: none !important; }
+  .pb-page.anim-library-arrival,
+  .pb-page.anim-arrivals-arrival,
+  .pb-page.anim-themes-arrival,
+  .pb-page.anim-author-arrival,
+  .pb-page.anim-admin-arrival,
+  .pb-archive-door::after,
+  .pb-archive-sheet .pb-arrival-source,
+  .pb-theme-dress,
+  .pb-author-avatar-arrival,
+  .pb-admin-signature::after,
+  .pb-rehearse-clapper,
+  .pb-stage[data-on-stage='true'] { animation: none !important; }
+}
+html[data-reduced-motion='true'] ::view-transition-old(pb-main),
+html[data-reduced-motion='true'] ::view-transition-new(pb-main),
+html[data-reduced-motion='true'] ::view-transition-group(pb-main),
+html[data-reduced-motion='true'] ::view-transition-old(pb-stage-surface),
+html[data-reduced-motion='true'] ::view-transition-new(pb-stage-surface),
+html[data-reduced-motion='true'] ::view-transition-group(pb-stage-surface) { animation: none !important; }
+html[data-reduced-motion='true'] .pb-page.anim-library-arrival,
+html[data-reduced-motion='true'] .pb-page.anim-arrivals-arrival,
+html[data-reduced-motion='true'] .pb-page.anim-themes-arrival,
+html[data-reduced-motion='true'] .pb-page.anim-author-arrival,
+html[data-reduced-motion='true'] .pb-page.anim-admin-arrival,
+html[data-reduced-motion='true'] .pb-archive-door::after,
+html[data-reduced-motion='true'] .pb-archive-sheet .pb-arrival-source,
+html[data-reduced-motion='true'] .pb-theme-dress,
+html[data-reduced-motion='true'] .pb-author-avatar-arrival,
+html[data-reduced-motion='true'] .pb-admin-signature::after,
+html[data-reduced-motion='true'] .pb-rehearse-clapper,
+html[data-reduced-motion='true'] .pb-stage[data-on-stage='true'] { animation: none !important; }

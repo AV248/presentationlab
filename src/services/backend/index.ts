@@ -4,23 +4,21 @@
  * This is the seam for browser-side Supabase account services; public
  * presentations go through the server-side Turso API instead. Supabase is used
  * for profiles, usernames, roles and account relationships under row-level
- * security. Clerk supplies the verified session. Convex is the separate,
- * optional live layer for presence and activity.
+ * security. Clerk supplies the verified session. Convex is an optional,
+ * bounded safety mirror and is not part of the presentation request path.
  *
  * `loadBackend()` resolves to the Supabase bundle or `null` when those account
  * services are not configured. A missing Supabase project keeps drafts local;
  * it does not redirect presentation reads to a second database.
  */
 
-import { BACKEND_ENABLED, LIVE_ENABLED, BACKEND_PROJECT, backendSummary } from './config';
+import { BACKEND_ENABLED, SAFETY_BACKUP_ENABLED, BACKEND_PROJECT, backendSummary } from './config';
 import { supabaseBundle } from './supabase';
 import * as library from './library';
-import * as live from './live';
 
-export { BACKEND_ENABLED, LIVE_ENABLED, BACKEND_PROJECT, backendSummary };
+export { BACKEND_ENABLED, SAFETY_BACKUP_ENABLED, BACKEND_PROJECT, backendSummary };
 export { setAccessTokenGetter } from './supabase';
-export { setLiveTokenGetter } from './live';
-export { library, live };
+export { library };
 
 export class NotConfiguredError extends Error {
   constructor() {

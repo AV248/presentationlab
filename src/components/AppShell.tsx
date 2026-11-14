@@ -31,6 +31,7 @@ import { fetchSiteFestival, SUPPORT_EMAIL, SUPPORT_URL } from '../services/profi
 import { useCloud } from '../store/cloud';
 import { useAuth } from '../store/auth';
 import { modifierLabel, isApple } from '../lib/platform';
+import { motionRoom } from '../lib/motion';
 
 export interface NavItem {
   to: string;
@@ -147,6 +148,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const current = NAV.find((item) =>
     item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to),
   );
+  const room = motionRoom(location.pathname);
 
   const renderNavLink = (item: NavItem) => (
     <NavLink
@@ -248,7 +250,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </header>
 
-        <main id="main" className="pb-main">
+        <main id="main" className="pb-main" data-room={room}>
           {children}
         </main>
       </div>

@@ -3,8 +3,8 @@
  *
  * The app is written against one seam — `loadBackend()` — and this file decides
  * which of the browser-facing services are configured. Supabase owns profiles,
- * usernames and account relationships; the public presentation library is
- * authoritative in Turso; Convex is live-only and optional.
+ * usernames and account relationships; Turso owns canonical presentations;
+ * Convex is a bounded, optional safety mirror only.
  *
  * The Supabase pair are `VITE_` variables because the browser uses the public
  * anon key under row-level security. The Turso token is **not** here — it lives
@@ -23,8 +23,8 @@ export const CONVEX_URL = clean(env.VITE_CONVEX_URL);
 /** Supabase account/profile services are reachable. The library is checked via /api/library. */
 export const BACKEND_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
-/** The live layer is reachable (optional: nothing durable depends on it). */
-export const LIVE_ENABLED = Boolean(CONVEX_URL);
+/** Convex safety snapshots are available (optional; no reader depends on them). */
+export const SAFETY_BACKUP_ENABLED = Boolean(CONVEX_URL);
 
 /** The same-origin API for Turso-backed presentation reads. */
 export const LIBRARY_ENDPOINT = '/api/library';
@@ -48,7 +48,7 @@ export function backendSummary(): { name: string; configured: boolean; job: stri
   return [
     { name: 'Supabase', configured: BACKEND_ENABLED, job: 'profiles, usernames and account-backed data' },
     { name: 'Turso', configured: true, job: 'authoritative published presentations, reads and search' },
-    { name: 'Convex', configured: LIVE_ENABLED, job: 'the live layer — presence and activity' },
+    { name: 'Convex', configured: SAFETY_BACKUP_ENABLED, job: 'bounded safety snapshots (optional; never a content source)' },
   ];
 }
 

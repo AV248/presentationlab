@@ -1,4 +1,6 @@
 import type { Client } from '@libsql/client';
+import { createHash } from 'node:crypto';
+import { makeSafetySlice } from '../../convex/lib/safetySlice';
 import { ensureLibrarySchema } from './reading';
 import { serverEnv, serverEnvAny } from './env';
 import { TURSO_CONFIGURED, turso } from './turso';
@@ -15,6 +17,8 @@ const MAX_TEXT = 200_000;
 export interface VerifiedIdentity {
   uid: string;
   token: string;
+  /** Optional Clerk JWT-template token used only for the Convex safety mirror. */
+  convexToken?: string;
 }
 
 export interface AuthorProfile {
@@ -66,7 +70,21 @@ export async function verifyClerkRequest(request: Request): Promise<VerifiedIden
       ...(AUTHORIZED_PARTIES.length ? { authorizedParties: AUTHORIZED_PARTIES } : {}),
     })) as { sub?: unknown };
     if (typeof claims.sub !== 'string' || !claims.sub) throw new Error('missing subject');
-    return { uid: claims.sub, token };
+    const uid = claims.sub;
+    let convexToken: string | undefined;
+    const candidate = request.headers.get('x-convex-token')?.trim() ?? '';
+    if (candidate && candidate.length <= 12_000) {
+      try {
+        const convexClaims = (await clerkSdk.verifyToken(candidate, {
+          secretKey: CLERK_SECRET_KEY,
+          ...(AUTHORIZED_PARTIES.length ? { authorizedParties: AUTHORIZED_PARTIES } : {}),
+        })) as { sub?: unknown };
+        if (convexClaims.sub === uid) convexToken = candidate;
+      } catch {
+        // An unavailable/misconfigured Convex template must never block a share.
+      }
+    }
+    return { uid, token, ...(convexToken ? { convexToken } : {}) };
   } catch {
     throw new PresentationError('Your sign-in has expired. Sign in again and retry.', 401, 'invalid_session_token');
   }
@@ -146,6 +164,120 @@ export async function ensurePresentationStore(): Promise<Client> {
   return db;
 }
 
+export interface SafetySampleState {
+  actorUid: string;
+  canonicalCount: number;
+  sampledIds: string[];
+}
+
+export interface SafetySnapshot extends SafetySampleState {
+  presentationId: string;
+  ownerUid: string;
+  selected: boolean;
+  checksum?: string;
+  sourceBytes?: number;
+  recoverySlice?: string;
+  recoveryBytes?: number;
+  byteLimit?: number;
+  updatedAt?: string;
+}
+
+const MAX_SAFETY_SAMPLE_IDS = 20_000;
+
+function assertSafetySampleState(canonicalCount: number, sampledIds: string[]): void {
+  if (!Number.isSafeInteger(canonicalCount) || canonicalCount < 0
+    || sampledIds.length > MAX_SAFETY_SAMPLE_IDS
+    || sampledIds.length > Math.floor(canonicalCount / 100)) {
+    throw new PresentationError('The safety sample is not within its global limit.', 503, 'safety_sample_invalid');
+  }
+}
+
+/** The global sample membership, from Turso's metadata-only selection flags. */
+export async function readSafetySampleState(identity: VerifiedIdentity): Promise<SafetySampleState> {
+  const db = await ensurePresentationStore();
+  const tx = await db.transaction('read');
+  try {
+    const countResult = await tx.execute("select count(*) as n from library where moderation_status = 'published'");
+    const canonicalCount = Number((countResult.rows[0] as Record<string, unknown> | undefined)?.n ?? 0);
+    const selected = await tx.execute(`select id from library
+      where moderation_status = 'published' and source_type = 'person' and safety_sampled = 1
+      order by id`);
+    const sampledIds = selected.rows.map((row) => String((row as Record<string, unknown>).id ?? '')).filter(Boolean);
+    assertSafetySampleState(canonicalCount, sampledIds);
+    await tx.commit();
+    return { actorUid: identity.uid, canonicalCount, sampledIds };
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Return only an author's already-selected recovery slice. The full body stays
+ * in Turso; the signed-in owner cannot submit content to this endpoint.
+ */
+export async function readSafetySnapshot(
+  identity: VerifiedIdentity,
+  presentationId: string,
+): Promise<SafetySnapshot> {
+  if (!/^[\w-]{1,100}$/.test(presentationId)) {
+    throw new PresentationError('The presentation id is invalid.');
+  }
+  const db = await ensurePresentationStore();
+  const tx = await db.transaction('read');
+  try {
+    const countResult = await tx.execute("select count(*) as n from library where moderation_status = 'published'");
+    const canonicalCount = Number((countResult.rows[0] as Record<string, unknown> | undefined)?.n ?? 0);
+    const selected = await tx.execute(`select id from library
+      where moderation_status = 'published' and source_type = 'person' and safety_sampled = 1
+      order by id`);
+    const sampledIds = selected.rows.map((row) => String((row as Record<string, unknown>).id ?? '')).filter(Boolean);
+    assertSafetySampleState(canonicalCount, sampledIds);
+
+    const result = await tx.execute({
+      sql: `select id, uid, content, updated_at from library
+            where id = ? and source_type = 'person' and moderation_status = 'published' limit 1`,
+      args: [presentationId],
+    });
+    const row = result.rows[0] as Record<string, unknown> | undefined;
+    if (!row) throw new PresentationError('That published presentation is not available for a safety snapshot.', 404, 'safety_source_unavailable');
+    if (String(row.uid ?? '') !== identity.uid) {
+      throw new PresentationError('Only the presentation owner can request its safety slice.', 403, 'not_author');
+    }
+
+    const response: SafetySnapshot = {
+      actorUid: identity.uid,
+      ownerUid: identity.uid,
+      presentationId,
+      canonicalCount,
+      sampledIds,
+      selected: sampledIds.includes(presentationId),
+    };
+    if (response.selected) {
+      const content = String(row.content ?? '');
+      if (content.length > MAX_TEXT) {
+        throw new PresentationError('This presentation is outside the safety mirror size limit.', 413, 'safety_source_too_large');
+      }
+      const slice = makeSafetySlice(content);
+      response.checksum = createHash('sha256').update(content, 'utf8').digest('hex');
+      response.sourceBytes = slice.sourceBytes;
+      response.recoverySlice = slice.recoverySlice;
+      response.recoveryBytes = slice.recoveryBytes;
+      response.byteLimit = slice.byteLimit;
+      response.updatedAt = String(row.updated_at ?? '').slice(0, 40) || new Date().toISOString();
+    }
+    await tx.commit();
+    return response;
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  } finally {
+    db.close();
+  }
+}
+
 export function normalizeShareInput(value: unknown): ShareInput {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new PresentationError('The share details are missing.');
@@ -194,8 +326,9 @@ export async function publishPresentation(
   const db = await ensurePresentationStore();
   const id = input.id ?? crypto.randomUUID();
   const now = new Date().toISOString();
+  const tx = await db.transaction('write');
   try {
-    await db.execute({
+    await tx.execute({
       sql: `insert into library (
         id, uid, username, folder, slug, title, author, author_photo_url, author_badges,
         preview, content, category, occasion, tags, credits, signature, allow_copy,
@@ -209,8 +342,21 @@ export async function publishPresentation(
         input.allowCopy === false ? 0 : 1, 'person', '', '', '', 0, 0, 0, 0, now, now,
       ],
     });
+    await tx.execute({
+      sql: `insert into presentation_versions (
+        presentation_id, version, title, preview, content, category, credits,
+        folder, slug, allow_copy, created_by, created_at, change_note
+      ) values (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')`,
+      args: [
+        id, input.title, input.preview ?? '', input.content, input.category || 'General',
+        input.credits ?? '', input.folder ?? '', input.slug ?? '',
+        input.allowCopy === false ? 0 : 1, identity.uid, now,
+      ],
+    });
+    await tx.commit();
     return id;
   } catch (error) {
+    await tx.rollback();
     const message = (error as Error).message ?? '';
     if (/unique constraint failed/i.test(message)) {
       throw new PresentationError('That presentation address is already in use. Choose a different title or link.', 409, 'address_taken');
@@ -232,58 +378,136 @@ export async function updatePresentation(
   const db = await ensurePresentationStore();
   try {
     const prior = await db.execute({
-      sql: 'select id, uid from library where id = ? limit 1',
+      sql: 'select uid from library where id = ? limit 1',
       args: [input.id],
     });
-    const row = prior.rows[0] as Record<string, unknown> | undefined;
-    if (!row) throw new PresentationError('That shared presentation no longer exists.', 404, 'not_found');
-    const admin = String(row.uid ?? '') !== identity.uid && await isAdministrator(identity);
-    if (String(row.uid ?? '') !== identity.uid && !admin) {
+    const priorRow = prior.rows[0] as Record<string, unknown> | undefined;
+    if (!priorRow) throw new PresentationError('That shared presentation no longer exists.', 404, 'not_found');
+    const ownerUid = String(priorRow.uid ?? '');
+    const admin = ownerUid !== identity.uid && await isAdministrator(identity);
+    if (ownerUid !== identity.uid && !admin) {
       throw new PresentationError('Only its author can change this presentation.', 403, 'not_author');
     }
 
-    await db.execute({
-      sql: `update library set
-        username = ?, folder = ?, slug = ?, title = ?, author = ?, author_photo_url = ?,
-        author_badges = ?, preview = ?, content = ?, category = ?, credits = ?,
-        signature = ?, allow_copy = ?, updated_at = ? where id = ?`,
-      args: [
-        profile.username, input.folder ?? '', input.slug ?? '', input.title, profile.displayName,
-        profile.photoURL, profile.badges.join(','), input.preview ?? '', input.content,
-        input.category || 'General', input.credits ?? '', profile.signature,
-        input.allowCopy === false ? 0 : 1, new Date().toISOString(), input.id,
-      ],
-    });
+    const tx = await db.transaction('write');
+    try {
+      const latest = await tx.execute({
+        sql: `select title, preview, content, category, credits, folder, slug, allow_copy,
+                     uid, published_at, updated_at
+              from library where id = ? limit 1`,
+        args: [input.id],
+      });
+      const row = latest.rows[0] as Record<string, unknown> | undefined;
+      if (!row) throw new PresentationError('That shared presentation no longer exists.', 404, 'not_found');
+      if (String(row.uid ?? '') !== ownerUid) {
+        throw new PresentationError('The presentation owner changed; retry the update.', 409, 'owner_changed');
+      }
+
+      const next = {
+        title: input.title,
+        preview: input.preview ?? '',
+        content: input.content,
+        category: input.category || 'General',
+        credits: input.credits ?? '',
+        folder: input.folder ?? '',
+        slug: input.slug ?? '',
+        allowCopy: input.allowCopy !== false,
+      };
+      const changed = String(row.title ?? '') !== next.title
+        || String(row.preview ?? '') !== next.preview
+        || String(row.content ?? '') !== next.content
+        || String(row.category ?? '') !== next.category
+        || String(row.credits ?? '') !== next.credits
+        || String(row.folder ?? '') !== next.folder
+        || String(row.slug ?? '') !== next.slug
+        || (Number(row.allow_copy ?? 1) !== 0) !== next.allowCopy;
+
+      if (changed) {
+        const latestVersion = await tx.execute({
+          sql: 'select coalesce(max(version), 0) as version from presentation_versions where presentation_id = ?',
+          args: [input.id],
+        });
+        let version = Number((latestVersion.rows[0] as Record<string, unknown> | undefined)?.version ?? 0);
+        const now = new Date().toISOString();
+        if (version === 0) {
+          // A legacy presentation has no version history yet; preserve its
+          // current canonical state as version one before recording this edit.
+          await tx.execute({
+            sql: `insert into presentation_versions (
+              presentation_id, version, title, preview, content, category, credits,
+              folder, slug, allow_copy, created_by, created_at, change_note
+            ) values (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Imported baseline')`,
+            args: [
+              input.id, String(row.title ?? ''), String(row.preview ?? ''), String(row.content ?? ''),
+              String(row.category ?? ''), String(row.credits ?? ''), String(row.folder ?? ''),
+              String(row.slug ?? ''), Number(row.allow_copy ?? 1) === 0 ? 0 : 1,
+              ownerUid, String(row.updated_at ?? row.published_at ?? now),
+            ],
+          });
+          version = 1;
+        }
+        await tx.execute({
+          sql: `insert into presentation_versions (
+            presentation_id, version, title, preview, content, category, credits,
+            folder, slug, allow_copy, created_by, created_at, change_note
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')`,
+          args: [
+            input.id, version + 1, next.title, next.preview, next.content, next.category,
+            next.credits, next.folder, next.slug, next.allowCopy ? 1 : 0, identity.uid, now,
+          ],
+        });
+      }
+
+      await tx.execute({
+        sql: `update library set
+          username = ?, folder = ?, slug = ?, title = ?, author = ?, author_photo_url = ?,
+          author_badges = ?, preview = ?, content = ?, category = ?, credits = ?,
+          signature = ?, allow_copy = ?, updated_at = ? where id = ?`,
+        args: [
+          profile.username, next.folder, next.slug, next.title, profile.displayName,
+          profile.photoURL, profile.badges.join(','), next.preview, next.content,
+          next.category, next.credits, profile.signature,
+          next.allowCopy ? 1 : 0, new Date().toISOString(), input.id,
+        ],
+      });
+      await tx.commit();
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
   } catch (error) {
     if (error instanceof PresentationError) throw error;
     if (/unique constraint failed/i.test((error as Error).message ?? '')) {
       throw new PresentationError('That presentation address is already in use.', 409, 'address_taken');
     }
-    throw new PresentationError('The presentation could not be updated. Try again.', 502, 'write_failed');
+    throw new PresentationError('The presentation could not be updated. Try again.', 502, 'update_failed');
   } finally {
     db.close();
   }
 }
 
-export async function deletePresentation(identity: VerifiedIdentity, id: string): Promise<void> {
+export async function deletePresentation(identity: VerifiedIdentity, id: string): Promise<boolean> {
   const db = await ensurePresentationStore();
   try {
     const result = await db.execute({ sql: 'select uid from library where id = ? limit 1', args: [id] });
     const row = result.rows[0] as Record<string, unknown> | undefined;
-    if (!row) return;
-    const admin = String(row.uid ?? '') !== identity.uid && await isAdministrator(identity);
-    if (String(row.uid ?? '') !== identity.uid && !admin) {
+    if (!row) return false;
+    const ownerUid = String(row.uid ?? '');
+    const admin = ownerUid !== identity.uid && await isAdministrator(identity);
+    if (ownerUid !== identity.uid && !admin) {
       throw new PresentationError('Only its author can remove this presentation.', 403, 'not_author');
     }
     const tx = await db.transaction('write');
     try {
       await tx.execute({ sql: 'delete from presentation_views where speech_id = ?', args: [id] });
+      await tx.execute({ sql: 'delete from presentation_versions where presentation_id = ?', args: [id] });
       await tx.execute({ sql: 'delete from library where id = ?', args: [id] });
       await tx.commit();
     } catch (error) {
       await tx.rollback();
       throw error;
     }
+    return ownerUid === identity.uid;
   } catch (error) {
     if (error instanceof PresentationError) throw error;
     throw new PresentationError('The presentation could not be removed. Try again.', 502, 'delete_failed');
@@ -303,14 +527,14 @@ export async function countPresentationView(
     const tx = await db.transaction('write');
     try {
       const result = await tx.execute({
-        sql: 'insert or ignore into presentation_views (speech_id, session_id, view_day, created_at) select ?, ?, ?, ? where exists (select 1 from library where id = ?)',
+        sql: "insert or ignore into presentation_views (speech_id, session_id, view_day, created_at) select ?, ?, ?, ? where exists (select 1 from library where id = ? and moderation_status = 'published')",
         args: [id, sessionId, day, now, id],
       });
       const counted = result.rowsAffected > 0;
       if (counted) {
         await tx.execute({ sql: 'update library set views = views + 1 where id = ?', args: [id] });
       }
-      const total = await tx.execute({ sql: 'select views from library where id = ?', args: [id] });
+      const total = await tx.execute({ sql: "select views from library where id = ? and moderation_status = 'published'", args: [id] });
       const views = Number((total.rows[0] as Record<string, unknown> | undefined)?.views ?? 0);
       await tx.commit();
       return { counted, views };

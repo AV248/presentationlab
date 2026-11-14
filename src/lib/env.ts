@@ -33,7 +33,7 @@ export const env = {
   /** Postgres: the truth, talked to directly under row-level security. */
   VITE_SUPABASE_URL: raw.VITE_SUPABASE_URL,
   VITE_SUPABASE_ANON_KEY: raw.VITE_SUPABASE_ANON_KEY,
-  /** The live layer. Optional: without it the site is quieter, not broken. */
+  /** Optional Convex safety mirror; never a live content dependency. */
   VITE_CONVEX_URL: raw.VITE_CONVEX_URL,
 
   /**

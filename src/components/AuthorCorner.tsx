@@ -39,6 +39,8 @@ export interface AuthorCornerProps {
   sourceURL?: string;
   badges?: string[];
   compact?: boolean;
+  /** One restrained portrait reveal on a profile or reading-room arrival. */
+  arrival?: boolean;
 }
 
 function safeHttpsUrl(value?: string): string {
@@ -60,6 +62,7 @@ export function AuthorCorner({
   sourceURL,
   badges,
   compact = false,
+  arrival = false,
 }: AuthorCornerProps) {
   const displayName = (sourceType === 'archive' ? sourceName : '')?.trim() || author.trim() || 'Anonymous';
   const initials = displayName.split(/\s+/).slice(0, 2).map((part) => part[0] ?? '').join('').toUpperCase() || 'PB';
@@ -70,7 +73,7 @@ export function AuthorCorner({
 
   const corner = (
     <span className={`pb-author-corner${compact ? ' pb-author-corner-compact' : ''}`}>
-      <span className="pb-author-avatar" aria-hidden="true">
+      <span className={`pb-author-avatar${arrival ? ' pb-author-avatar-arrival' : ''}`} aria-hidden="true">
         {image && !imageFailed
           ? <img src={image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setImageFailed(true)} />
           : <span>{initials}</span>}

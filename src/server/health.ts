@@ -279,16 +279,15 @@ async function checkReadingRoom(): Promise<Check> {
 }
 
 /**
- * Convex — the live layer.
+ * Convex — the optional safety mirror.
  *
- * Reachability only. It is optional, there is nothing to repair if it is quiet,
- * and a probe that needs a JWT to be meaningful would be reporting on Convex's
- * auth rather than on this deployment's configuration.
+ * Reachability only. It is never a presentation read path, and a missing
+ * mirror does not affect the canonical Turso library.
  */
 async function checkLive(): Promise<Check> {
   const base: Pick<Check, 'id' | 'title' | 'vars'> = {
     id: 'live',
-    title: 'Convex — the live layer (optional)',
+    title: 'Convex — bounded safety mirror (optional)',
     vars: ['VITE_CONVEX_URL'],
   };
   const url = serverEnv('VITE_CONVEX_URL').replace(/\/+$/, '');
@@ -297,7 +296,7 @@ async function checkLive(): Promise<Check> {
     return {
       ...base,
       status: 'optional',
-      detail: 'Not configured. Presence ("3 people reading") and the live activity ticker are quiet; nothing else changes.',
+      detail: 'Not configured. No optional safety snapshots are kept; Turso remains the sole canonical store.',
     };
   }
 
@@ -314,8 +313,8 @@ async function checkLive(): Promise<Check> {
       ...base,
       status: 'optional',
       ms,
-      detail: 'The deployment URL is set but nothing answered. The live layer stays quiet.',
-      fix: 'Check that VITE_CONVEX_URL is the deployment URL from npx convex deploy, then redeploy.',
+      detail: 'The safety deployment URL is set but nothing answered. Canonical presentation reads and writes still use Turso.',
+      fix: 'Check that VITE_CONVEX_URL is the Convex deployment URL, then redeploy.',
     };
   }
   return {
@@ -378,8 +377,8 @@ function checkSite(origin: string): Check {
  * The services needed for the full authoring and reading experience.
  *
  * Clerk verifies sessions, Supabase owns profiles and usernames, and Turso is
- * the single presentation store. Convex presence and the canonical origin are
- * useful but have graceful fallbacks, so they are not counted as faults.
+ * the single presentation store. The optional Convex safety mirror and the
+ * canonical origin have graceful fallbacks, so they are not counted as faults.
  */
 const CRITICAL: ReadonlySet<Check['id']> = new Set<Check['id']>(['clerk', 'profiles', 'reading-room']);
 
@@ -406,9 +405,9 @@ export async function healthReport(origin: string): Promise<HealthReport> {
    *
    * A missing critical piece and a missing optional piece are both "missing",
    * and they mean different things: without Clerk, Supabase profiles or Turso,
-   * sign-in, identity or the shared library cannot do their job. Convex and the
-   * canonical origin have graceful fallbacks; counting those alongside a core
-   * outage would report a broken deployment as merely degraded.
+   * sign-in, identity or the shared library cannot do their job. The optional
+   * Convex safety mirror and canonical origin have graceful fallbacks; counting
+   * those alongside a core outage would report a broken deployment as merely degraded.
    */
   const failing = checks.filter((check) => check.critical && check.status !== 'ok');
   const optional = checks.filter((check) => !check.critical && check.status !== 'ok');

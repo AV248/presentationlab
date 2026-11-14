@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { Link, useParams } from '@/lib/router';
 import {
   ChevronDown,
@@ -33,6 +34,7 @@ import { AFTER_PRACTICE, LETTER_PROMPTS, breathPhase, pick } from '../lib/heart'
 import { pageMetaFor } from '../data/routes';
 import { SITE_URL } from '../lib/seo';
 import { usePageMeta } from '../lib/usePageMeta';
+import { presentationViewName, startElementTransition } from '../lib/motion';
 
 /**
  * The Rehearsal Room — the centre of this app.
@@ -206,8 +208,12 @@ export function PracticePage() {
   }, [onStage, running, wakeChrome]);
 
   const enterStage = useCallback(async () => {
-    setOnStage(true);
-    const next = await toggleFullscreen(stageRef.current ?? undefined);
+    // Request fullscreen synchronously inside the user's gesture, then let the
+    // named stage surface expand through a native view transition where safe.
+    const fullscreenRequest = toggleFullscreen(stageRef.current ?? undefined);
+    const showStage = () => flushSync(() => setOnStage(true));
+    if (!startElementTransition('stage', showStage)) showStage();
+    const next = await fullscreenRequest;
     setFullscreen(next);
     if (!running && countdown === 0 && offset === 0) restart();
   }, [countdown, offset, restart, running]);
@@ -218,7 +224,8 @@ export function PracticePage() {
       await toggleFullscreen(stageRef.current ?? undefined);
     }
     setFullscreen(false);
-    setOnStage(false);
+    const hideStage = () => flushSync(() => setOnStage(false));
+    if (!startElementTransition('stage-return', hideStage)) hideStage();
     setChromeVisible(true);
   }, [stop]);
 
@@ -300,6 +307,7 @@ export function PracticePage() {
     <div
       ref={stageRef}
       className="pb-stage"
+      style={{ viewTransitionName: 'pb-stage-surface' }}
       data-on-stage={onStage}
       data-chrome={chromeVisible}
       onMouseMove={onStage ? wakeChrome : undefined}
@@ -468,6 +476,7 @@ export function PracticePage() {
           items={items}
           selectedId={selectedId}
           onSelect={setSelectedId}
+          presentationId={item.id}
           title={item.title}
           minutes={Math.max(1, Math.round(targetSeconds / 60))}
           words={words}
@@ -593,6 +602,7 @@ function RehearseHero({
   selectedId,
   onSelect,
   title,
+  presentationId,
   minutes,
   words,
   onStart,
@@ -601,15 +611,22 @@ function RehearseHero({
   selectedId: string;
   onSelect: (id: string) => void;
   title?: string;
+  presentationId?: string;
   minutes?: number;
   words?: number;
   onStart?: () => void;
 }) {
   return (
-    <section className="pb-panel pb-rehearse-hero anim-enter">
+    <section className="pb-panel pb-rehearse-hero pb-clapper-snap anim-enter">
+      <span className="pb-rehearse-clapper" aria-hidden="true"><Clapperboard size={18} /></span>
       <div className="pb-rehearse-hero-text">
         <span className="pb-eyebrow">The Rehearsal Room</span>
-        <h1 className="pb-page-title">{title ?? 'Say it out loud, before it counts'}</h1>
+        <h1
+          className="pb-page-title"
+          style={presentationId ? { viewTransitionName: presentationViewName(presentationId) } : undefined}
+        >
+          {title ?? 'Say it out loud, before it counts'}
+        </h1>
         <p className="pb-page-sub">
           {title
             ? `${words?.toLocaleString()} words · about ${minutes} minute${minutes === 1 ? '' : 's'} at your pace. Go full screen and let it run.`

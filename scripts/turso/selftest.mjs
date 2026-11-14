@@ -108,6 +108,262 @@ try {
   expect('turso/schema.sql applies to an empty database', objects.rows.length === 2, `found ${objects.rows.length} of 2 objects`);
   await db.close();
 
+  // A pre-existing Turso table cannot create an index on fields that have not
+  // been added yet. Exercise the additive upgrade against the prior shape.
+  const LEGACY_DB_URL = 'file:./node_modules/.pb-selftest/legacy.db';
+  let legacy = createClient({ url: LEGACY_DB_URL });
+  await legacy.execute(`create table library (
+    id text primary key, uid text not null, username text not null default '',
+    folder text not null default '', slug text not null default '',
+    title text not null default 'Untitled', author text not null default '',
+    author_photo_url text not null default '', author_badges text not null default '',
+    preview text not null default '', content text not null default '',
+    category text not null default '', occasion text not null default '',
+    tags text not null default '', credits text not null default '',
+    signature text not null default '', allow_copy integer not null default 1,
+    source_type text not null default 'person', source_name text not null default '',
+    source_url text not null default '', license text not null default '',
+    views integer not null default 0, likes integer not null default 0,
+    dislikes integer not null default 0, shares integer not null default 0,
+    published_at text not null default '', updated_at text not null default ''
+  )`);
+  await legacy.execute({
+    sql: `insert into library (id, uid, username, slug, title, content, published_at)
+          values ('legacy-row', 'u1', 'aavrit', 'legacy', 'Preserved title', 'Preserved body', '2026-10-01T00:00:00Z')`,
+  });
+  await legacy.batch(Array.from({ length: 199 }, (_, index) => ({
+    sql: `insert into library (id, uid, username, slug, title, content, published_at)
+          values (?, 'u1', 'writer', ?, ?, 'Legacy body', ?)` ,
+    args: [
+      `legacy-seed-${String(index + 1).padStart(3, '0')}`,
+      `legacy-${index + 1}`,
+      `Legacy ${index + 1}`,
+      `2026-09-01T00:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}Z`,
+    ],
+  })), 'write');
+  await legacy.close();
+  execFileSync(process.execPath, [resolve(ROOT, 'scripts/turso/apply.mjs')], {
+    env: { ...process.env, TURSO_DATABASE_URL: LEGACY_DB_URL, TURSO_AUTH_TOKEN: '' },
+    stdio: 'pipe',
+  });
+  legacy = createClient({ url: LEGACY_DB_URL });
+  const upgradedColumns = await legacy.execute('pragma table_info(library)');
+  const upgradedNames = new Set(upgradedColumns.rows.map((row) => String(row.name)));
+  const upgradedIndexes = await legacy.execute(`
+    select name from sqlite_master where type = 'index'
+      and name in ('library_public_recent_idx', 'library_official_idx')`);
+  const preservedRow = await legacy.execute(`select title, content from library where id = 'legacy-row'`);
+  expect(
+    'an older library upgrades its new moderation/provenance columns without losing content',
+    ['source_title', 'source_fetched_at', 'official_slug', 'source_item_id', 'moderation_status', 'moderation_note', 'featured', 'safety_sampled'].every((name) => upgradedNames.has(name))
+      && preservedRow.rows[0]?.title === 'Preserved title'
+      && preservedRow.rows[0]?.content === 'Preserved body',
+    `columns=${[...upgradedNames].join(', ')}`,
+  );
+  expect('new moderation indexes are created after the additive upgrade', upgradedIndexes.rows.length === 2, `found ${upgradedIndexes.rows.length}/2`);
+  const legacySampleCount = await legacy.execute('select count(*) as n from library where safety_sampled = 1');
+  expect('an additive upgrade backfills only the one-in-one-hundred legacy cohort', Number(legacySampleCount.rows[0]?.n) === 2, `got ${legacySampleCount.rows[0]?.n}`);
+  const legacyFts = await legacy.execute({
+    sql: `select library.id from library_fts join library on library.rowid = library_fts.rowid
+          where library_fts match ? and library.id = 'legacy-row'`,
+    args: ['"preserved"'],
+  });
+  expect('FTS remains readable after the safety-column upgrade and cohort backfill', legacyFts.rows.length === 1 && legacyFts.rows[0]?.id === 'legacy-row', `got ${legacyFts.rows.length} match(es)`);
+  const initialLegacyMembership = await legacy.execute('select id from library where safety_sampled = 1 order by published_at, id');
+  expect('legacy backfill chooses the two oldest eligible personal works',
+    initialLegacyMembership.rows.length === 2
+      && initialLegacyMembership.rows[0]?.id === 'legacy-seed-001'
+      && initialLegacyMembership.rows[1]?.id === 'legacy-seed-002');
+
+  // Simulate an installation with the prior same-name admission trigger and
+  // no current migration marker. The additive upgrade must replace the trigger
+  // and repair the cohort after a newly inserted older legacy work.
+  await legacy.execute('delete from turso_schema_migrations where version = 2');
+  await legacy.execute('drop trigger if exists library_safety_sample_ai');
+  await legacy.execute(`create trigger library_safety_sample_ai after insert on library
+    when new.moderation_status = 'published' and new.source_type = 'person' and new.safety_sampled = 0
+    begin
+      update library set safety_sampled = 1 where id = new.id
+        and (select count(*) / 100 from library where moderation_status = 'published')
+          > (select count(*) from library where moderation_status = 'published' and source_type = 'person' and safety_sampled = 1);
+    end`);
+  await legacy.execute({
+    sql: `insert into library (id, uid, username, slug, title, content, published_at, updated_at)
+          values ('legacy-ancient', 'u1', 'writer', 'legacy-ancient', 'Ancient', 'Ancient body', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`,
+  });
+  await legacy.close();
+  execFileSync(process.execPath, [resolve(ROOT, 'scripts/turso/apply.mjs')], {
+    env: { ...process.env, TURSO_DATABASE_URL: LEGACY_DB_URL, TURSO_AUTH_TOKEN: '' },
+    stdio: 'pipe',
+  });
+  legacy = createClient({ url: LEGACY_DB_URL });
+  const upgradedLegacyMembership = await legacy.execute('select id from library where safety_sampled = 1 order by published_at, id');
+  const samplingVersion = await legacy.execute('select count(*) as n from turso_schema_migrations where version = 2');
+  expect('the trigger migration replaces the old algorithm and reselects the oldest cohort',
+    Number(samplingVersion.rows[0]?.n) === 1
+      && upgradedLegacyMembership.rows.length === 2
+      && upgradedLegacyMembership.rows[0]?.id === 'legacy-ancient'
+      && upgradedLegacyMembership.rows[1]?.id === 'legacy-seed-001',
+    JSON.stringify(upgradedLegacyMembership.rows.map((row) => row.id)));
+  const migratedFts = await legacy.execute({
+    sql: `select library.id from library_fts join library on library.rowid = library_fts.rowid
+          where library_fts match ? and library.id = 'legacy-row'`,
+    args: ['"preserved"'],
+  });
+  expect('FTS stays readable after the one-time cohort-trigger migration', migratedFts.rows.length === 1);
+  await legacy.close();
+
+  // The global safety cohort admits at most one personal presentation per
+  // hundred published rows. This also exercises sample rebalancing on deletion.
+  const SAMPLE_DB_URL = 'file:./node_modules/.pb-selftest/sampling.db';
+  execFileSync(process.execPath, [resolve(ROOT, 'scripts/turso/apply.mjs')], {
+    env: { ...process.env, TURSO_DATABASE_URL: SAMPLE_DB_URL, TURSO_AUTH_TOKEN: '' },
+    stdio: 'pipe',
+  });
+  const sampledDb = createClient({ url: SAMPLE_DB_URL });
+  const sampleInsert = (index) => ({
+    sql: `insert into library (id, uid, username, slug, title, content, source_type,
+          moderation_status, published_at, updated_at)
+          values (?, 'owner', 'writer', ?, ?, 'Body', 'person', 'published', ?, ?)` ,
+    args: [
+      `sample-${String(index).padStart(3, '0')}`,
+      `sample-${index}`,
+      `Sample ${index}`,
+      `2026-10-01T00:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}Z`,
+      '2026-10-01T00:00:00Z',
+    ],
+  });
+  await sampledDb.batch(Array.from({ length: 99 }, (_, index) => sampleInsert(index + 1)), 'write');
+  let sampleCount = await sampledDb.execute('select count(*) as n from library where safety_sampled = 1');
+  expect('the global recovery sample stays empty below 100 canonical presentations', Number(sampleCount.rows[0]?.n) === 0);
+  await sampledDb.execute(sampleInsert(100));
+  let sampleRows = await sampledDb.execute('select id from library where safety_sampled = 1 order by id');
+  expect('the 100th published presentation opens one slot for the oldest eligible personal work', sampleRows.rows.length === 1 && sampleRows.rows[0]?.id === 'sample-001');
+  await sampledDb.batch(Array.from({ length: 100 }, (_, index) => sampleInsert(index + 101)), 'write');
+  sampleRows = await sampledDb.execute('select id from library where safety_sampled = 1 order by id');
+  expect('the 200th canonical presentation opens a second slot for the next-oldest personal work', sampleRows.rows.length === 2 && sampleRows.rows[0]?.id === 'sample-001' && sampleRows.rows[1]?.id === 'sample-002');
+  await sampledDb.execute({ sql: "update library set moderation_status = 'hidden' where id = 'sample-001'" });
+  sampleRows = await sampledDb.execute('select id from library where safety_sampled = 1 order by id');
+  expect('unpublishing a sampled work clears it and backfills the oldest remaining eligible work', sampleRows.rows.length === 1 && sampleRows.rows[0]?.id === 'sample-002');
+  await sampledDb.execute({ sql: "update library set moderation_status = 'published' where id = 'sample-001'" });
+  sampleRows = await sampledDb.execute('select id from library where safety_sampled = 1 order by id');
+  expect('republishing an older work restores oldest-first cohort membership', sampleRows.rows.length === 2 && sampleRows.rows[0]?.id === 'sample-001' && sampleRows.rows[1]?.id === 'sample-002');
+  await sampledDb.execute({ sql: "update library set source_type = 'official' where id = 'sample-001'" });
+  sampleRows = await sampledDb.execute('select id from library where safety_sampled = 1 order by id');
+  expect('changing a sampled work to an official source clears it and backfills another personal work', sampleRows.rows.length === 2 && sampleRows.rows[0]?.id === 'sample-002' && sampleRows.rows[1]?.id === 'sample-003');
+  await sampledDb.execute({ sql: "update library set source_type = 'person' where id = 'sample-001'" });
+  sampleRows = await sampledDb.execute('select id from library where safety_sampled = 1 order by id');
+  expect('returning an older work to personal provenance restores oldest-first membership', sampleRows.rows.length === 2 && sampleRows.rows[0]?.id === 'sample-001' && sampleRows.rows[1]?.id === 'sample-002');
+  await sampledDb.execute({ sql: 'delete from library where id = ?', args: ['sample-200'] });
+  sampleRows = await sampledDb.execute('select id from library where safety_sampled = 1 order by id');
+  expect('deleting an unsampled canonical row trims the cohort when its quota shrinks', sampleRows.rows.length === 1 && sampleRows.rows[0]?.id === 'sample-001');
+  await sampledDb.execute("delete from library where id >= 'sample-100' and id <= 'sample-199'");
+  sampleCount = await sampledDb.execute('select count(*) as n from library where safety_sampled = 1');
+  let remaining = await sampledDb.execute("select count(*) as n from library where moderation_status = 'published'");
+  expect('deletions below 100 remove every global safety marker', Number(remaining.rows[0]?.n) === 99 && Number(sampleCount.rows[0]?.n) === 0);
+  await sampledDb.execute({
+    sql: `insert into library (id, uid, username, title, content, source_type, moderation_status, published_at, updated_at)
+          values ('official-100', 'archive', 'wikisource', 'Official source', 'Body', 'official', 'published', '2026-10-02T00:00:00Z', '2026-10-02T00:00:00Z')`,
+  });
+  sampleRows = await sampledDb.execute('select id from library where safety_sampled = 1 order by id');
+  expect('a published official row opening the 100th slot selects the oldest eligible personal work', sampleRows.rows.length === 1 && sampleRows.rows[0]?.id === 'sample-001');
+  await sampledDb.execute({ sql: "update library set moderation_status = 'hidden' where id = 'official-100'" });
+  sampleRows = await sampledDb.execute('select id from library where safety_sampled = 1 order by id');
+  remaining = await sampledDb.execute("select count(*) as n from library where moderation_status = 'published'");
+  expect('unpublishing the denominator row closes the slot and clears its personal snapshot', Number(remaining.rows[0]?.n) === 99 && sampleRows.rows.length === 0, JSON.stringify({ remaining: remaining.rows[0]?.n, samples: sampleRows.rows.map((row) => row.id) }));
+  await sampledDb.execute({
+    sql: `insert into library (id, uid, username, slug, title, content, source_type, moderation_status, published_at, updated_at)
+          values ('sample-ancient', 'owner', 'writer', 'sample-ancient', 'Ancient personal work', 'Ancient body searchable text', 'person', 'published', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`,
+  });
+  sampleRows = await sampledDb.execute('select id from library where safety_sampled = 1 order by published_at, id');
+  expect('a newly inserted oldest work displaces newer markers immediately', sampleRows.rows.length === 1 && sampleRows.rows[0]?.id === 'sample-ancient');
+  const newlySampledFts = await sampledDb.execute({
+    sql: `select library.id from library_fts join library on library.rowid = library_fts.rowid
+          where library_fts match ? and library.id = 'sample-ancient'`,
+    args: ['"ancient"'],
+  });
+  expect('FTS remains readable when the insert trigger immediately samples its new row', newlySampledFts.rows.length === 1);
+  await sampledDb.close();
+
+  // Exercise the canonical share/edit transaction and its Turso version log.
+  const VERSION_DB_URL = 'file:./node_modules/.pb-selftest/versions.db';
+  process.env.TURSO_DATABASE_URL = VERSION_DB_URL;
+  process.env.TURSO_AUTH_TOKEN = 'unused';
+  const presentations = await bundle('src/server/presentations.ts', 'presentation-versions.mjs');
+  const identity = { uid: 'writer-1', token: 'test-session' };
+  const profile = { uid: 'writer-1', username: 'writer', displayName: 'Writer', photoURL: '', signature: '', badges: [] };
+  const initial = presentations.normalizeShareInput({ title: 'First address', content: 'First canonical text.' });
+  const presentationId = await presentations.publishPresentation(identity, profile, initial);
+  let versionDb = createClient({ url: VERSION_DB_URL });
+  let versions = await versionDb.execute({
+    sql: 'select version, title, content from presentation_versions where presentation_id = ? order by version',
+    args: [presentationId],
+  });
+  expect('a first share records canonical version one in the same Turso transaction',
+    versions.rows.length === 1 && Number(versions.rows[0]?.version) === 1 && versions.rows[0]?.content === 'First canonical text.');
+  const revised = presentations.normalizeShareInput({
+    id: presentationId, title: 'Revised address', content: 'Second canonical text.', category: 'General',
+  });
+  await presentations.updatePresentation(identity, profile, { ...revised, id: presentationId });
+  versions = await versionDb.execute({
+    sql: 'select version, title, content from presentation_versions where presentation_id = ? order by version',
+    args: [presentationId],
+  });
+  expect('an edit preserves a second immutable canonical version',
+    versions.rows.length === 2 && Number(versions.rows[1]?.version) === 2
+      && versions.rows[0]?.content === 'First canonical text.'
+      && versions.rows[1]?.content === 'Second canonical text.');
+  await presentations.updatePresentation(identity, profile, { ...revised, id: presentationId });
+  const unchangedVersions = await versionDb.execute({
+    sql: 'select count(*) as n from presentation_versions where presentation_id = ?',
+    args: [presentationId],
+  });
+  expect('a no-op Share does not create a duplicate version', Number(unchangedVersions.rows[0]?.n) === 2);
+  await presentations.deletePresentation(identity, presentationId);
+  const deletedVersions = await versionDb.execute({
+    sql: 'select count(*) as n from presentation_versions where presentation_id = ?',
+    args: [presentationId],
+  });
+  expect('deleting a presentation also removes its private version history', Number(deletedVersions.rows[0]?.n) === 0);
+
+  await versionDb.execute({
+    sql: `insert into library (
+      id, uid, username, slug, title, preview, content, category, credits, folder,
+      allow_copy, published_at, updated_at
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      'legacy-version-row', 'writer-1', 'writer', 'legacy-work', 'Old legacy title',
+      'Old legacy preview', 'Old legacy content.', 'Legacy category', 'Old credits', '',
+      1, '2025-01-01T00:00:00.000Z', '2025-01-02T00:00:00.000Z',
+    ],
+  });
+  const legacyEdit = presentations.normalizeShareInput({
+    id: 'legacy-version-row', title: 'Updated legacy title', content: 'Updated legacy content.',
+    category: 'Speech', credits: 'Updated credits',
+  });
+  await presentations.updatePresentation(identity, profile, { ...legacyEdit, id: 'legacy-version-row' });
+  const legacyVersions = await versionDb.execute({
+    sql: `select version, title, content, change_note from presentation_versions
+          where presentation_id = ? order by version`,
+    args: ['legacy-version-row'],
+  });
+  expect('the first legacy edit preserves its canonical state as an imported baseline',
+    legacyVersions.rows.length === 2
+      && Number(legacyVersions.rows[0]?.version) === 1
+      && legacyVersions.rows[0]?.title === 'Old legacy title'
+      && legacyVersions.rows[0]?.content === 'Old legacy content.'
+      && legacyVersions.rows[0]?.change_note === 'Imported baseline'
+      && Number(legacyVersions.rows[1]?.version) === 2
+      && legacyVersions.rows[1]?.content === 'Updated legacy content.');
+  await presentations.updatePresentation(identity, profile, { ...legacyEdit, id: 'legacy-version-row' });
+  const unchangedLegacyVersions = await versionDb.execute({
+    sql: 'select count(*) as n from presentation_versions where presentation_id = ?',
+    args: ['legacy-version-row'],
+  });
+  expect('a no-op edit after legacy history starts adds no version', Number(unchangedLegacyVersions.rows[0]?.n) === 2);
+  await versionDb.close();
+
+  process.env.TURSO_DATABASE_URL = DB_URL;
   const importer = await bundle('src/server/project.ts', 'legacy-import.mjs');
   const importOptions = { supabaseUrl: SUPABASE, apiKey: 'stub-key', tursoUrl: DB_URL, tursoToken: 'unused' };
   const first = await importer.importLegacyLibrary(importOptions);

@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { applyThemeVars } from '../design/compile';
 import { useSettings } from '../store/settings';
 import { festivalById } from '../data/festivals';
 import { fetchSiteFestival } from '../services/profiles';
+
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 /**
  * The user's own five-axis theme is the base. The festival is a thin seasonal
@@ -23,15 +25,16 @@ export function useThemeEngine() {
 
   const festival = festivalById(siteFestival);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
     let systemReduced = media.matches;
 
     const apply = () => {
-      applyThemeVars(theme, {
-        reducedMotion:
-          reducedMotion === 'on' || (reducedMotion === 'auto' && systemReduced),
-      });
+      const still = reducedMotion === 'on'
+        || (reducedMotion === 'auto' && systemReduced)
+        || theme.motion === 'still';
+      applyThemeVars(theme, { reducedMotion: still });
+      document.documentElement.dataset.reducedMotion = still ? 'true' : 'false';
       // Festival layer goes on AFTER the user's theme, every time, so a
       // theme change can never wash the season away.
       const root = document.documentElement;

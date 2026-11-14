@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSettings } from '../store/settings';
 
 const PETALS = [
   { x: '15%', y: '24%', delay: '0.4s', duration: '2.8s', glyph: '✿', color: '#bb6f62' },
@@ -19,6 +20,7 @@ export function Splash() {
   // session check happens after hydration, never in a render initializer.
   const [show, setShow] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const finishOpening = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     try {
@@ -29,7 +31,9 @@ export function Splash() {
 
     let finished = false;
     let hideTimer = 0;
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const settings = useSettings.getState();
+    const systemReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduced = settings.reducedMotion === 'on' || systemReduced || settings.theme.motion === 'still';
     const markSeen = () => {
       try { sessionStorage.setItem('pb.splash.seen', '1'); }
       catch { /* private mode */ }
@@ -41,25 +45,42 @@ export function Splash() {
       setLeaving(true);
       hideTimer = window.setTimeout(() => setShow(false), 390);
     };
-    const skip = () => hide();
+    const skipWithPointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('.pb-splash-skip')) return;
+      hide();
+    };
+    const skipWithEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') hide();
+    };
 
+    finishOpening.current = hide;
     setShow(true);
     setLeaving(false);
-    const finishTimer = window.setTimeout(hide, reduced ? 40 : 3450);
-    window.addEventListener('pointerdown', skip);
-    window.addEventListener('keydown', skip);
+    const finishTimer = window.setTimeout(hide, reduced ? 40 : 2250);
+    window.addEventListener('pointerdown', skipWithPointer);
+    window.addEventListener('keydown', skipWithEscape);
 
     return () => {
       window.clearTimeout(finishTimer);
       window.clearTimeout(hideTimer);
-      window.removeEventListener('pointerdown', skip);
-      window.removeEventListener('keydown', skip);
+      finishOpening.current = () => undefined;
+      window.removeEventListener('pointerdown', skipWithPointer);
+      window.removeEventListener('keydown', skipWithEscape);
     };
   }, []);
 
   if (!show) return null;
   return (
-    <div className={`pb-splash${leaving ? ' pb-splash-leave' : ''}`} role="img" aria-label="Presentation Buddy">
+    <div className={`pb-splash${leaving ? ' pb-splash-leave' : ''}`} role="status" aria-label="Presentation Buddy opening">
+      <button
+        type="button"
+        className="pb-splash-skip"
+        onClick={() => finishOpening.current()}
+        aria-label="Skip the opening animation"
+      >
+        Skip
+      </button>
       <div className="pb-splash-atmosphere" aria-hidden="true">
         {PETALS.map((petal, index) => (
           <span
@@ -90,8 +111,8 @@ export function Splash() {
         <circle className="pb-splash-dot-rest" cx="24.5" cy="8.9" r="2.6" fill="var(--c-accent)" />
         <circle className="pb-splash-dot-motion" cx="5" cy="25.5" r="2.6" fill="var(--c-accent)">
           <animateMotion
-            dur="2.8s"
-            begin="0.45s"
+            dur="1.55s"
+            begin="0.24s"
             fill="freeze"
             calcMode="spline"
             keyTimes="0;0.15;0.3;0.45;0.6;0.75;1"

@@ -1,177 +1,103 @@
 # Deploying Presentation Buddy
 
-> **3.1:** the framework is Next.js and the build command is `npm run build` again. See
-> [NEXTJS.md](NEXTJS.md) for the deploy changes, and for the build-command trick that still
-> works when you would rather not use a terminal.
+Presentation Buddy 3.1 is a **Next.js server application**, not a static site.
+Vercel is the documented managed host; see [VERCEL.md](VERCEL.md). This guide
+covers a Node.js host or reverse-proxy deployment. Do not upload `dist/`,
+rewrite every route to a static `index.html`, or run a Vite export: API routes,
+Clerk verification and canonical Turso reads/writes need the Next.js runtime.
 
-The build output in `dist/` is a pile of static files. Any static host will
-serve it. What follows is everything the host has to get right.
+## Requirements
+
+- Node.js 22 (the `package.json` engine constraint)
+- HTTPS on the public site
+- Network access from the Node server to Clerk, Supabase, Turso and, if enabled,
+  Convex and the source endpoints
+- The nine existing Vercel environment-variable names from [ENV.md](ENV.md);
+  no replacement names or new dashboard settings are required
+
+## Prepare the data services
+
+1. Create/configure Clerk and use its production publishable and secret keys.
+   Set `CLERK_AUTHORIZED_PARTIES` to the exact public origin.
+2. Apply `supabase/schema.sql` in the Supabase SQL editor and configure Clerk as
+   its third-party auth provider. Supabase owns account/profile data, not
+   canonical presentation bodies.
+3. Configure the remote Turso URL and token. Apply the schema from a trusted
+   operator environment:
+
+   ```bash
+   npm run db:turso
+   ```
+
+   Turso is required for public shared presentations and publishing. The app
+   does not fall back to Supabase content if Turso is unavailable.
+4. Optionally deploy Convex and configure its Clerk JWT provider/template as
+   documented in [ARCHITECTURE.md](ARCHITECTURE.md). Convex is a safety-only
+   mirror; deployment does not enable presence or activity features.
+5. If old Supabase speech rows need to be imported, inspect them first with
+   `npm run sync:turso -- --check`. The reviewed importer only adds missing rows;
+   its `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are local/operator-only
+   credentials and must never be placed in client code or Vercel.
+
+## Build and run
+
+Configure the existing variables before building. Public `VITE_` values are
+inlined at build time, so redeploy after changing one. Server-only credentials
+must remain unprefixed and server-side.
 
 ```bash
 npm ci
-npm run verify     # typecheck + headless render of every route
-npm run build      # bundle → 32 cards → 57 prerendered pages → sitemap
-# upload dist/
+npm run verify
+npm run build
+npm run start -- --hostname 0.0.0.0 --port 3000
 ```
 
----
+The app listens on port 3000 by default. Keep the Node process supervised by
+your host's process manager, and put a TLS-terminating reverse proxy in front
+of it. Forward the original host and protocol correctly; configure the
+production origin in both `VITE_SITE_URL` and `CLERK_AUTHORIZED_PARTIES`.
 
-## 1. The three things a host must do
+Do not copy only `.next/server/app` or individual HTML files. Keep the complete
+Next.js build output and run it with the same source revision and environment
+used for the build. Static files, route handlers and server-rendered pages are
+all part of the deploy.
 
-**Serve prerendered files first.** Every indexable route is a real file:
-`/rehearse` is `dist/rehearse/index.html`. If the host rewrites everything to
-`index.html` before checking disk, Google gets the empty shell on every URL
-and the prerendering is wasted.
+## Routing, headers, SEO and PWA
 
-**Fall back to `/index.html` for anything else.** Routes with no static file
-(`/admin`, `/read/<a-cloud-speech-id>`) are client-rendered.
+`next.config.ts` owns the legacy route redirects, CSP/security headers and
+cache headers. Keep it as the single header/redirect source; duplicating policy
+at the reverse proxy can produce conflicting CSPs. The configuration includes
+HSTS, CSP, frame/content-type protections, referrer and permissions policies,
+asset caching and service-worker revalidation.
 
-**Serve `dist/404.html` with a 404 status** for unknown paths.
+The App Router also serves the metadata, `robots.txt` and sitemap endpoints.
+The web app manifest and service worker remain in `public/`. After a domain or
+host change, verify canonical URLs, sitemap host, redirects and browser
+installation/offline behavior rather than assuming a successful build proves
+them.
 
-## 2. Redirects
+## Verify after deployment
 
-`public/_redirects` is Netlify-style. 2.4 renamed the three working rooms and
-the old paths must keep their ranking:
+1. Open `GET /api/health`. It reports the service checks and verdict in JSON;
+   the GET itself responds with HTTP 200 even when the verdict is `broken`.
+   `HEAD /api/health` returns 503 only for a broken verdict.
+2. Check the library and a known public presentation, including a direct
+   `/read/<id>` load.
+3. In a test account, sign in, confirm the Supabase profile/username, Share a
+   short work, then open its public Turso-backed URL. Verify an edit creates a
+   version and a no-op does not.
+4. If Convex is enabled, validate the deployed Clerk issuer and the safety
+   action separately. Local static checks do not prove a remote Convex trust
+   boundary.
+5. Review keyboard/reduced-motion behavior and route transitions in a real
+   browser. Automated verification does not replace the requested motion review.
 
-| From | To | Code |
-| --- | --- | --- |
-| `/practice`, `/practice/*` | `/rehearse`, `/rehearse/:splat` | 301 |
-| `/studio`, `/studio/*` | `/write`, `/write/:splat` | 301 |
-| `/web` | `/arrivals` | 301 |
+Run `npm run verify:all` locally to execute type/schema/library checks, build the
+production app and exercise served routes. This does not contact or certify
+your production providers, the scheduled arrivals pipeline, or browser motion.
 
-The app also redirects these client-side, so a visitor never lands on a dead
-route even if the host ignores the file. The 301s are what move the *ranking*.
+## Vercel
 
-## 3. Headers
-
-`public/_headers` covers Netlify and Cloudflare Pages. Two rules matter most:
-
-- **`/assets/*` is immutable** — filenames are content-hashed.
-- **HTML and `/sw.js` must revalidate** — otherwise a deploy never lands.
-
-### nginx
-
-```nginx
-server {
-  listen 443 ssl http2;
-  server_name presentationbuddy.aavrit.dedyn.io;
-  root /var/www/presentationbuddy/dist;
-
-  add_header X-Frame-Options SAMEORIGIN always;
-  add_header X-Content-Type-Options nosniff always;
-  add_header Referrer-Policy strict-origin-when-cross-origin always;
-  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
-
-  # 2.4 route renames.
-  location = /practice { return 301 /rehearse; }
-  location ^~ /practice/ { rewrite ^/practice/(.*)$ /rehearse/$1 permanent; }
-  location = /studio   { return 301 /write; }
-  location ^~ /studio/ { rewrite ^/studio/(.*)$ /write/$1 permanent; }
-  location = /web      { return 301 /arrivals; }
-
-  location /assets/ {
-    add_header Cache-Control "public, max-age=31536000, immutable";
-  }
-
-  location = /sw.js {
-    add_header Cache-Control "public, max-age=0, must-revalidate";
-  }
-
-  # Prerendered file first, directory index second, shell last.
-  location / {
-    try_files $uri $uri/index.html /index.html;
-  }
-
-  error_page 404 /404.html;
-}
-```
-
-### Caddy
-
-```
-presentationbuddy.aavrit.dedyn.io {
-  root * /var/www/presentationbuddy/dist
-  redir /practice /rehearse permanent
-  redir /studio   /write    permanent
-  redir /web      /arrivals permanent
-  header /assets/* Cache-Control "public, max-age=31536000, immutable"
-  header /sw.js    Cache-Control "public, max-age=0, must-revalidate"
-  try_files {path} {path}/index.html /index.html
-  file_server
-}
-```
-
-## 4. The databases
-
-Optional in the truest sense: with no variables set, the app is fully local and
-every cloud feature degrades to a quiet "not configured". With them, it is a
-shared library with accounts.
-
-Three databases, each with one job — Postgres is the truth, Turso serves
-reading, Convex carries presence. The full picture and every setting:
-[ARCHITECTURE.md](ARCHITECTURE.md). The short version:
-
-1. **Supabase** — create a project, then paste `supabase/schema.sql` into the
-   SQL editor and run it. Connect Clerk under **Authentication → Third-party
-   auth**. That is the entire setup: tables, indexes, policies and the two
-   counter functions arrive together.
-2. **Turso** — create a database and set `TURSO_DATABASE_URL` +
-   `TURSO_AUTH_TOKEN`. Nothing else: the reading room builds its own schema the
-   first time the site publishes something, and fills itself every time
-   afterwards. (The **Rebuild reading room** button in the Control Room, and
-   `npm run db:turso && npm run sync:turso` from a terminal, do the same two
-   steps by hand, which is what you want if you have edited Postgres directly.)
-   Optional; without it every read comes from Postgres.
-3. **Convex** — `npx convex deploy`, add Clerk as a provider, and create the
-   JWT template named `convex`. Optional; without it the site is simply quiet.
-4. Copy `.env.example` to `.env` and fill in the values — nine variables, and
-   [ENV.md](ENV.md) is the list in order.
-
-### About the policies
-
-They live inside the schema, beside the tables they guard, which is the reason
-Postgres replaced Firestore here. A rule that names a column that does not exist
-is a rule you discover in production; a foreign key is one you discover in the
-editor.
-
-The interesting part is still the counters. A like has to move a number on a row
-you do not own, and in the Firestore version that had to be permitted by a rule
-allowing any signed-in person to change `likes` and nothing else. It is now a
-database function — `react_to_speech()` — that moves the reaction row, the
-speech's counters and the author's score inside one transaction. Nothing about
-the write is the client's to get wrong, and the totals can always be recomputed
-from the rows underneath them.
-
-Field names are still **capitalised** in the app (`Title`, `Content`, `Author`)
-— that is the schema from v1, and the mapping into real columns happens in one
-file. `npm run check:schema` fails the build if a field is mapped to a column
-that does not exist.
-
-### Making the first owner
-
-Roles live in `admins`, and only an `owner` may write them, so the first one
-comes from the database itself:
-
-1. Sign in to the site once, so a `profiles` row exists for you.
-2. Clerk Dashboard → **Users** → copy your user id.
-3. Supabase → **SQL Editor**:
-
-   ```sql
-   select public.bootstrap_owner('<clerk-user-id>', 'amaavrit@yahoo.com');
-   ```
-
-4. Reload. `/admin` is now reachable.
-
-It refuses if a role already exists — which is exactly what you want it to do.
-
-## 5. Search Console
-
-1. Verify the domain (DNS TXT is the durable option).
-2. Submit `https://presentationbuddy.aavrit.dedyn.io/sitemap.xml`.
-3. Use **URL Inspection → Request indexing** on `/`, `/rehearse` and
-   `/topics` to seed the crawl.
-4. Confirm the **Rich results** test passes for `/` (FAQ + SoftwareApplication
-   + WebSite/SearchAction) and for any `/read/*` page (Article).
-
-Indexing takes days to weeks. Nothing in the build shortens that; it only
-removes the technical reasons a page would be skipped.
+Vercel should auto-detect Next.js. Use `npm run build` and the framework-managed
+output; don't override it with a static Vite command. Follow
+[VERCEL.md](VERCEL.md) and preserve the exact variables in [ENV.md](ENV.md).

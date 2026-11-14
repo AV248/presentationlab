@@ -3,13 +3,13 @@
   "private": true,
   "version": "3.1.0",
   "type": "module",
-  "description": "Presentation Buddy 3.1 \u2014 Next.js App Router in front of one identity and three databases: Supabase/Postgres for every durable record, Turso for the reading room, Convex for presence and live activity. The Vercel environment variable names are unchanged from 2.x.",
+  "description": "Presentation Buddy 3.1 \u2014 Next.js App Router in front of Clerk identity, Supabase account records, Turso canonical presentations, and an optional Convex safety slice. Deployment variable names are unchanged from 2.x.",
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/cards/run.mjs && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "verify": "npm run typecheck && npm run audit:secrets && npm run check:schema && npm run check:pg && npm run check:reading && npm run check:library",
+    "verify": "npm run typecheck && npm run audit:secrets && npm run check:schema && npm run check:pg && npm run check:reading && npm run check:library && npm run check:convex",
     "verify:all": "PB_REQUIRE_PG=1 npm run verify && npm run build && npm run check:routes",
     "cards": "node scripts/cards/run.mjs",
     "audit:secrets": "node scripts/check-secrets.mjs",
@@ -20,7 +20,8 @@
     "check:library": "node scripts/turso/selftest.mjs",
     "check:reading": "node scripts/check-reading.mjs",
     "check:routes": "node scripts/check-routes.mjs",
-    "check:pg": "node scripts/check-pg.mjs"
+    "check:pg": "node scripts/check-pg.mjs",
+    "check:convex": "node scripts/check-convex-safety.mjs"
   },
   "dependencies": {
     "@clerk/backend": "^3.23.2",

@@ -193,6 +193,51 @@ try {
     expect('schema ensure is cached and idempotent', again.ok && again.note === 'already_present', again.note);
   });
 
+  const MIGRATION_DB_URL = `file:${resolve(WORK, 'sample-upgrade.db')}`;
+  execFileSync(process.execPath, [resolve(ROOT, 'scripts/turso/apply.mjs')], {
+    env: { ...process.env, TURSO_DATABASE_URL: MIGRATION_DB_URL, TURSO_AUTH_TOKEN: '' },
+    stdio: 'pipe',
+  });
+  let migrationDb = createClient({ url: MIGRATION_DB_URL });
+  await migrationDb.execute('delete from turso_schema_migrations where version = 2');
+  await migrationDb.execute('drop trigger if exists library_safety_sample_ai');
+  await migrationDb.execute(`create trigger library_safety_sample_ai after insert on library
+    when new.moderation_status = 'published' and new.source_type = 'person' and new.safety_sampled = 0
+    begin
+      update library set safety_sampled = 1 where id = new.id
+        and (select count(*) / 100 from library where moderation_status = 'published')
+          > (select count(*) from library where moderation_status = 'published' and source_type = 'person' and safety_sampled = 1);
+    end`);
+  const migrationInserts = Array.from({ length: 100 }, (_, index) => {
+    const number = index + 1;
+    return {
+      sql: `insert into library (id, uid, username, title, content, source_type, moderation_status, published_at, updated_at)
+            values (?, 'writer', 'writer', ?, ?, 'person', 'published', ?, ?)` ,
+      args: [
+        `upgrade-${String(number).padStart(3, '0')}`,
+        `Upgrade ${number}`,
+        `Upgrade body ${number}`,
+        `2026-10-01T00:${String(Math.floor(number / 60)).padStart(2, '0')}:${String(number % 60).padStart(2, '0')}Z`,
+        '2026-10-01T00:00:00Z',
+      ],
+    };
+  });
+  await migrationDb.batch(migrationInserts, 'write');
+  const oldMembership = await migrationDb.execute('select id from library where safety_sampled = 1');
+  expect('old trigger fixture selects its triggering 100th row before upgrade', oldMembership.rows.length === 1 && oldMembership.rows[0]?.id === 'upgrade-100');
+  await migrationDb.close();
+  await withEnv({ TURSO_DATABASE_URL: MIGRATION_DB_URL, TURSO_AUTH_TOKEN: '' }, 'runtime-sample-upgrade', async (reader) => {
+    const upgraded = await reader.ensureLibrarySchema();
+    expect('the authenticated runtime path upgrades the old sampling algorithm', upgraded.ok, upgraded.note);
+    const db = createClient({ url: MIGRATION_DB_URL });
+    const membership = await db.execute('select id from library where safety_sampled = 1 order by published_at, id');
+    const version = await db.execute('select count(*) as n from turso_schema_migrations where version = 2');
+    expect('runtime trigger upgrade backfills the oldest eligible personal work',
+      Number(version.rows[0]?.n) === 1 && membership.rows.length === 1 && membership.rows[0]?.id === 'upgrade-001',
+      JSON.stringify(membership.rows.map((row) => row.id)));
+    await db.close();
+  });
+
   await withEnv({}, 'split', async (reader) => {
     const body = "create table t (a text);\ncreate function f() returns void language sql as $$\n  select 'a; b'; -- and a comment with ; in it\n$$;\ncreate trigger x after insert on t begin\n  insert into t values (';still here');\nend;\nselect 1;";
     const statements = reader.splitSql(body);

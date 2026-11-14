@@ -17,6 +17,7 @@ import { copyText } from '../lib/platform';
 import { usePageMeta } from '../lib/usePageMeta';
 import { Markdown } from '../components/Markdown';
 import { AuthorCorner } from '../components/AuthorCorner';
+import { presentationViewName } from '../lib/motion';
 
 /** What the server already read, handed over so the page can be rendered as
  *  HTML before the browser runs. Absent on a client-side navigation. */
@@ -107,10 +108,10 @@ export function HandlePage({ initial }: { initial?: HandleSeed } = {}) {
   const display = profile ?? (isMine ? { username, uid: user?.uid ?? '', displayName: me.displayName || username, bio: me.bio, location: me.location, website: me.website, signature: me.signature, createdAt: '', photoURL: user?.photoURL ?? '' } : null);
   if (!display) return <p className="pb-muted" style={{ padding: 24 }}>Opening @{username}…</p>;
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:'var(--l-rhythm)' }}>
+    <div className="pb-page anim-author-arrival" style={{ display:'flex', flexDirection:'column', gap:'var(--l-rhythm)' }}>
       <section className="pb-panel anim-enter" style={{ padding:'clamp(20px,4vw,36px)' }}>
         <div className="pb-profile-author-corner">
-          <AuthorCorner author={display.displayName} username={display.username} photoURL={display.photoURL} />
+          <AuthorCorner author={display.displayName} username={display.username} photoURL={display.photoURL} arrival />
         </div>
         <span className="pb-eyebrow"><AtSign size={12} /> {username}</span>
         <h1 style={{ fontSize:'clamp(1.7rem,4vw,2.5rem)', margin:'8px 0' }}>{display?.displayName ?? `@${username}`}</h1>
@@ -168,10 +169,18 @@ function HandleWork({ username, work }: { username: string; work: { id: string; 
       onCopy={protectedWork ? (e) => { e.preventDefault(); toast('© This work is protected by its writer.', 'warn'); } : undefined}
       onContextMenu={protectedWork ? (e) => e.preventDefault() : undefined}>
       <div className="pb-reader-author-row">
-        <AuthorCorner author={work.author ?? username} username={username} photoURL={work.authorPhotoURL} badges={work.authorBadges} />
+        <AuthorCorner author={work.author ?? username} username={username} photoURL={work.authorPhotoURL} badges={work.authorBadges} arrival />
       </div>
       <span className="pb-eyebrow">@{username} · {work.category}</span>
-      <h1 style={{ fontSize:'clamp(1.6rem,4vw,2.4rem)', margin:'10px 0' }}>{work.title}</h1>
+      <h1
+        style={{
+          fontSize: 'clamp(1.6rem,4vw,2.4rem)',
+          margin: '10px 0',
+          viewTransitionName: presentationViewName(work.id),
+        }}
+      >
+        {work.title}
+      </h1>
       {work.preview && <p className="pb-soft" style={{ lineHeight:1.65, maxInlineSize:'62ch' }}>{work.preview}</p>}
       <div style={{ display:'flex', gap:8, flexWrap:'wrap', margin:'16px 0' }}>
         <button type="button" className="pb-btn" onClick={async () => { const ok = await copyText(url); toast(ok ? url : 'Copy failed', ok ? 'success' : 'error'); }}>Copy {url}</button>

@@ -1,3 +1,5 @@
+import { after } from 'next/server';
+import { reconcileConvexSafetySamples } from '@/server/convexSafety';
 import {
   deletePresentation,
   normalizeShareInput,
@@ -46,6 +48,17 @@ function failure(error: unknown) {
   return json(500, { error: 'internal_error', message: 'The presentation could not be saved. Try again shortly.' });
 }
 
+/** Run optional Convex safety work without delaying the canonical Turso reply. */
+function deferSafetyWork(task: () => Promise<void>) {
+  try {
+    after(task);
+  } catch {
+    // Direct route-harness calls have no Next request context; keep the fallback
+    // best-effort and do not turn the primary share into an error.
+    void task();
+  }
+}
+
 export function OPTIONS() {
   return new Response(null, { status: 204, headers: { Allow: 'POST, PUT, DELETE, OPTIONS' } });
 }
@@ -55,7 +68,9 @@ export async function POST(request: Request) {
     const identity = await verifyClerkRequest(request);
     const input = normalizeShareInput(await bodyOf(request));
     const profile = await readAuthorProfile(identity);
-    const id = await publishPresentation(identity, profile, input);
+    // New ids are server-generated so writers cannot grind the global sample
+    // ordering by choosing their own presentation id.
+    const id = await publishPresentation(identity, profile, { ...input, id: undefined });
     return json(201, { ok: true, id, username: profile.username, slug: input.slug });
   } catch (error) {
     return failure(error);
@@ -82,6 +97,7 @@ export async function DELETE(request: Request) {
     const id = typeof body.id === 'string' ? body.id.trim() : '';
     if (!/^[\w-]{1,100}$/.test(id)) throw new PresentationError('The presentation id is invalid.');
     await deletePresentation(identity, id);
+    if (identity.convexToken) deferSafetyWork(() => reconcileConvexSafetySamples(identity));
     return json(200, { ok: true, id });
   } catch (error) {
     return failure(error);

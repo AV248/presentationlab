@@ -1,273 +1,125 @@
-# How Presentation Buddy is put together
+# Architecture and data ownership
 
-> **3.1:** the layer on top of all of this is the Next.js App Router — one `page.tsx` per
-> route in `app/`, the screens in `src/screens/`, the endpoints in `app/api/*/route.ts`, and
-> `src/lib/router.tsx` keeping the old `<Link to=…>` vocabulary working. The three databases
-> below are exactly as described. See [NEXTJS.md](NEXTJS.md).
+Last updated: 2026-10-13
 
-Three databases, one identity, one writer per fact.
+Presentation Buddy has one owner per kind of data. A service may cache or
+reference another service's data, but it does not become a second authority.
 
-This replaces the old `docs/FIRESTORE.md`. Everything it described — collections,
-rules, the token exchange — is gone. What follows is what exists now, why each
-piece exists, and the order to set it up in.
+## The four stores
 
----
+| Store | Canonical responsibility | Explicitly not responsible for |
+|---|---|---|
+| **Clerk** | Authentication, sessions and the stable user subject (`uid`) | Application profiles, usernames, social records, badge ownership, presentation content |
+| **Supabase / Postgres** | Profiles, handles, social evidence, badge ownership and grant/revoke audit, admin roles, ads, posts, feedback and settings | Full presentation bodies, public presentation versions, drafts |
+| **Turso / SQLite** | Published presentations, versions, moderation, source provenance, arrivals, read counts and FTS search | User identity, profile authority, badge ownership |
+| **Convex (optional)** | A safety-only cohort, globally capped at `floor(published rows / 100)` personal presentations; each recovery slice is at most 1% of that body's UTF-8 bytes | Primary reads/writes, drafts, presence/activity, full-text copies, reader fallback |
 
-## 1. The shape of it
+Drafts remain private in this device's local storage until the writer chooses
+**Share**. A missing database never authorizes copying data into another store.
 
-```
-                       ┌──────────────────────────────────────────┐
-   Clerk               │  identity, sessions, usernames, MFA      │
-   (only identity)     └────────────────┬─────────────────────────┘
-                                       │  session token
-              ┌────────────────────────┼────────────────────────┐
-              │                        │                        │
-              ▼                        ▼                        ▼
-   ┌────────────────────┐   ┌────────────────────┐   ┌────────────────────┐
-   │  SUPABASE          │   │  TURSO             │   │  CONVEX            │
-   │  Postgres          │   │  SQLite            │   │  reactive store    │
-   │                    │   │                    │   │                    │
-   │  THE TRUTH         │   │  THE READING ROOM  │   │  THE LIVE LAYER    │
-   │                    │   │                    │   │                    │
-   │  every durable     │◄──┤  a derived copy of │   │  who is here now,  │
-   │  record: profiles, │   │  published work +  │   │  what just happened│
-   │  handles, roles,   │   │  FTS5 search       │   │                    │
-   │  speeches, ads,    │   │                    │   │  ephemeral by      │
-   │  reactions, shares,│   │  rebuilt, never    │   │  design: losing it │
-   │  posts, feedback,  │   │  written by hand   │   │  costs nothing     │
-   │  settings          │   │                    │   │                    │
-   └─────────┬──────────┘   └─────────┬──────────┘   └─────────┬──────────┘
-             │                        │                        │
-             │  PostgREST + RLS       │  GET /api/library      │  websockets
-             │  (browser, direct)     │  (browser → server)    │  (browser, direct)
-             ▼                        ▼                        ▼
-        ┌────────────────────────────────────────────────────────────┐
-        │  the app                                                   │
-        └────────────────────────────────────────────────────────────┘
-```
+## Request flows
 
-The rule that keeps this honest is one sentence: **one fact has exactly one
-writer.** Postgres writes everything durable. Turso is rebuilt from Postgres and
-never written by the app. Convex is never the authoritative copy of anything, so
-it cannot disagree with either of them.
+### Sign in and profile
 
-### Why three databases
+1. Clerk signs the person in and supplies the session token.
+2. The server verifies the token and derives the owner id from its signed `sub`;
+   client-supplied names or ids are not accepted as identity.
+3. Supabase policies use the Clerk subject for profile, username, social, badge
+   and admin operations. Public author corners read current profile data from
+   Supabase, with only a display cache on a Turso presentation row as fallback.
 
-Because they are three different problems, and one database doing all three
-badly is how a site gets slow.
+### Write and read a presentation
 
-| | The problem it solves | Free tier |
-| --- | --- | --- |
-| **Supabase / Postgres** | Correctness. Foreign keys, unique indexes, row-level security, transactions. The one place a fact is allowed to be born. | 500 MB, pauses after ~7 days with no traffic — ping it weekly |
-| **Turso / SQLite** | Read latency and search. Reading is free and it is most of the traffic, so it is served from a copy that sits near the reader, with FTS5 behind the search box. | 9 GB storage, 1 B rows read/month |
-| **Convex** | Liveness. Presence ("3 people reading") and a live activity feed are the only things here; they are worth nothing tomorrow. | generous free tier; `npx convex deploy` |
+1. Typing updates only the local draft. The writing page has a required title,
+   optional category/preview/credits and the body; its three primary actions are
+   **Share**, **Rehearse** and **Save**.
+2. Share sends the work to `/api/presentations`. The server verifies Clerk,
+   resolves the author's Supabase profile, then inserts the canonical row and
+   version 1 together in Turso. An edit appends a version and updates the current
+   row in the same Turso transaction. A no-op edit does not create a version.
+3. `/api/library` and server-rendered presentation pages read published rows
+   from Turso. Search uses Turso FTS5. Supabase is not a fallback for content.
+4. Reader counts are deduplicated in Turso. Moderation state is applied to every
+   public reader/search/list query.
 
-### What lives where, exactly
+## Badge contract
 
-| Collection (app name) | Table | Database | Who may write |
-| --- | --- | --- | --- |
-| `presentations` | `speeches` | Postgres | the author, and role-holders |
-| `users` | `profiles` | Postgres | the person themselves, and the reaction function |
-| `handles` | `handles` | Postgres | the person claiming it, once; role-holders |
-| `admins` | `admins` | Postgres | role-holders |
-| `adminPrivate` | `admin_private` | Postgres | the owner, only after the second lock |
-| `servingads` | `ads` | Postgres | role-holders |
-| `sponsors` | `sponsors` | Postgres | role-holders |
-| `reactions` | `reactions` | Postgres | the person reacting |
-| — | `shares` | Postgres | the person sharing |
-| — | `speech_views` | Postgres | anyone (one row per open) |
-| `bloggerblogs` | `posts` | Postgres | the author |
-| `feedback` | `feedback` | Postgres | anyone, signed in or not |
-| `siteSettings` | `site_settings` | Postgres | the owner |
-| — | `library` | **Turso** | nothing — rebuilt by the sync |
-| — | `presence`, `activity` | **Convex** | the session that is present |
+There are exactly three badges:
 
-The names on the left are what the app says; the names on the right are what the
-database calls them. `src/services/backend/supabase.ts` is the only file that
-knows both, and `npm run check:schema` fails the build if a field is mapped to a
-column that does not exist. That check has already caught three.
+- **Quintal** — permanent after 100 presentations written and 100 presentations
+  read or rehearsed.
+- **Sole** — permanent for everyone who has ever held the top read/view count;
+  the first award is not made until someone reaches 10,000.
+- **Grey** — reserved for vetted official/source accounts. System-source accounts
+  receive it by nature, not by pretending to be a Clerk user.
 
-### Identity, and why there is no bridge any more
+Supabase owns assignments and grant/revoke audit. Its schema restricts the
+vocabulary and account types, and local schema tests exercise the admin-gated
+write path. The admin badge desk, complete automatic eligibility rules and
+public current-badge resolution are not yet fully integrated; the schema alone
+is not evidence those product flows are deployed.
 
-Clerk is the only identity provider. There is no Firebase Auth, no custom token,
-no exchange endpoint.
+### Optional Convex safety mirror
 
-- **Postgres** trusts Clerk as a third-party auth provider, so
-  `auth.jwt() ->> 'sub'` is the Clerk user id, and every policy in
-  `supabase/schema.sql` is written in terms of it.
-- **Convex** trusts the same token through a JWT template named `convex`.
-- **Turso** never learns who is asking. It is a public reading room; the people
-  who read it need no account, and the endpoint that serves it holds the only
-  token.
+The global cohort is marked in Turso by additive triggers. It contains no more
+than `floor(published presentations / 100)` personal rows; the denominator
+includes every published row. The triggers backfill legacy libraries
+additively, fill eligible slots as the library grows, and rebalance when rows
+are deleted or unpublished.
 
-What this removed: one serverless function, one credential that could mint
-another credential, a whole class of "token exchange failed" bugs, and the
-awkward state where you were signed in to one system but not the other.
+After a canonical share/edit, the browser asks Clerk for its optional Convex
+JWT **in the background**; this never delays the Turso write. The public Convex
+action accepts only a presentation id and a Clerk session. It fetches the
+selected owner's bounded slice from the fixed canonical Presentation Buddy API,
+which verifies the Clerk token, checks ownership, and rereads the selected
+published row from Turso. The caller cannot provide content. Only an internal
+Convex mutation writes the response; it independently checks the UTF-8 byte
+limit and reconciles the stored ids against Turso's current cohort. The
+presentation reader never queries Convex.
 
-### The two operations that are not a single row write
+The fixed callback origin defaults to the current `VITE_SITE_URL` value,
+`https://presentationbuddy.aavrit.dedyn.io`. It may be overridden by the same
+existing `VITE_SITE_URL` setting in the Convex deployment; no new Vercel
+variable is needed. If the canonical domain changes, update the fallback in
+`convex/safety.ts`. Missing Convex, an absent Clerk template or a failed backup
+never turns a successful Turso write into a failure.
 
-Reacting and sharing used to be client-side transactions. They are now database
-functions, because that is where atomicity actually lives:
+## Schema and migration
 
-| Function | What it does, in one transaction |
-| --- | --- |
-| `react_to_speech(speech_id, kind)` | the reaction row, the speech's like/dislike counters, and the author's score — which is `likes − floor(dislikes / 3)` |
-| `record_share(speech_id)` | one row per (person, speech), and the share counter only moves the first time |
+- `supabase/schema.sql` is the account/social/admin schema, not the presentation
+  body store. It includes active badge grants and the audit trail.
+- `turso/schema.sql` defines the canonical published library, version history,
+  arrivals/provenance, views and search index.
+- `turso/safety-sampling.sql` is applied only after additive upgrades add the
+  `safety_sampled` metadata column. Its version-2 trigger migration replaces
+  older same-name cohort triggers and repairs membership transactionally,
+  oldest-first by `published_at`, then `id`; it performs no destructive rebuild.
+- `npm run db:turso` applies both Turso schema files and upgrades old tables in
+  place. The authenticated write path can also ensure the schema.
+- `npm run sync:turso` is a reviewed, additive import for legacy Supabase rows;
+  it never overwrites an existing Turso row. It is not the ordinary publishing
+  path. Its optional `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are local
+  migration credentials only and are never client variables.
+- Existing compatibility tables and legacy records are retained until an
+  explicit, verified migration or cleanup is performed.
 
-Both are in `supabase/schema.sql`. Because every counter can be recomputed from
-the rows, the numbers can always be rebuilt if they are ever doubted.
+## Frozen deployment variables
 
-Views are a plain counter: one honest increment per open, through
-`bump_counter()`.
+The nine existing Vercel names are unchanged:
 
----
+| Visibility | Variables |
+|---|---|
+| Public (`VITE_`) | `VITE_SITE_URL`, `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_CONVEX_URL` |
+| Server-only | `CLERK_SECRET_KEY`, `CLERK_AUTHORIZED_PARTIES`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` |
 
-## 2. Setting it up, in order
+Never expose Clerk secret keys or Turso auth tokens through a `VITE_` variable.
+The two local legacy-import credentials above are not required by Vercel.
 
-Five things, in this order. Each one is verifiable before you start the next.
+## Verification
 
-### Step 1 — Supabase (the truth)
-
-1. Create a project at supabase.com. Note the database password somewhere safe.
-2. **SQL Editor → New query** → paste the whole of `supabase/schema.sql` → **Run**.
-   It is idempotent: running it twice changes nothing.
-3. **Project Settings → API keys** → copy the **Project URL** and the
-   **anon/public** key. They become `VITE_SUPABASE_URL` and
-   `VITE_SUPABASE_ANON_KEY`.
-4. **Authentication → Third-party auth → Clerk** → add your Clerk instance's
-   issuer. Without this step every write is refused, and the app says so in
-   plain words rather than failing silently.
-5. Sign in to the site once with Clerk (so a `profiles` row exists), then run
-   this in the SQL editor with your own Clerk user id — found in the Clerk
-   dashboard under Users:
-
-   ```sql
-   select public.bootstrap_owner('<clerk-user-id>', 'amaavrit@yahoo.com');
-   ```
-
-   That one call makes you the owner. It is the only way to get the first role,
-   and it can be run exactly once per database — if a role already exists it
-   refuses, which is the point.
-6. **Supabase pauses a free project after about seven days with no traffic.** A
-   weekly visit to the site is enough to keep it awake; the site's own reads
-   count as traffic.
-
-### Step 2 — Turso (the reading room)
-
-Optional, and genuinely so: without it, reading falls back to Postgres. With it,
-reading is faster and search works.
-
-1. Create a database at turso.tech. Copy its `libsql://` URL and create a token.
-   They become `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`.
-2. Put both in `.env`, then apply the schema once:
-
-   ```bash
-   npm run db:turso
-   ```
-
-3. Fill it from Postgres, and check it:
-
-   ```bash
-   npm run sync:turso -- --check   # how many rows each side holds
-   npm run sync:turso              # copy them across
-   ```
-
-   After this, ordinary publishing keeps it current on its own: the app calls
-   `POST /api/sync-library` after a speech is written, edited or deleted.
-
-### Step 3 — Convex (the live layer)
-
-Optional as well; the site is quieter without it and loses nothing else.
-
-1. `npx convex dev` once, to create the deployment and sign in.
-2. `npx convex deploy` to push `convex/schema.ts` and `convex/activity.ts`.
-3. In the Convex dashboard → **Settings → Authentication**, add Clerk as a
-   provider, and in Clerk create a JWT template named exactly **`convex`**.
-4. Copy the deployment URL into `VITE_CONVEX_URL`.
-
-### Step 4 — Vercel
-
-The full list, in the order to paste it, is in [ENV.md](ENV.md). In short:
-five `VITE_` variables (one optional) and four server-only ones. Then redeploy —
-`VITE_` values are baked in at build time, so saving them without a redeploy
-changes nothing.
-
-### Step 5 — Moving the data (once)
-
-Firestore is still holding everything. Move it:
-
-```bash
-npm run migrate:firestore                    # plan only: read Firestore, write nothing
-npm run migrate:firestore -- --apply         # do it
-npm run sync:turso                           # fill the reading room from the new rows
-```
-
-The importer is read-only towards Firestore and never deletes anything, so
-Firestore stays as your archive until you are satisfied. It needs the service
-account JSON and the Supabase service key, both **local only** — see the bottom
-of `.env.example`. Once the site is verified:
-
-1. revoke the Firebase service account key in the Firebase console,
-2. retire the Firebase project,
-3. remove `firebase-admin` from `devDependencies` (it is used by nothing else).
-
-Two things the importer does deliberately, which are worth knowing before you
-run it:
-
-- **`bloggers` is not carried across as a table.** It held one thing — a
-  person's like/dislike score — and that now lives on their `profiles` row. One
-  fact, one row.
-- **Rows whose parent is missing are skipped and named.** A reaction whose
-  speech was never migrated, a speech whose author has no profile: each is
-  listed in the report, and stays in Firestore untouched. Nothing is guessed.
-
----
-
-## 3. Where the code lives
-
-| Path | What it is |
-| --- | --- |
-| `src/services/backend/config.ts` | which databases this build has, from the environment |
-| `src/services/backend/supabase.ts` | the engine: collection → table, field → column, queries, counters, RPCs |
-| `src/services/backend/library.ts` | the reading room, with a transparent Postgres fallback |
-| `src/services/backend/live.ts` | presence and activity; entirely inert without `VITE_CONVEX_URL` |
-| `src/services/backend/index.ts` | `loadBackend()` — the one seam the app imports |
-| `api/library.ts` | `GET /api/library` — public reads from Turso. Holds the only Turso read token |
-| `api/sync-library.ts` | `POST /api/sync-library` — rebuild the reading room |
-| `api/_project.ts` | the projection itself, shared by the endpoint and the CLI |
-| `api/clerk-set-username.ts` | writes a username into Clerk, once, with the secret key |
-| `supabase/schema.sql` | tables, policies, functions. The truth |
-| `turso/schema.sql` | the projection table, its indexes, and the FTS5 triggers |
-| `convex/` | schema, presence, activity, auth config |
-| `scripts/migrate/` | the Firestore importer, and its mapping table |
-| `scripts/turso/` | `apply.mjs` (schema), `sync.mjs` (fill) |
-| `scripts/check-schema.mjs` | the field map and the migration vs the schema — a build failure, not a warning |
-
-Nothing else in the app knows which database anything is in. Every page imports
-`loadBackend()`, which returns either the whole bundle or `null`, and asks it for
-`{ db, fs, rpc }`.
-
----
-
-## 4. Things that are true on purpose
-
-- **The app works without any of this.** No variables at all means the library
-  is local to the browser, sign-in is off, and the site still runs. That
-  fallback is not a leftover; it is what makes the setup steps safe to take
-  slowly.
-- **Counters are never invented.** They move by real increments, tied to a
-  signed-in person, and the two that must be atomic are database functions.
-- **Nothing durable is written to Turso or Convex.** Both can be deleted and
-  rebuilt: Turso from Postgres in one command, Convex from nothing at all.
-- **The reading room is public by construction.** It holds published work only.
-  The endpoint requires no session, because reading requires no account.
-- **A missing Turso or Convex is reported as what it is** — a setup step not
-  taken yet — never as a broken site. This is the lesson the old 501 saga taught,
-  and `src/services/envCheck.ts` is where it is enforced.
-- **Testing the projection without an account.** Everything here can be run
-  against local files:
-
-  ```bash
-  TURSO_DATABASE_URL=file:./.tmp/library.db npm run db:turso
-  TURSO_DATABASE_URL=file:./.tmp/library.db npm run sync:turso -- --check
-  ```
+`npm run verify` runs the typecheck, secret audit, schema/policy checks, library
+self-tests, read-path tests, and Convex safety checks. The local Turso tests cover
+legacy upgrades, version snapshots, the global sample boundary and deletion
+rebalancing without requiring a remote database. They do not prove that a live
+Convex deployment or browser animation is configured; those remain separate
+operational/browser checks.

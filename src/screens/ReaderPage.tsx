@@ -41,6 +41,7 @@ import { useGate } from '../components/SignIn';
 import { pageMetaFor } from '../data/routes';
 import { SITE_URL, absoluteUrl } from '../lib/seo';
 import { usePageMeta } from '../lib/usePageMeta';
+import { presentationViewName } from '../lib/motion';
 import type { CloudSpeech } from '../lib/speech';
 
 /**
@@ -296,6 +297,7 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
             sourceName={item.sourceName}
             sourceURL={item.sourceURL}
             badges={item.authorBadges}
+            arrival
           />
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
@@ -303,7 +305,15 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
             <span className="pb-eyebrow">
               {item.category} · {item.occasion}
             </span>
-            <h1 style={{ fontSize: 'clamp(1.5rem, 3.4vw, 2.2rem)', margin: '8px 0 10px' }}>{item.title}</h1>
+            <h1
+              style={{
+                fontSize: 'clamp(1.5rem, 3.4vw, 2.2rem)',
+                margin: '8px 0 10px',
+                viewTransitionName: presentationViewName(item.id),
+              }}
+            >
+              {item.title}
+            </h1>
             <p className="pb-soft" style={{ fontSize: '0.98rem', lineHeight: 1.7 }}>{item.preview}</p>
 
             <div className="pb-muted" style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: '0.8rem', marginTop: 12 }}>
