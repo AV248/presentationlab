@@ -20,7 +20,6 @@
  * two projects apart at a glance.
  */
 import { TURSO_CONFIGURED, TURSO_URL, libraryTableExists, turso } from './turso';
-import { POSTGRES_CONFIGURED } from './reading';
 import { serverEnv, serverEnvAny } from './env';
 
 /** How long any one service gets before it counts as not answering. */
@@ -29,7 +28,7 @@ const PROBE_TIMEOUT_MS = 4000;
 export type CheckStatus = 'ok' | 'optional' | 'missing' | 'broken';
 
 export interface Check {
-  id: 'site' | 'clerk' | 'postgres' | 'reading-room' | 'live';
+  id: 'site' | 'clerk' | 'profiles' | 'reading-room' | 'live';
   title: string;
   /**
    * Can the site do its job without this? Filled in by `healthReport`, from
@@ -138,35 +137,34 @@ function checkClerk(): Check {
 }
 
 /**
- * Postgres — the truth.
+ * Supabase — identity, profiles and account data.
  *
- * One real read against the same endpoint the app uses, with the anon key, so
- * what comes back is exactly what a visitor's browser would get. The status
- * codes are interpreted rather than merely reported, because each one has a
- * different fix and they are easy to confuse.
+ * Presentations are authoritative in Turso; Supabase remains the public profile
+ * directory and the home of usernames and account relationships. Probe the
+ * same public profile endpoint the site reads, with the anon key, so a 200 is a
+ * real answer rather than a presence-only check.
  */
-async function checkPostgres(): Promise<Check> {
+async function checkProfiles(): Promise<Check> {
   const base: Pick<Check, 'id' | 'title' | 'vars'> = {
-    id: 'postgres',
-    title: 'Postgres — everything durable',
+    id: 'profiles',
+    title: 'Supabase — profiles and usernames',
     vars: ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'],
   };
+  const url = serverEnvAny('VITE_SUPABASE_URL', 'SUPABASE_URL').replace(/\/+$/, '');
+  const key = serverEnvAny('VITE_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY');
 
-  if (!POSTGRES_CONFIGURED) {
+  if (!url || !key) {
     return {
       ...base,
       status: 'missing',
-      detail: 'No Postgres URL and key are set, so there is no library to read and nothing can be published.',
+      detail: 'Supabase is not configured, so public profiles, usernames and account-backed actions are unavailable.',
       fix: 'Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then redeploy — both are build-time variables.',
     };
   }
 
-  const url = serverEnvAny('VITE_SUPABASE_URL', 'SUPABASE_URL').replace(/\/+$/, '');
-  const key = serverEnvAny('VITE_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY');
-
   const { value, ms, error } = await timed(async () => {
-    const target = new URL('/rest/v1/speeches', url);
-    target.searchParams.set('select', 'id');
+    const target = new URL('/rest/v1/profiles', url);
+    target.searchParams.set('select', 'uid');
     target.searchParams.set('limit', '1');
     const response = await fetch(target, {
       headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/json' },
@@ -181,19 +179,19 @@ async function checkPostgres(): Promise<Check> {
       ...base,
       status: 'broken',
       ms,
-      detail: `The database did not answer within ${PROBE_TIMEOUT_MS / 1000}s (${error}).`,
+      detail: `Supabase did not answer within ${PROBE_TIMEOUT_MS / 1000}s (${error}).`,
       fix: 'Check the project is not paused, and that VITE_SUPABASE_URL is the project URL (https://<ref>.supabase.co).',
     };
   }
   if (value.status === 200) {
-    return { ...base, status: 'ok', ms, detail: 'The database answered a public read.' };
+    return { ...base, status: 'ok', ms, detail: 'Supabase answered a public profile read.' };
   }
   if (value.status === 401 || value.status === 403) {
     return {
       ...base,
       status: 'broken',
       ms,
-      detail: `The database refused the key (HTTP ${value.status}).`,
+      detail: `Supabase refused the public key (HTTP ${value.status}).`,
       fix: 'The anon key does not match this project — copy it again from Settings → API, then redeploy.',
     };
   }
@@ -202,25 +200,24 @@ async function checkPostgres(): Promise<Check> {
       ...base,
       status: 'broken',
       ms,
-      detail: 'The database answered but has no tables yet.',
-      fix: 'Paste supabase/schema.sql into the Supabase SQL Editor and run it.',
+      detail: 'Supabase answered but the profiles table is missing.',
+      fix: 'Apply supabase/schema.sql in the Supabase SQL Editor, then redeploy if the API schema cache needs a refresh.',
     };
   }
   return {
     ...base,
     status: 'broken',
     ms,
-    detail: `The database answered with HTTP ${value.status}.`,
+    detail: `Supabase answered with HTTP ${value.status}.`,
     fix: 'Open the Supabase project log; a 5xx usually means the project is paused or restoring.',
   };
 }
 
 /**
- * The reading room — the copy readers are served from.
+ * Turso — the authoritative presentation library.
  *
- * Optional by design: without it every read falls back to Postgres. So "absent"
- * is reported as optional, and only a *configured but unreachable* reading room
- * is treated as something to fix.
+ * It is required for public shared reads and writes; Supabase is the profile
+ * directory, not a second presentation store or a reading fallback.
  */
 async function checkReadingRoom(): Promise<Check> {
   const base: Pick<Check, 'id' | 'title' | 'vars'> = {
@@ -232,9 +229,9 @@ async function checkReadingRoom(): Promise<Check> {
   if (!TURSO_CONFIGURED) {
     return {
       ...base,
-      status: 'optional',
-      detail: 'No reading room is attached. Reads are being served from Postgres — the same rows, one hop further away.',
-      fix: 'Optional. Add TURSO_DATABASE_URL and TURSO_AUTH_TOKEN to turn on the fast, searchable copy.',
+      status: 'missing',
+      detail: 'Turso is not configured, so the shared presentation library cannot be read or published.',
+      fix: 'Add TURSO_DATABASE_URL and TURSO_AUTH_TOKEN, then redeploy — Turso is the authoritative presentation store.',
     };
   }
 
@@ -265,17 +262,19 @@ async function checkReadingRoom(): Promise<Check> {
   if (!value.hasTable) {
     return {
       ...base,
-      status: 'optional',
+      status: 'missing',
       ms,
-      detail: 'The reading room is reachable but empty — its schema has not been created yet. Reads fall back to Postgres meanwhile.',
-      fix: 'Nothing to do by hand: publishing a speech, or the Rebuild reading room button, creates it.',
+      detail: 'Turso is reachable, but the library schema is missing, so shared presentations cannot be served.',
+      fix: 'Apply the additive schema with npm run db:turso, then retry the check.',
     };
   }
   return {
     ...base,
     status: 'ok',
     ms,
-    detail: `The reading room is reachable and holds ${value.rows} published ${value.rows === 1 ? 'speech' : 'speeches'}.`,
+    detail: value.rows === 0
+      ? 'Turso is reachable and ready; no presentations have been shared yet.'
+      : `Turso is reachable and holds ${value.rows} published ${value.rows === 1 ? 'presentation' : 'presentations'}.`,
   };
 }
 
@@ -376,16 +375,13 @@ function checkSite(origin: string): Check {
 /* ------------------------------------------------------------------ */
 
 /**
- * Which pieces the site cannot do its job without.
+ * The services needed for the full authoring and reading experience.
  *
- * Clerk and Postgres: without them there is no sign-in and no library.
- * The reading room, Convex and the canonical address each have a working
- * fallback, so their absence is reported and costed but never counted as a
- * fault. Declared once, here, because "missing" and "missing but fine" are the
- * same word and opposite news — and a check that is critical in one branch of
- * its own logic and not in another is a bug waiting to happen.
+ * Clerk verifies sessions, Supabase owns profiles and usernames, and Turso is
+ * the single presentation store. Convex presence and the canonical origin are
+ * useful but have graceful fallbacks, so they are not counted as faults.
  */
-const CRITICAL: ReadonlySet<Check['id']> = new Set<Check['id']>(['clerk', 'postgres']);
+const CRITICAL: ReadonlySet<Check['id']> = new Set<Check['id']>(['clerk', 'profiles', 'reading-room']);
 
 /**
  * Probe everything, in parallel, and turn the answers into a verdict.
@@ -394,13 +390,13 @@ const CRITICAL: ReadonlySet<Check['id']> = new Set<Check['id']>(['clerk', 'postg
  * it with the configured canonical — see `checkSite`.
  */
 export async function healthReport(origin: string): Promise<HealthReport> {
-  const [postgres, readingRoom, live] = await Promise.all([
-    checkPostgres(),
+  const [profiles, readingRoom, live] = await Promise.all([
+    checkProfiles(),
     checkReadingRoom(),
     checkLive(),
   ]);
 
-  const checks: Check[] = [checkClerk(), checkSite(origin), postgres, readingRoom, live].map((check) => ({
+  const checks: Check[] = [checkClerk(), checkSite(origin), profiles, readingRoom, live].map((check) => ({
     ...check,
     critical: CRITICAL.has(check.id),
   }));
@@ -409,10 +405,10 @@ export async function healthReport(origin: string): Promise<HealthReport> {
    * The verdict weighs *what* is wrong, not only how much.
    *
    * A missing critical piece and a missing optional piece are both "missing",
-   * and they are opposite news: no Postgres means the site cannot keep its
-   * promise, while no reading room means reads take one hop more. Counting
-   * them together would report a deployment with no database as "working,
-   * with 3 optional pieces" — which is worse than no report at all.
+   * and they mean different things: without Clerk, Supabase profiles or Turso,
+   * sign-in, identity or the shared library cannot do their job. Convex and the
+   * canonical origin have graceful fallbacks; counting those alongside a core
+   * outage would report a broken deployment as merely degraded.
    */
   const failing = checks.filter((check) => check.critical && check.status !== 'ok');
   const optional = checks.filter((check) => !check.critical && check.status !== 'ok');

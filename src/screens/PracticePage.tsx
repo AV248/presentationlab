@@ -462,7 +462,7 @@ export function PracticePage() {
   }
 
   return (
-    <div className="pb-page" data-rehearsing={onStage}>
+    <div className="pb-page anim-rehearse-arrival" data-rehearsing={onStage}>
       {!onStage && (
         <RehearseHero
           items={items}

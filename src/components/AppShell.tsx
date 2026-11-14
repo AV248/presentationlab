@@ -325,26 +325,23 @@ function AccountChip() {
 
 function CloudBadge() {
   const status = useCloud((s) => s.status);
-  const enabled = useCloud((s) => s.enabled);
   const items = useCloud((s) => s.items);
   const error = useCloud((s) => s.error);
 
   const tone =
     status === 'online' ? 'var(--c-ok)' : status === 'error' ? 'var(--c-warn)' : 'var(--c-ink-muted)';
-  const label = !enabled
-    ? 'Local only'
-    : status === 'online'
-      ? `Cloud · ${items.length}`
-      : status === 'connecting'
-        ? 'Connecting…'
-        : status === 'error'
-          ? 'Cloud offline'
-          : 'Local only';
+  const label = status === 'online'
+    ? `Turso · ${items.length}`
+    : status === 'connecting'
+      ? 'Connecting…'
+      : status === 'error'
+        ? 'Library offline'
+        : 'Local only';
 
   return (
     <div
       className="pb-cloud-badge"
-      title={error ?? 'The built-in library works offline; the cloud adds shared speeches when reachable.'}
+      title={error ?? 'Bundled examples work offline; shared presentations are served from Turso.'}
     >
       <span className="pb-dot" style={{ background: tone, boxShadow: `0 0 8px ${tone}` }} />
       {label}

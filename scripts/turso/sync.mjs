@@ -1,82 +1,48 @@
 #!/usr/bin/env node
 /**
- * Rebuild the reading room from the truth.
+ * Additively import legacy Supabase presentations into Turso.
  *
- * `npm run sync:turso`            rebuild it
- * `npm run sync:turso -- --check`  say what would happen, change nothing
+ * `npm run sync:turso -- --check` reads both stores and reports what would be
+ * added without writing. `npm run sync:turso` imports only missing rows.
+ * Existing Turso rows are never overwritten or deleted. New site writes go
+ * directly to Turso and do not call this CLI.
  *
- * This is the full sync, and it is the same code the app uses: the endpoint
- * `POST /api/sync-library` and this script both call `projectLibrary()` in
- * `src/server/project.ts`. One implementation, two entry points — so the reading room
- * cannot mean one thing when the site refreshes it and another when you do.
- *
- * Use it for the first fill, and after anything large — a migration, a bulk
- * edit, a restore. Ordinary publishing refreshes the reading room on its own.
- *
- * Requires, in `.env` or the environment:
- *   SUPABASE_URL                 https://<project>.supabase.co
- *   SUPABASE_SERVICE_ROLE_KEY    the service key — server-side only, never VITE_
- *   TURSO_DATABASE_URL           libsql://…
- *   TURSO_AUTH_TOKEN             the token for that database
- *
- * The service key is used here rather than a person's session token because
- * this runs on your machine, without a browser, and it must be able to read
- * every published speech regardless of who is asking. It is read from `.env`
- * and never printed, never logged, and never sent anywhere but your own
- * Supabase project.
+ * Requires locally, in `.env` or the environment:
+ *   SUPABASE_URL                 legacy Supabase project URL
+ *   SUPABASE_SERVICE_ROLE_KEY    CLI-only read key; never a VITE_ variable
+ *   TURSO_DATABASE_URL           libsql://… or file:…
+ *   TURSO_AUTH_TOKEN             remote Turso token (not needed for file:)
  */
 
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { build } from 'esbuild';
 import { createClient } from '@libsql/client';
-import { ROOT, loadEnv, need, presence, fingerprint } from '../lib/env.mjs';
+import { ROOT, loadEnv, need, presence } from '../lib/env.mjs';
 
 const env = loadEnv();
 const checkOnly = process.argv.includes('--check');
-
-const supabaseUrl = need(
-  env,
-  'SUPABASE_URL',
-  'It is the Project URL from Supabase → Project Settings → Data API. Put it in .env.',
-);
+const supabaseUrl = need(env, 'SUPABASE_URL', 'Set the legacy Supabase Project URL in your local .env file.');
 const serviceKey = need(
   env,
   'SUPABASE_SERVICE_ROLE_KEY',
-  'It is the service_role key from Supabase → Project Settings → API keys. It belongs in .env (local only) — never in a VITE_ variable, and it is not needed in Vercel.',
+  'Set this CLI-only key in your local .env file. Never expose it through a VITE_ variable or add it to Vercel.',
 );
-const tursoUrl = need(
-  env,
-  'TURSO_DATABASE_URL',
-  'It is the libsql:// URL of the database created at turso.tech. Put it in .env.',
-);
+const tursoUrl = need(env, 'TURSO_DATABASE_URL', 'Set the authoritative Turso URL in .env.');
 const tursoToken = (env.TURSO_AUTH_TOKEN ?? '').trim();
 if (!tursoUrl.startsWith('file:') && !tursoToken) {
-  need(env, 'TURSO_AUTH_TOKEN', 'Create a token for the database in the Turso dashboard and put it in .env.');
+  need(env, 'TURSO_AUTH_TOKEN', 'Set the Turso token in your local .env file.');
 }
 
-console.log('\n  Rebuilding the reading room from Postgres\n');
-console.log(`  Postgres : ${supabaseUrl.replace(/^https?:\/\//, '')}`);
-console.log(`  key      : ${fingerprint(serviceKey)}${presence(env, 'SUPABASE_SERVICE_ROLE_KEY') === 'set' ? '' : ' (missing)'}`);
-console.log(`  Turso    : ${tursoUrl.startsWith('file:') ? tursoUrl : 'the configured database'}`);
-console.log(`  token    : ${tursoUrl.startsWith('file:') ? 'not needed (local file)' : presence(env, 'TURSO_AUTH_TOKEN')}`);
-if (checkOnly) console.log('  mode     : check only — nothing will be written');
+console.log(`\n  Legacy import : ${supabaseUrl.replace('https://', '').replace('http://', '')} → ${tursoUrl.startsWith('file:') ? tursoUrl : 'Turso'}`);
+console.log(`  service key   : ${presence(env, 'SUPABASE_SERVICE_ROLE_KEY')} (value not shown)`);
+console.log(`  Turso token   : ${tursoUrl.startsWith('file:') ? 'not needed for a local file' : presence(env, 'TURSO_AUTH_TOKEN')}`);
+if (checkOnly) console.log('  mode          : check only — no changes will be made');
 
-/**
- * Load `src/server/project.ts`.
- *
- * It is TypeScript, written for the serverless runtime, and this script is
- * plain node — so it is bundled by esbuild first, the same way the Vite dev
- * server mounts the API handlers. The compiled copy goes inside `node_modules`
- * (git-ignored, swept by `npm ci`) rather than a temp directory outside the
- * repository, because a bundle has to resolve its imports from somewhere that
- * can see `node_modules`.
- */
-async function loadProjection() {
+async function loadImporter() {
   const outDir = resolve(ROOT, 'node_modules/.pb-turso');
   mkdirSync(outDir, { recursive: true });
-  const outfile = resolve(outDir, 'project.mjs');
-
+  const outfile = resolve(outDir, 'legacy-import.mjs');
   await build({
     entryPoints: [resolve(ROOT, 'src/server/project.ts')],
     bundle: true,
@@ -87,73 +53,55 @@ async function loadProjection() {
     outfile,
     logLevel: 'error',
   });
-
   const module = await import(`${outfile}?t=${Date.now()}`);
-  if (typeof module.projectLibrary !== 'function') {
-    throw new Error('src/server/project.ts did not export projectLibrary — the sync cannot run.');
+  if (typeof module.inspectLegacyLibrary !== 'function' || typeof module.importLegacyLibrary !== 'function') {
+    throw new Error('The legacy importer is missing its safe inspect/import functions.');
   }
-  return module.projectLibrary;
+  return module;
 }
 
-try {
-  const projectLibrary = await loadProjection();
+const options = {
+  supabaseUrl,
+  apiKey: serviceKey,
+  tursoUrl,
+  tursoToken: tursoToken || 'local',
+};
 
+try {
+  const importer = await loadImporter();
   if (checkOnly) {
-    const url = new URL('/rest/v1/speeches', supabaseUrl);
-    url.searchParams.set('select', 'id');
-    url.searchParams.set('status', 'eq.published');
-    const response = await fetch(url, {
-      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, Prefer: 'count=exact' },
-    });
-    if (!response.ok) {
-      console.error(`\n  Postgres refused the read (${response.status}).`);
-      console.error(`  ${(await response.text()).slice(0, 300)}\n`);
-      process.exit(1);
-    }
-    const published = (await response.json()).length;
-    const db = createClient({ url: tursoUrl, authToken: tursoToken || undefined });
-    let present = 0;
-    try {
-      const { rows } = await db.execute('select count(*) as n from library');
-      present = Number(rows[0]?.n ?? 0);
-    } catch {
-      console.error('\n  turso/schema.sql has not been applied to this database yet.');
-      console.error('  Run:  npm run db:turso\n');
-      process.exit(1);
-    } finally {
-      db.close();
-    }
-    console.log(`\n  Postgres holds ${published} published speech(es).`);
-    console.log(`  The reading room holds ${present}.`);
-    console.log(present === published ? '  They agree — nothing to do.\n' : '  Run without --check to rebuild it.\n');
+    const plan = await importer.inspectLegacyLibrary(options);
+    console.log(`\n  Supabase legacy rows : ${plan.read}`);
+    console.log(`  Already represented : ${plan.present}`);
+    console.log(`  Missing in Turso     : ${plan.missing}`);
+    console.log('  Check complete. No presentation row was written or changed.\n');
     process.exit(0);
   }
 
   const started = Date.now();
-  const result = await projectLibrary({
-    supabaseUrl,
-    apiKey: serviceKey,
-    tursoUrl,
-    tursoToken: tursoToken || 'local',
-  });
-
-  // A quick, honest verification: the row count the database reports, and a
-  // search that must return at least one hit when there is anything to find.
+  const result = await importer.importLegacyLibrary(options);
   const db = createClient({ url: tursoUrl, authToken: tursoToken || undefined });
+  let total = 0;
   try {
-    const { rows } = await db.execute('select count(*) as n from library');
-    const stored = Number(rows[0]?.n ?? 0);
-    console.log(`\n  Copied ${result.synced} speech(es) in ${Date.now() - started} ms.`);
-    console.log(`  The reading room now reports ${stored} row(s).`);
-    if (stored !== result.synced) {
-      console.error('  The count does not match what was written — inspect the database before trusting it.');
-      process.exitCode = 1;
-    }
+    const rows = await db.execute('select count(*) as n from library');
+    total = Number(rows.rows[0]?.n ?? 0);
   } finally {
     db.close();
   }
-  console.log('\n  Done. Readers now reach this copy through /api/library.\n');
+  const verification = await importer.inspectLegacyLibrary(options);
+  console.log(`\n  Read from legacy store : ${result.read}`);
+  console.log(`  Added missing rows    : ${result.imported}`);
+  console.log(`  Left untouched        : ${result.skipped}`);
+  console.log(`  Still not represented : ${verification.missing}`);
+  console.log(`  Turso library total   : ${total}`);
+  console.log(`  Duration              : ${Date.now() - started} ms`);
+  if (verification.missing) {
+    console.error('\n  Some legacy rows were not imported. Inspect address conflicts before retrying.\n');
+    process.exitCode = 1;
+  } else {
+    console.log('\n  Import complete. Future writes are Turso-native; this command is not part of publishing.\n');
+  }
 } catch (error) {
-  console.error(`\n  Failed: ${error.message}\n`);
+  console.error(`\n  Import failed: ${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
 }

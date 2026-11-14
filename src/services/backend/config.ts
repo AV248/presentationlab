@@ -2,17 +2,14 @@
  * Which backends this build can reach.
  *
  * The app is written against one seam — `loadBackend()` — and this file decides
- * which of the three databases are actually available in the running build. All
- * three are optional: with none of them configured the site is fully local, as
- * it has always been when the cloud is absent.
+ * which of the browser-facing services are configured. Supabase owns profiles,
+ * usernames and account relationships; the public presentation library is
+ * authoritative in Turso; Convex is live-only and optional.
  *
- *   Supabase  the truth          (durable records, row-level security)
- *   Turso     the reading room   (published library + search, server-side only)
- *   Convex    the live layer     (presence, activity, ticking counters)
- *
- * The Supabase pair are `VITE_` variables because the browser talks to Postgres
- * directly under row-level security. The Turso token is **not** here — it lives
- * on the server, used by `/api/library`, so it never reaches a visitor.
+ * The Supabase pair are `VITE_` variables because the browser uses the public
+ * anon key under row-level security. The Turso token is **not** here — it lives
+ * on the server, used by `/api/library` and `/api/presentations`, so it never
+ * reaches a visitor.
  */
 
 import { env } from '../../lib/env';
@@ -23,13 +20,13 @@ export const SUPABASE_URL = clean(env.VITE_SUPABASE_URL);
 export const SUPABASE_ANON_KEY = clean(env.VITE_SUPABASE_ANON_KEY);
 export const CONVEX_URL = clean(env.VITE_CONVEX_URL);
 
-/** Durable records are reachable. */
+/** Supabase account/profile services are reachable. The library is checked via /api/library. */
 export const BACKEND_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 /** The live layer is reachable (optional: nothing durable depends on it). */
 export const LIVE_ENABLED = Boolean(CONVEX_URL);
 
-/** The reading room is reachable — always true; /api/library says if it is up. */
+/** The same-origin API for Turso-backed presentation reads. */
 export const LIBRARY_ENDPOINT = '/api/library';
 
 /**
@@ -49,15 +46,15 @@ export const BACKEND_PROJECT = (() => {
 /** Which databases this build is actually using, for the diagnostics panel. */
 export function backendSummary(): { name: string; configured: boolean; job: string }[] {
   return [
-    { name: 'Supabase', configured: BACKEND_ENABLED, job: 'the truth — profiles, handles, speeches, ads' },
-    { name: 'Turso', configured: true, job: 'the reading room — published writing and search' },
+    { name: 'Supabase', configured: BACKEND_ENABLED, job: 'profiles, usernames and account-backed data' },
+    { name: 'Turso', configured: true, job: 'authoritative published presentations, reads and search' },
     { name: 'Convex', configured: LIVE_ENABLED, job: 'the live layer — presence and activity' },
   ];
 }
 
 if (env.DEV && !BACKEND_ENABLED) {
   console.info(
-    '[pb] No Supabase configuration — records stay on this device. ' +
-      'Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to use the shared library.',
+    '[pb] No Supabase configuration — profiles and account-backed features are unavailable. ' +
+      'Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable them.'
   );
 }

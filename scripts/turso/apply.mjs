@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Apply `turso/schema.sql` to the reading room.
+ * Apply `turso/schema.sql` to Turso's authoritative presentation store.
  *
  * `npm run db:turso`
  *
@@ -114,9 +114,26 @@ const db = createClient({ url, authToken: authToken || undefined });
 
 try {
   // Sequential, not batched: a failure should name the statement that caused it
-  // rather than the batch it was in.
-  for (const statement of statements) {
-    await db.execute(statement);
+  // rather than the batch it was in. Every schema statement is idempotent.
+  for (const statement of statements) await db.execute(statement);
+
+  // Additive upgrades for databases created before the Turso-first content
+  // model. Never drop or replace existing presentation rows.
+  const current = await db.execute('pragma table_info(library)');
+  const present = new Set(current.rows.map((row) => String(row.name ?? '')));
+  const additions = [
+    ['author_photo_url', "text not null default ''"],
+    ['author_badges', "text not null default ''"],
+    ['source_type', "text not null default 'person'"],
+    ['source_name', "text not null default ''"],
+    ['source_url', "text not null default ''"],
+    ['license', "text not null default ''"],
+  ];
+  let upgraded = 0;
+  for (const [name, declaration] of additions) {
+    if (present.has(name)) continue;
+    await db.execute(`alter table library add column ${name} ${declaration}`);
+    upgraded += 1;
   }
 
   const tables = await db.execute(
@@ -135,7 +152,7 @@ try {
     process.exitCode = 1;
   } else {
     console.log('  Full-text search is in place (library_fts).');
-    console.log('\n  Next: npm run sync:turso   (fill it from Postgres)\n');
+    console.log('\n  Turso is ready. To import existing Supabase presentations, use the reviewed migration command; ordinary shares now write directly here.\n');
   }
 } catch (error) {
   console.error(`\n  Failed: ${error.message}\n`);

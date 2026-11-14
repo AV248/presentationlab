@@ -6,6 +6,7 @@ import type { CollectionItem } from '../hooks/useCollection';
 import { useLibrary } from '../store/library';
 import { formatCount } from '../lib/text';
 import { ReactionBar } from './ReactionBar';
+import { AuthorCorner } from './AuthorCorner';
 
 interface SpeechCardProps {
   item: CollectionItem;
@@ -127,6 +128,19 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
           </div>
         </div>
       </button>
+
+      <div className="pb-card-author-corner">
+        <AuthorCorner
+          author={item.author}
+          username={item.username}
+          photoURL={item.authorPhotoURL}
+          sourceType={item.sourceType}
+          sourceName={item.sourceName}
+          sourceURL={item.sourceURL}
+          badges={item.authorBadges}
+          compact
+        />
+      </div>
 
       <div
         style={{

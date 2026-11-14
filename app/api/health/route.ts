@@ -5,7 +5,7 @@ import { healthReport } from '@/server/health';
  *
  * The question the environment panel cannot answer, because it only ever sees
  * the browser's half: *does each service actually answer?* This endpoint talks
- * to Clerk, Postgres, Turso and Convex with the deployment's own credentials —
+ * to Clerk, Supabase, Turso and Convex with the deployment's own credentials —
  * over the server, where the secrets live — and reports what came back.
  *
  *   200  { verdict: 'ready' | 'degraded' | 'broken', summary, checks: […] }

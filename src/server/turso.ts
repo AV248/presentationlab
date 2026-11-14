@@ -37,8 +37,8 @@ export async function turso(): Promise<Client | null> {
     const { createClient } = await import('@libsql/client');
     return createClient({ url: TURSO_URL, authToken: TURSO_TOKEN });
   } catch {
-    // A missing client is a deployment problem, not a reader's problem:
-    // every caller falls back to Postgres, which holds the same rows.
+    // The library reports itself unavailable rather than consulting a second
+    // presentation-content store; Turso remains the single source of truth.
     return null;
   }
 }
@@ -79,4 +79,25 @@ export async function libraryTableExists(db: Client): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Upgrade the original read-copy table in place, without dropping rows. */
+export async function ensureLibraryColumns(db: Client): Promise<number> {
+  const info = await db.execute('pragma table_info(library)');
+  const present = new Set(info.rows.map((row) => String((row as Record<string, unknown>).name ?? '')));
+  const additions: [string, string][] = [
+    ['author_photo_url', "text not null default ''"],
+    ['author_badges', "text not null default ''"],
+    ['source_type', "text not null default 'person'"],
+    ['source_name', "text not null default ''"],
+    ['source_url', "text not null default ''"],
+    ['license', "text not null default ''"],
+  ];
+  let applied = 0;
+  for (const [name, declaration] of additions) {
+    if (present.has(name)) continue;
+    await db.execute(`alter table library add column ${name} ${declaration}`);
+    applied += 1;
+  }
+  return applied;
 }

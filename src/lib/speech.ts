@@ -33,6 +33,12 @@ export interface CloudSpeech {
   createdAt: string;
   uid: string;
   username?: string;
+  authorPhotoURL?: string;
+  authorBadges?: string[];
+  sourceType?: 'person' | 'archive' | 'admin';
+  sourceName?: string;
+  sourceURL?: string;
+  license?: string;
   slug?: string;
   folder?: string;
   credits?: string;
@@ -111,6 +117,15 @@ export function mapSpeechRow(id: string, data: SpeechRow): CloudSpeech {
     createdAt: created ? created.slice(0, 10) : new Date().toISOString().slice(0, 10),
     uid: str(data.uid ?? data.authorUid),
     username: str(data.username) || undefined,
+    authorPhotoURL: str(data.authorPhotoURL ?? data.author_photo_url ?? data.photo_url) || undefined,
+    authorBadges: (() => {
+      const raw = data.authorBadges ?? data.author_badges ?? data.badge_codes;
+      return Array.isArray(raw) ? raw.map(String) : str(raw).split(',').map((badge) => badge.trim()).filter(Boolean);
+    })(),
+    sourceType: (str(data.sourceType ?? data.source_type, 'person') as CloudSpeech['sourceType']),
+    sourceName: str(data.sourceName ?? data.source_name) || undefined,
+    sourceURL: str(data.sourceURL ?? data.source_url) || undefined,
+    license: str(data.license ?? data.licence) || undefined,
     slug: str(data.slug) || undefined,
     folder: str(data.folder) || undefined,
     credits: str(data.Credits ?? data.credits) || undefined,
@@ -142,6 +157,12 @@ export function speechRowFromPostgres(row: SpeechRow): SpeechRow {
     Category: row.category,
     Occasion: row.occasion,
     Author: row.author,
+    authorPhotoURL: row.author_photo_url,
+    authorBadges: row.author_badges,
+    sourceType: row.source_type,
+    sourceName: row.source_name,
+    sourceURL: row.source_url,
+    license: row.license,
     Tags: row.tags,
     Credits: row.credits,
     Signature: row.signature,
@@ -176,6 +197,12 @@ export function speechRowFromLibrary(row: SpeechRow): SpeechRow {
     Category: row.category,
     Occasion: row.occasion,
     Author: row.author,
+    authorPhotoURL: row.author_photo_url,
+    authorBadges: row.author_badges,
+    sourceType: row.source_type,
+    sourceName: row.source_name,
+    sourceURL: row.source_url,
+    license: row.license,
     Tags: row.tags,
     Credits: row.credits,
     Signature: row.signature,

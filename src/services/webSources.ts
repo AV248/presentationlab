@@ -92,15 +92,33 @@ function tidy(raw: string, limit?: number): string {
   return limit && text.length > limit ? `${text.slice(0, limit).trimEnd()}…` : text;
 }
 
+function stableSeed(value: string): number {
+  let hash = 2166136261;
+  for (const character of value) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  return hash >>> 0;
+}
+
 /** Every network call is time-boxed: an archive that hangs must not hang us. */
+const SOURCE_USER_AGENT = 'PresentationBuddy/3.1 (https://presentationbuddy.aavrit.dedyn.io/)';
+
+/**
+ * Public archive traffic is made from the server route, never a reader's
+ * browser. That lets Wikimedia see a useful User-Agent and lets Next cache
+ * each public source response instead of making every visit a fresh query.
+ */
 async function fetchJson<T>(url: string, timeoutMs = 9000): Promise<T | null> {
   if (typeof fetch !== 'function') return null;
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const server = typeof window === 'undefined';
   try {
     const response = await fetch(url, {
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        ...(server ? { 'User-Agent': SOURCE_USER_AGENT } : {}),
+      },
       signal: controller?.signal,
+      ...(server ? { cache: 'force-cache' as const, next: { revalidate: 1800 } } : { cache: 'no-store' as const }),
     });
     if (!response.ok) return null;
     return (await response.json()) as T;
@@ -115,8 +133,13 @@ async function fetchText(url: string, timeoutMs = 12000): Promise<string | null>
   if (typeof fetch !== 'function') return null;
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const server = typeof window === 'undefined';
   try {
-    const response = await fetch(url, { signal: controller?.signal });
+    const response = await fetch(url, {
+      headers: server ? { 'User-Agent': SOURCE_USER_AGENT, Accept: 'text/plain, text/html;q=0.9, */*;q=0.8' } : undefined,
+      signal: controller?.signal,
+      ...(server ? { cache: 'force-cache' as const, next: { revalidate: 86400 } } : { cache: 'no-store' as const }),
+    });
     if (!response.ok) return null;
     return await response.text();
   } catch {
@@ -156,18 +179,17 @@ function wikisourceSpeech(page: MwPage, content: string): WebSpeech {
   };
 }
 
-async function searchWikisource(query: string, limit: number): Promise<WebSpeech[]> {
+async function searchWikisource(query: string, limit: number, variation = 0): Promise<WebSpeech[]> {
   const term = query.trim();
   const searches = term
     ? [`incategory:"Speeches" ${term}`, `insource:"${term}" incategory:"Speeches"`, term]
     : ['incategory:"Speeches"', 'speech address oration lecture'];
 
   for (const search of searches) {
+    const pageOffset = (stableSeed(search) + variation * 13) % 20;
     const url = `${WS_API}?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(
       search,
-    )}&gsrnamespace=0&gsrlimit=${Math.max(limit, 8)}&gsroffset=${Math.floor(
-      Math.random() * 20,
-    )}&prop=extracts&exintro=1&explaintext=1`;
+    )}&gsrnamespace=0&gsrlimit=${Math.max(limit, 8)}&gsroffset=${pageOffset}&prop=extracts&exintro=1&explaintext=1`;
     const payload = await fetchJson<{ query?: { pages?: Record<string, MwPage> } }>(url);
     const pages = Object.values(payload?.query?.pages ?? {}).filter(
       (page) => page && page.pageid && !page.missing && (page.extract ?? '').length > 80,
@@ -289,7 +311,7 @@ async function searchWikiquote(query: string, limit: number): Promise<WebSpeech[
 /* ------------------------------------------------------------------ */
 
 /** Search every archive at once and interleave the results. */
-export async function searchWebSpeeches(query: string, limit = 12): Promise<WebSpeech[]> {
+async function searchWebSpeechesDirect(query: string, limit: number): Promise<WebSpeech[]> {
   const per = Math.max(3, Math.ceil(limit / 2));
   const [wikisource, wikiquote, gutenberg] = await Promise.all([
     searchWikisource(query, per).catch(() => []),
@@ -311,8 +333,18 @@ export async function searchWebSpeeches(query: string, limit = 12): Promise<WebS
   return out;
 }
 
+export async function searchWebSpeeches(query: string, limit = 12): Promise<WebSpeech[]> {
+  const safeLimit = Math.min(Math.max(Math.floor(limit) || 12, 1), 20);
+  if (typeof window === 'undefined') return searchWebSpeechesDirect(query.trim().slice(0, 120), safeLimit);
+  const params = new URLSearchParams({ mode: 'search', q: query.trim().slice(0, 120), limit: String(safeLimit) });
+  const response = await fetch(`/api/arrivals?${params}`, { headers: { Accept: 'application/json' } });
+  if (!response.ok) throw new Error('The archives could not be reached.');
+  const payload = await response.json() as { speeches?: WebSpeech[] };
+  return Array.isArray(payload.speeches) ? payload.speeches : [];
+}
+
 /** Fetch the full text of a single item, whichever archive it came from. */
-export async function fetchWebSpeech(speech: WebSpeech): Promise<WebSpeech> {
+async function fetchWebSpeechDirect(speech: WebSpeech): Promise<WebSpeech> {
   if (speech.sourceId === 'gutenberg') {
     const id = speech.id.replace(/^pg-/, '');
     const book = await fetchJson<GutenBook>(`${GUTENDEX}/${id}`);
@@ -335,6 +367,22 @@ export async function fetchWebSpeech(speech: WebSpeech): Promise<WebSpeech> {
   const page = Object.values(payload?.query?.pages ?? {})[0];
   if (!page?.extract) return speech;
   return { ...speech, content: tidy(page.extract, 30000) };
+}
+
+export async function fetchWebSpeech(speech: WebSpeech): Promise<WebSpeech> {
+  if (typeof window === 'undefined') return fetchWebSpeechDirect(speech);
+  try {
+    const response = await fetch('/api/arrivals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ mode: 'text', speech }),
+    });
+    if (!response.ok) return speech;
+    const payload = await response.json() as { speech?: WebSpeech };
+    return payload.speech && typeof payload.speech.content === 'string' ? payload.speech : speech;
+  } catch {
+    return speech;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -398,21 +446,22 @@ export interface ArrivalsResult {
 }
 
 /**
- * Fetch this session's five new arrivals, spread across the archives so
- * every run brings something from more than one place. Known ids are
- * skipped, so "bring me five more" really does bring five more.
+ * Fetch this session's new arrivals, spread across the archives. Known ids
+ * are skipped, so an automatic top-up never repeats a presentation already
+ * shown in this tab.
  */
-export async function fetchArrivals(
-  known: string[] = [],
-  goal = ARRIVALS_GOAL,
-  offset = 0,
+async function fetchArrivalsDirect(
+  known: string[],
+  goal: number,
+  offset: number,
+  baseSeed: number,
 ): Promise<ArrivalsResult> {
-  const seed = sessionSeed() + offset;
+  const seed = baseSeed + offset;
   const theme = ARRIVAL_THEMES[seed % ARRIVAL_THEMES.length];
   const knownSet = new Set(known);
 
   const settled = await Promise.allSettled([
-    searchWikisource(theme, goal),
+    searchWikisource(theme, goal, seed),
     searchGutenberg(theme, 2),
     searchWikiquote(theme, 3),
   ]);
@@ -449,6 +498,29 @@ export async function fetchArrivals(
   }
 
   return { speeches, theme, answered, unreachable };
+}
+
+export async function fetchArrivals(
+  known: string[] = [],
+  goal = ARRIVALS_GOAL,
+  offset = 0,
+  seed = sessionSeed(),
+): Promise<ArrivalsResult> {
+  const safeGoal = Math.min(Math.max(Math.floor(goal) || ARRIVALS_GOAL, 1), ARRIVALS_GOAL);
+  const safeOffset = Math.min(Math.max(Math.floor(offset) || 0, 0), 64);
+  const safeKnown = known.filter((id) => /^[A-Za-z0-9_-]{1,100}$/.test(id)).slice(-40);
+  if (typeof window === 'undefined') return fetchArrivalsDirect(safeKnown, safeGoal, safeOffset, seed);
+
+  const params = new URLSearchParams({
+    mode: 'batch',
+    goal: String(safeGoal),
+    offset: String(safeOffset),
+    seed: String(Math.max(0, Math.floor(seed)) % 1_000_000),
+    known: safeKnown.join(','),
+  });
+  const response = await fetch(`/api/arrivals?${params}`, { headers: { Accept: 'application/json' } });
+  if (!response.ok) throw new Error('The archives could not be reached.');
+  return await response.json() as ArrivalsResult;
 }
 
 /** Kept for the library's quiet first-load top-up. */

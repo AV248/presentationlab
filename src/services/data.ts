@@ -1,29 +1,31 @@
 /**
  * Data access for Presentation Buddy.
  *
- * Everything durable lives in Postgres (Supabase). The names below are the
- * app's own collection names; src/services/backend/supabase.ts maps each one
- * to a table, and to the column behind every field:
+ * Shared presentations are authoritative in Turso and are read through
+ * `/api/library`; a writer's draft stays on-device until they explicitly share.
+ * Supabase/Postgres remains the account and relationship store used by the
+ * existing services in this module:
  *
- *   presentations — speeches. Public read; authors may write their own.
- *   bloggerblogs  — community posts ("open mic"). Authors may write.
- *   users         — one row per person, carrying their own like score.
- *   handles       — the username lock: one row per claimed name.
- *   reactions     — one row per (person, speech): like or dislike.
- *   shares        — one row per (person, speech) share.
- *   admins        — role rows: 'owner' | 'admin'.
- *   adminPrivate  — the second lock; readable only by a role-holder.
- *   servingads    — sponsored cards.
- *   sponsors      — optional sponsor slots used by the ad gate.
- *   feedback      — what people tell us.
- *   siteSettings  — one row per site-wide setting.
+ *   users / profiles — the person's account and public profile.
+ *   handles          — the username lock: one row per claimed name.
+ *   reactions        — one row per (person, speech): like or dislike.
+ *   shares           — one row per (person, speech) share.
+ *   admins           — role rows: 'owner' | 'admin'.
+ *   adminPrivate     — the second lock; readable only by a role-holder.
+ *   ads / sponsors   — sponsored cards and optional sponsor slots.
+ *   posts / feedback / siteSettings — other account-backed site data.
+ *
+ * The legacy `speeches` table is retained for additive import and compatibility;
+ * new presentations are written directly to Turso, not mirrored here.
  *
  * Nothing here invents numbers. Counters only ever move by real increments
  * tied to a signed-in person, and the two that must be atomic — reacting and
  * sharing — are single database functions rather than a sequence of writes.
  */
 
-import { loadBackend, BACKEND_ENABLED } from './backend';
+import { loadBackend } from './backend';
+import { fetchLibrary, fetchOne } from './backend/library';
+import { clerkSessionToken } from './clerk';
 import { mapSpeechRow, str, num, isoTimestamp, type CloudSpeech } from '../lib/speech';
 
 export type CloudStatus = 'off' | 'connecting' | 'online' | 'error';
@@ -59,52 +61,62 @@ export interface CloudResult {
 /* ------------------------------------------------------------------ */
 
 export async function fetchSpeeches(): Promise<CloudResult> {
-  if (!BACKEND_ENABLED) return { items: [], status: 'off' };
   try {
-    const bundle = await fs();
-    if (!bundle) return { items: [], status: 'off' };
-    const { fs: f, db } = bundle;
-    const snap = await f.getDocs(f.query(f.collection(db, 'presentations'), f.limit(200)));
-    const items = snap.docs.map((doc) => mapSpeechRow(doc.id, doc.data()));
-    return { items, status: 'online' };
-  } catch (error) {
+    const page = await fetchLibrary({ max: 200 });
+    if (page.source === 'none') {
+      return {
+        items: [],
+        status: 'error',
+        error: page.error ?? 'The shared presentation store could not be reached.',
+      };
+    }
     return {
-      items: [],
-      status: 'error',
-      error: describeError(error),
+      items: page.items.map((row) => mapSpeechRow(String(row.id ?? ''), row)),
+      status: 'online',
     };
+  } catch (error) {
+    return { items: [], status: 'error', error: describeError(error) };
   }
 }
 
 export async function getSpeech(id: string): Promise<CloudSpeech | null> {
-  const bundle = await fs();
-  if (!bundle) return null;
-  const { fs: f, db } = bundle;
-  const snap = await f.getDoc(f.doc(db, 'presentations', id));
-  if (!snap.exists()) return null;
-  return mapSpeechRow(snap.id, snap.data() ?? {});
+  const row = await fetchOne(id);
+  return row ? mapSpeechRow(String(row.id ?? id), row) : null;
 }
 
-/** A real view: one increment per open. Fails silently if rules forbid it. */
+/**
+ * A real published read. A tab-scoped random identifier deduplicates reloads
+ * for the same presentation on the same UTC day; it contains no account id or
+ * network address and stays in sessionStorage only.
+ */
 export async function registerView(id: string): Promise<void> {
-  const bundle = await fs();
-  if (!bundle) return;
+  if (typeof window === 'undefined') return;
   try {
-    await bundle.fs.updateDoc(bundle.fs.doc(bundle.db, 'presentations', id), {
-      views: bundle.fs.increment(1),
+    const key = 'pb.reader.session.v1';
+    let sessionId = sessionStorage.getItem(key) ?? '';
+    if (!/^[A-Za-z0-9_-]{16,100}$/.test(sessionId)) {
+      sessionId = crypto.randomUUID();
+      sessionStorage.setItem(key, sessionId);
+    }
+    await fetch('/api/presentations/view', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, sessionId }),
+      keepalive: true,
     });
   } catch {
-    /* read-only rules are a perfectly normal configuration */
+    /* Private mode, offline reads, and a missing counter do not block reading. */
   }
 }
 
 export interface PublishInput {
   title: string;
   content: string;
-  preview: string;
-  category: string;
-  occasion: string;
-  tags: string[];
+  preview?: string;
+  category?: string;
+  /** Retained for old call sites; the minimal writer no longer asks for it. */
+  occasion?: string;
+  tags?: string[];
   ad?: boolean;
   username?: string;
   slug?: string;
@@ -115,111 +127,51 @@ export interface PublishInput {
   allowCopy?: boolean;
 }
 
+async function writePresentation(method: 'POST' | 'PUT' | 'DELETE', payload: Record<string, unknown>) {
+  const token = await clerkSessionToken();
+  if (!token) throw new Error('Sign in again before sharing or changing a presentation.');
+  const response = await fetch('/api/presentations', {
+    method,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json().catch(() => ({})) as { id?: string; error?: string; message?: string };
+  if (!response.ok) throw new Error(result.message ?? result.error ?? `The presentation request failed (${response.status}).`);
+  return result;
+}
+
 export async function publishSpeech(
   input: PublishInput,
   uid: string,
   authorName: string,
 ): Promise<{ id: string }> {
-  const bundle = await fs();
-  if (!bundle) throw new Error('Cloud publishing is not configured on this installation.');
-  const { fs: f, db } = bundle;
-  const now = new Date().toISOString().slice(0, 10);
-  const payload = {
-    Title: input.title,
-    Content: input.content,
-    Preview: input.preview,
-    Category: input.category,
-    Occasion: input.occasion,
-    Tags: input.tags.join(', '),
-    Author: authorName,
-    uid,
-    username: input.username ?? '',
-    slug: input.slug ?? '',
-    folder: input.folder ?? '',
-    Credits: input.credits ?? '',
-    Signature: input.signature ?? '',
-    allowCopy: input.allowCopy !== false,
-    ad: Boolean(input.ad),
-    views: 0,
-    likes: 0,
-    dislikes: 0,
-    shares: 0,
-    Date: now,
-    createdAt: f.serverTimestamp(),
-    updatedAt: f.serverTimestamp(),
-  };
-  const ref = await f.addDoc(f.collection(db, 'presentations'), payload);
-  return { id: ref.id };
-}
-
-/* ------------------------------------------------------------------ */
-/* The reading room, kept in step with the truth                       */
-/* ------------------------------------------------------------------ */
-
-/**
- * Ask the server to rebuild the reading room.
- *
- * Publishing writes to Postgres, which is the truth. Turso holds a *copy*, so
- * something has to carry the new row across — and it has to be the server that
- * does it, because the Turso token never reaches a browser.
- *
- * This is deliberately fire-and-forget from the caller's point of view: the
- * speech is published the moment Postgres accepts it, and a copy that is a
- * minute late is not an error anyone needs to see. Failures are returned
- * rather than thrown so the caller can say "published, and the fast copy will
- * catch up" instead of pretending the publish failed.
- */
-export async function refreshReadingRoom(
-  getToken: () => Promise<string | null>,
-): Promise<{ ok: boolean; synced?: number; reason?: string }> {
-  try {
-    const token = await getToken();
-    if (!token) return { ok: false, reason: 'no-session' };
-
-    const response = await fetch('/api/sync-library', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: '{}',
-    });
-    const payload = (await response.json().catch(() => ({}))) as {
-      synced?: number;
-      error?: string;
-      message?: string;
-    };
-    if (!response.ok) {
-      return { ok: false, reason: payload.error ?? `http_${response.status}` };
-    }
-    return { ok: true, synced: payload.synced };
-  } catch (error) {
-    return { ok: false, reason: (error as Error).message };
-  }
+  // Caller-supplied identity is intentionally ignored. The server verifies the
+  // Clerk token and reads the author/username/photo from the public profile.
+  void uid;
+  void authorName;
+  const result = await writePresentation('POST', input as unknown as Record<string, unknown>);
+  if (!result.id) throw new Error('The presentation was saved without an id. Please check the library.');
+  return { id: result.id };
 }
 
 export async function updateSpeechDoc(id: string, patch: Partial<PublishInput>): Promise<void> {
-  const bundle = await fs();
-  if (!bundle) throw new Error('Cloud sync is not configured.');
-  const { fs: f, db } = bundle;
-  const payload: Record<string, unknown> = { updatedAt: f.serverTimestamp() };
-  if (patch.title !== undefined) payload.Title = patch.title;
-  if (patch.content !== undefined) payload.Content = patch.content;
-  if (patch.preview !== undefined) payload.Preview = patch.preview;
-  if (patch.category !== undefined) payload.Category = patch.category;
-  if (patch.occasion !== undefined) payload.Occasion = patch.occasion;
-  if (patch.tags !== undefined) payload.Tags = patch.tags.join(', ');
-  if (patch.ad !== undefined) payload.ad = Boolean(patch.ad);
-  if (patch.credits !== undefined) payload.Credits = patch.credits;
-  if (patch.signature !== undefined) payload.Signature = patch.signature;
-  if (patch.allowCopy !== undefined) payload.allowCopy = patch.allowCopy !== false;
-  if (patch.folder !== undefined) payload.folder = patch.folder;
-  if (patch.slug !== undefined) payload.slug = patch.slug;
-  if (patch.username !== undefined) payload.username = patch.username;
-  await f.updateDoc(f.doc(db, 'presentations', id), payload);
+  const current = await getSpeech(id);
+  if (!current) throw new Error('That shared presentation could not be found.');
+  await writePresentation('PUT', {
+    id,
+    title: patch.title ?? current.title,
+    content: patch.content ?? current.content,
+    preview: patch.preview ?? current.preview,
+    category: patch.category ?? current.category,
+    credits: patch.credits ?? current.credits ?? '',
+    slug: patch.slug ?? current.slug ?? current.title,
+    folder: patch.folder ?? current.folder ?? '',
+    allowCopy: patch.allowCopy ?? current.allowCopy,
+  });
 }
 
 export async function deleteSpeechDoc(id: string): Promise<void> {
-  const bundle = await fs();
-  if (!bundle) throw new Error('Cloud sync is not configured.');
-  await bundle.fs.deleteDoc(bundle.fs.doc(bundle.db, 'presentations', id));
+  await writePresentation('DELETE', { id });
 }
 
 /* ------------------------------------------------------------------ */
@@ -596,11 +548,6 @@ export async function moveSpeech(
 }
 
 export async function fetchSpeechesByUsername(username: string): Promise<CloudSpeech[]> {
-  if (!BACKEND_ENABLED) return [];
-  const bundle = await fs(); if (!bundle) return [];
-  const { fs: f, db } = bundle;
-  try {
-    const snap = await f.getDocs(f.query(f.collection(db, 'presentations'), f.where('username', '==', username), f.limit(100)));
-    return snap.docs.map((d) => mapSpeechRow(d.id, d.data()));
-  } catch { return []; }
+  const page = await fetchLibrary({ username, max: 200 });
+  return page.items.map((row) => mapSpeechRow(String(row.id ?? ''), row));
 }
