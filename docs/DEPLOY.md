@@ -8,7 +8,7 @@ Clerk verification and canonical Turso reads/writes need the Next.js runtime.
 
 ## Requirements
 
-- Node.js 22 (the `package.json` engine constraint)
+- Node.js 26.13.1 (the exact `.nvmrc` and `package.json` engine constraint)
 - HTTPS on the public site
 - Network access from the Node server to Clerk, Supabase, Turso and, if enabled,
   Convex and the source endpoints

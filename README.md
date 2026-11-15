@@ -61,7 +61,7 @@ to Turso only.
 
 ## Setup and verification
 
-Use Node 22 (the version pinned in `package.json`). Copy `.env.example` to
+Use Node 26.13.1 (pinned in `.nvmrc` and `package.json`). Copy `.env.example` to
 `.env`, keep real credentials there, then:
 
 ```bash

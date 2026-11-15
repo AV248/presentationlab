@@ -25,7 +25,7 @@
  * which of the four to check first. No support ticket needed to find out.
  */
 import { useEffect, useState } from 'react';
-import { useClerk, useSignIn, useAuth as useClerkAuth } from '@clerk/clerk-react';
+import { useClerk, useSignIn, useAuth as useClerkAuth } from '@clerk/react';
 import { AlertTriangle, Mail } from 'lucide-react';
 import { GoogleMark, MicrosoftMark } from './AuthMarks';
 import {
@@ -89,7 +89,7 @@ const CAUSES = [
 export function ClerkAuthButtons() {
   const clerk = useClerk();
   const { isLoaded, isSignedIn } = useClerkAuth();
-  const { isLoaded: signInLoaded, signIn } = useSignIn();
+  const { fetchStatus: signInFetchStatus, signIn } = useSignIn();
   const closeSheet = useUi((s) => s.closeSignIn);
   const [busy, setBusy] = useState<OAuthStrategy | 'email' | 'create' | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -128,7 +128,7 @@ export function ClerkAuthButtons() {
 
   const withProvider = async (strategy: OAuthStrategy) => {
     setNote(null);
-    if (!signInLoaded || !signIn) {
+    if (signInFetchStatus === 'fetching') {
       setNote('Still waking up sign-in — try once more in a moment.');
       return;
     }
@@ -139,11 +139,15 @@ export function ClerkAuthButtons() {
     } catch { /* private mode */ }
     setBusy(strategy);
     try {
-      await signIn.authenticateWithRedirect({
+      const { error } = await signIn.sso({
         strategy,
-        redirectUrl: CLERK_SSO_CALLBACK_PATH,
-        redirectUrlComplete: destination(),
+        redirectUrl: destination(),
+        redirectCallbackUrl: CLERK_SSO_CALLBACK_PATH,
       });
+      if (error) {
+        setBusy(null);
+        setNote(clerkAuthMessage(error));
+      }
       // The browser is leaving for the provider; the button stays busy on
       // purpose so nobody double-clicks their way into two attempts.
     } catch (error) {

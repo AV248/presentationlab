@@ -5,7 +5,7 @@ import { Check, Heart, PencilLine, Share2, X } from 'lucide-react';
 import { EnvCheckPanel } from './EnvCheckPanel';
 import { GoogleMark, MicrosoftMark } from './AuthMarks';
 import { useUi } from '../store/ui';
-import { SignIn } from '@clerk/clerk-react';
+import { SignIn } from '@clerk/react';
 import { useAuth, isSignInAvailable } from '../store/auth';
 import { CLERK_ENABLED } from '../services/clerk';
 import type { SignInProvider } from '../services/auth';

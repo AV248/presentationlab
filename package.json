@@ -9,10 +9,11 @@
     "build": "node scripts/cards/run.mjs && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "verify": "npm run typecheck && npm run audit:secrets && npm run check:schema && npm run check:pg && npm run check:reading && npm run check:library && npm run check:convex",
+    "verify": "npm run typecheck && npm run audit:secrets && npm run check:env && npm run check:schema && npm run check:pg && npm run check:reading && npm run check:library && npm run check:convex",
     "verify:all": "PB_REQUIRE_PG=1 npm run verify && npm run build && npm run check:routes",
     "cards": "node scripts/cards/run.mjs",
     "audit:secrets": "node scripts/check-secrets.mjs",
+    "check:env": "node scripts/check-env-bridge.mjs",
     "check:schema": "node scripts/check-schema.mjs",
     "db:turso": "node scripts/turso/apply.mjs",
     "migrate:firestore": "node scripts/migrate/from-firestore.mjs",
@@ -24,32 +25,33 @@
     "check:convex": "node scripts/check-convex-safety.mjs"
   },
   "dependencies": {
-    "@clerk/backend": "^3.23.2",
-    "@clerk/clerk-react": "^5.61.10",
-    "@clerk/themes": "^2.4.57",
-    "@libsql/client": "^0.15.0",
-    "@supabase/supabase-js": "^2.58.0",
-    "@tailwindcss/postcss": "^4.3.3",
-    "clsx": "^2.1.1",
-    "convex": "^1.29.0",
-    "lucide-react": "^1.47.0",
-    "next": "^16.4.1",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "zustand": "^5.0.15"
+    "@clerk/backend": "3.29.0",
+    "@clerk/react": "6.18.8",
+    "@clerk/themes": "2.4.57",
+    "@libsql/client": "0.18.0",
+    "@supabase/supabase-js": "2.119.0",
+    "@tailwindcss/postcss": "4.3.5",
+    "@vercel/analytics": "2.0.1",
+    "clsx": "2.1.1",
+    "convex": "1.50.0",
+    "lucide-react": "1.73.0",
+    "next": "16.4.6",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zustand": "5.1.0"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.10",
-    "@types/node": "^26.6.5",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "esbuild": "^0.28.2",
-    "firebase-admin": "^14.5.0",
-    "sharp": "^0.35.4",
-    "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.3"
+    "@electric-sql/pglite": "0.5.16",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "esbuild": "0.28.2",
+    "firebase-admin": "14.5.1",
+    "sharp": "0.35.5",
+    "tailwindcss": "4.3.5",
+    "typescript": "7.0.2"
   },
   "engines": {
-    "node": "22.x"
+    "node": "26.13.1"
   }
 }

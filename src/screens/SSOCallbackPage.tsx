@@ -17,7 +17,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate } from '@/lib/router';
-import { AuthenticateWithRedirectCallback, useAuth } from '@clerk/clerk-react';
+import { AuthenticateWithRedirectCallback, useAuth } from '@clerk/react';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
 import { CLERK_ENABLED } from '../services/clerk';
 import { usePageMeta } from '../lib/usePageMeta';
@@ -36,8 +36,8 @@ const REASONS: Record<string, string> = {
   session_exists: 'You are already signed in.',
 };
 
-function explain(): { code: string; message: string } | null {
-  const params = new URLSearchParams(window.location.search);
+function explain(search: string): { code: string; message: string } | null {
+  const params = new URLSearchParams(search);
   const status = params.get('__clerk_status');
   if (status === 'failed' || status === 'expired') {
     const raw = params.get('__clerk_error') ?? params.get('__clerk_reason') ?? '';
@@ -63,8 +63,16 @@ export function SSOCallbackPage() {
 function ClerkHandshake() {
   const navigate = useNavigate();
   const { isLoaded, isSignedIn } = useAuth();
-  const [failed] = useState(() => explain());
+  const [failed, setFailed] = useState<{ code: string; message: string } | null>(null);
+  const [failureChecked, setFailureChecked] = useState(false);
   const [slow, setSlow] = useState(false);
+
+  // Client Components are still prerendered by Next.js. Read the callback URL
+  // only after hydration so the static callback page can render on the server.
+  useEffect(() => {
+    setFailed(explain(window.location.search));
+    setFailureChecked(true);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSlow(true), 12_000);
@@ -74,15 +82,15 @@ function ClerkHandshake() {
   // Clerk normally redirects on its own (right back to the page they left).
   // This is the belt to that pair of braces: signed in is signed in.
   useEffect(() => {
-    if (!isLoaded || !isSignedIn || failed) return undefined;
+    if (!failureChecked || !isLoaded || !isSignedIn || failed) return undefined;
     const timer = window.setTimeout(() => navigate('/', { replace: true }), 500);
     return () => window.clearTimeout(timer);
-  }, [isLoaded, isSignedIn, failed, navigate]);
+  }, [failureChecked, isLoaded, isSignedIn, failed, navigate]);
 
   return (
     <>
-      {!failed && <AuthenticateWithRedirectCallback />}
-      <CallbackShell failed={failed} slow={slow} />
+      {failureChecked && !failed && <AuthenticateWithRedirectCallback />}
+      <CallbackShell failed={failed} slow={failureChecked && slow} />
     </>
   );
 }

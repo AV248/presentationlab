@@ -23,26 +23,25 @@
  * lives only on the server, and is never imported into this module.
  */
 
-const raw = process.env;
-
 export const env = {
-  /** The canonical origin: canonicals, sitemap, Open Graph, share links. */
-  VITE_SITE_URL: raw.VITE_SITE_URL,
-  /** Clerk publishable key — identifies the instance in the browser. */
-  VITE_CLERK_PUBLISHABLE_KEY: raw.VITE_CLERK_PUBLISHABLE_KEY,
-  /** Postgres: the truth, talked to directly under row-level security. */
-  VITE_SUPABASE_URL: raw.VITE_SUPABASE_URL,
-  VITE_SUPABASE_ANON_KEY: raw.VITE_SUPABASE_ANON_KEY,
-  /** Optional Convex safety mirror; never a live content dependency. */
-  VITE_CONVEX_URL: raw.VITE_CONVEX_URL,
+  /**
+   * Keep each public read as a literal member access. Next replaces these
+   * expressions at build time; aliasing `process.env` first leaves an empty
+   * object in browser bundles and makes valid Vercel values look missing.
+   */
+  VITE_SITE_URL: process.env.VITE_SITE_URL,
+  VITE_CLERK_PUBLISHABLE_KEY: process.env.VITE_CLERK_PUBLISHABLE_KEY,
+  VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL,
+  VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY,
+  VITE_CONVEX_URL: process.env.VITE_CONVEX_URL,
 
   /**
    * Vite's own two flags, kept because a lot of diagnostics are written
    * against them ("in development, say why"). `next dev` sets
    * NODE_ENV=development; `next build` sets production.
    */
-  DEV: raw.NODE_ENV !== 'production',
-  PROD: raw.NODE_ENV === 'production',
+  DEV: process.env.NODE_ENV !== 'production',
+  PROD: process.env.NODE_ENV === 'production',
   /** The app is always served from the root of its own domain. */
   BASE_URL: '/',
 } as const;
