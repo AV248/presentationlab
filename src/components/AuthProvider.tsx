@@ -7,7 +7,7 @@ import {
   useUser,
   useAuth as useClerkAuth,
   useClerk,
-} from '@clerk/clerk-react';
+} from '@clerk/react';
 import { dark } from '@clerk/themes';
 import {
   CLERK_PUBLISHABLE_KEY,
@@ -287,7 +287,6 @@ export function AccountMenu() {
   if (!CLERK_ENABLED) return null;
   return (
     <UserButton
-      afterSignOutUrl="/"
       showName={false}
       /* Connected accounts are switched off for this site: sign-in is
          e-mail plus whatever the dashboard enables, and a social account

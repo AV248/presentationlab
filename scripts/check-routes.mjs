@@ -111,6 +111,13 @@ try {
   );
   expect('the library declares its canonical origin', canonicalOf(home.body).startsWith('http'));
 
+  const callback = await get('/sso-callback');
+  expect(
+    'the SSO callback prerenders as a real page without reading the request URL on the server',
+    callback.status === 200 && callback.body.includes('Finishing sign-in'),
+    `status ${callback.status}; ${callback.body.length} bytes`,
+  );
+
   const speech = await get('/read/five-minutes');
   expect('a speech page answers 200', speech.status === 200, `status ${speech.status}`);
   expect(
@@ -268,6 +275,7 @@ try {
   const policy = home.headers.get('content-security-policy') ?? '';
   expect('every response carries a content security policy', policy.includes("default-src 'self'"));
   expect('the policy allows the databases the app talks to', policy.includes('*.supabase.co') && policy.includes('*.convex.cloud'));
+  expect('the policy allows Vercel Analytics script and data endpoints', policy.includes('va.vercel-scripts.com') && policy.includes('vitals.vercel-insights.com'));
   expect('and does not allow the page to be framed', policy.includes("frame-ancestors 'self'"));
   expect('HSTS is on', (home.headers.get('strict-transport-security') ?? '').includes('max-age=31536000'));
   expect('nosniff is on', home.headers.get('x-content-type-options') === 'nosniff');

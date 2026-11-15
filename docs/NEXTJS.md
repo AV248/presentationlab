@@ -3,7 +3,7 @@
 Presentation Buddy 3.1 runs on the **Next.js App Router**. The application is a
 Node.js server, not a Vite static export. Vercel should detect Next.js from
 `package.json`; for another host, build with `npm run build` and run
-`npm run start` on Node 22.
+`npm run start` on Node 26.13.1 (the exact version pinned by `.nvmrc` and `package.json`).
 
 ## Framework ownership
 
