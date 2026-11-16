@@ -107,7 +107,16 @@ export async function POST(request: Request) {
     return json(400, { error: 'invalid_handle', message: checkedHandle.error ?? 'That handle is reserved for a site page.' });
   }
   const slug = typeof body.slug === 'string' ? body.slug.trim().toLowerCase() : '';
-  if (!/^[a-z0-9-]{2,60}$/.test(slug)) return json(400, { error: 'invalid_slug', message: 'Use 2–60 lowercase letters, numbers or single hyphens for the official slug.' });
+  if (
+    slug.length < 2 ||
+    slug.length > 60 ||
+    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)
+  ) {
+    return json(400, {
+      error: 'invalid_slug',
+      message: 'Use 2–60 lowercase letters, numbers or single hyphens for the official slug.',
+    });
+  }
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(400, { error: 'invalid_email', message: 'Enter a contact email for the new Clerk identity.' });
   const displayName = typeof body.displayName === 'string' ? body.displayName.trim().slice(0, 80) : '';
@@ -146,15 +155,28 @@ export async function POST(request: Request) {
     });
     return json(201, { ok: true, uid: createdUid, handle, slug });
   } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+
+    // Keep the specific failure in server logs; the browser gets a generic message.
+    console.error('[admin/accounts] provisioning failed:', detail.slice(0, 400));
+
     if (createdUid) {
-      try { await clerk.users.deleteUser(createdUid); }
-      catch { /* If Clerk is temporarily unreachable, report the orphan for cleanup. */ }
+      try {
+        await clerk.users.deleteUser(createdUid);
+      } catch (cleanupError) {
+        const cleanupDetail = cleanupError instanceof Error
+          ? cleanupError.message
+          : String(cleanupError);
+        console.error('[admin/accounts] Clerk cleanup failed:', cleanupDetail.slice(0, 400));
+      }
     }
-    const detail = (error as Error).message ?? '';
+
     const conflict = /already exists|duplicate|unique|taken/i.test(detail);
     return json(conflict ? 409 : 502, {
       error: conflict ? 'account_conflict' : 'account_creation_failed',
-      message: conflict ? 'That email, Clerk handle or source slug already exists.' : 'The official identity could not be provisioned. Check the workspace setup and try again.',
+      message: conflict
+        ? 'That email, Clerk handle or source slug already exists.'
+        : 'The official identity could not be provisioned. Check the workspace setup and try again.',
     });
   }
 }

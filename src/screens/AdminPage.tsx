@@ -828,7 +828,21 @@ function SourceReviewPanel() {
         <form onSubmit={submitAccount} style={{ display: 'grid', gap: 10, marginTop: 12 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(190px, 100%), 1fr))', gap: 10 }}>
             <div><label className="pb-label" htmlFor="official-name">Display name *</label><input id="official-name" className="pb-input" required maxLength={80} value={draft.displayName} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} placeholder="Wikisource Editorial" /></div>
-            <div><label className="pb-label" htmlFor="official-slug">Source slug *</label><input id="official-slug" className="pb-input" required maxLength={60} pattern="[a-z0-9-]{2,60}" value={draft.slug} onChange={(event) => setDraft({ ...draft, slug: event.target.value.toLowerCase() })} placeholder="wikisource-editorial" /></div>
+            <div>
+              <label className="pb-label" htmlFor="official-slug">Source slug *</label>
+              <input
+                id="official-slug"
+                className="pb-input"
+                required
+                minLength={2}
+                maxLength={60}
+                pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                title="Use lowercase letters and numbers separated by single hyphens."
+                value={draft.slug}
+                onChange={(event) => setDraft({ ...draft, slug: event.target.value.toLowerCase() })}
+                placeholder="wikisource-editorial"
+              />
+            </div>
             <div><label className="pb-label" htmlFor="official-email">Sign-in/contact email *</label><input id="official-email" className="pb-input" required type="email" maxLength={254} value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} placeholder="editor@example.org" /></div>
             <div><label className="pb-label" htmlFor="official-handle">Public handle *</label><input id="official-handle" className="pb-input" required maxLength={24} value={draft.handle} onChange={(event) => setDraft({ ...draft, handle: event.target.value.toLowerCase() })} placeholder="source_editor" /></div>
             <div><label className="pb-label" htmlFor="official-logo">Logo URL</label><input id="official-logo" className="pb-input" type="url" value={draft.logoURL} onChange={(event) => setDraft({ ...draft, logoURL: event.target.value })} placeholder="https://…" /></div>
