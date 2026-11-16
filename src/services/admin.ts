@@ -411,8 +411,13 @@ async function adminApi<T>(path: string, init: RequestInit = {}): Promise<T> {
     },
     cache: 'no-store',
   });
-  const payload = await response.json().catch(() => ({})) as T & { message?: string; error?: string };
-  if (!response.ok) throw new Error(payload.message ?? payload.error ?? `Admin request failed (${response.status}).`);
+  const payload = await response.json().catch(() => ({})) as T & { message?: string; error?: string; failedStep?: string };
+  if (!response.ok) {
+    const message = payload.message ?? payload.error ?? `Admin request failed (${response.status}).`;
+    const failedStep = payload.failedStep;
+    const knownStep = failedStep === 'clerk.createUser' || failedStep === 'supabase.admin_create_official_account';
+    throw new Error(`${message}${knownStep ? ` [${failedStep}]` : ''}`);
+  }
   return payload;
 }
 

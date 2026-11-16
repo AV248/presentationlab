@@ -27,7 +27,7 @@ import {
   useRouter,
   useParams as useNextParams,
 } from 'next/navigation';
-import { useEffect, type AnchorHTMLAttributes, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useSyncExternalStore, type AnchorHTMLAttributes, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { startSpatialTransition } from './motion';
 
 /** What `to` accepts, as 2.x code already uses it. */
@@ -173,13 +173,30 @@ export function useRouteParams<
   return (useNextParams() ?? {}) as T;
 }
 
+function subscribeLocation(onChange: () => void) {
+  if (typeof window === 'undefined') return () => {};
+  window.addEventListener('popstate', onChange);
+  window.addEventListener('hashchange', onChange);
+  return () => {
+    window.removeEventListener('popstate', onChange);
+    window.removeEventListener('hashchange', onChange);
+  };
+}
+
+const browserSearchAndHash = () => `${window.location.search}\u0000${window.location.hash}`;
+const serverSearchAndHash = () => '\u0000';
+
 /** `useLocation()`, as much of it as 2.x reads: `pathname` and `search`. */
 export function useLocation() {
   const pathname = usePathname() ?? '/';
+  // useSyncExternalStore keeps the server snapshot and the hydration snapshot
+  // identical, then switches to the browser URL after hydration.
+  const searchAndHash = useSyncExternalStore(subscribeLocation, browserSearchAndHash, serverSearchAndHash);
+  const separator = searchAndHash.indexOf('\u0000');
   return {
     pathname,
-    search: typeof window === 'undefined' ? '' : window.location.search,
-    hash: typeof window === 'undefined' ? '' : window.location.hash,
+    search: searchAndHash.slice(0, separator),
+    hash: searchAndHash.slice(separator + 1),
     key: 'next',
     state: null,
   };
