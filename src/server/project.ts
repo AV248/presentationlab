@@ -79,12 +79,11 @@ function sourceType(value: unknown): 'person' | 'archive' | 'admin' {
   return value === 'archive' || value === 'admin' ? value : 'person';
 }
 
-function badges(value: unknown, kind: 'person' | 'archive' | 'admin'): string {
+function badges(value: unknown): string {
   const raw = Array.isArray(value) ? value.map(String) : text(value).split(',');
   const valid = raw.map((badge) => badge.trim().toLowerCase()).filter((badge) =>
     badge === 'quintal' || badge === 'sole' || badge === 'grey',
   );
-  if (kind === 'archive') valid.push('grey');
   return [...new Set(valid)].join(',');
 }
 
@@ -101,7 +100,7 @@ function toLibraryArgs(row: LegacyPresentationRow): (string | number)[] {
     text(row.title, 'Untitled', 140),
     text(row.author, 'Anonymous', 180),
     publicUrl(row.author_photo_url),
-    badges(row.author_badges, type),
+    badges(row.author_badges),
     text(row.preview, '', 500),
     text(row.content),
     text(row.category, 'General', 80),

@@ -1,10 +1,12 @@
 'use client';
 
-import { useNavigate } from '@/lib/router';
-import { Bookmark, Cloud, FileText, Mic2, PenLine, Globe, DraftingCompass } from 'lucide-react';
+import { Link, useNavigate } from '@/lib/router';
+import type { MouseEvent as ReactMouseEvent } from 'react';
+import { Bookmark, Cloud, FileText, Mic2, Globe, DraftingCompass } from 'lucide-react';
 import type { CollectionItem } from '../hooks/useCollection';
 import { useLibrary } from '../store/library';
 import { formatCount } from '../lib/text';
+import { slugifySegment, presentationPath } from '../lib/paths';
 import { ReactionBar } from './ReactionBar';
 import { AuthorCorner } from './AuthorCorner';
 import { presentationViewName } from '../lib/motion';
@@ -20,11 +22,7 @@ interface SpeechCardProps {
 export function SpeechCard({ item, index = 0, featured, onSelect, selected }: SpeechCardProps) {
   const navigate = useNavigate();
   const toggleBookmark = useLibrary((s) => s.toggleBookmark);
-
-  const open = () => {
-    if (onSelect) onSelect(item);
-    else navigate(`/read/${encodeURIComponent(item.id)}`);
-  };
+  const target = presentationPath(item);
 
   const initials = item.title
     .replace(/[^A-Za-z0-9 ]/g, '')
@@ -34,34 +32,38 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
     .join('')
     .toUpperCase();
 
+  const interceptSelect = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (!onSelect) return;
+    event.preventDefault();
+    onSelect(item);
+  };
+
   return (
     <article
       className="pb-card anim-enter"
       style={{
         ['--i' as string]: index,
         viewTransitionName: presentationViewName(item.id),
-        cursor: 'pointer',
         borderColor: selected ? 'var(--c-accent)' : undefined,
       }}
-      onClick={open}
     >
-      <button
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          open();
-        }}
-        style={{ all: 'unset', cursor: 'pointer', display: 'block' }}
-        aria-label={`Open ${item.title}`}
+      <Link
+        to={target}
+        className="pb-cover"
+        onClick={interceptSelect}
+        aria-label={`Read ${item.title}`}
       >
-        <div className="pb-cover">{initials}</div>
-        <div className="pb-card-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        {initials}
+      </Link>
+      <div className="pb-card-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
             <div style={{ minWidth: 0, flex: 1 }}>
               <span className="pb-muted" style={{ fontSize: '0.68rem', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-                {item.category}
+                <Link to={`/category/${slugifySegment(item.category)}`}>{item.category}</Link>
               </span>
-              <h3 className="pb-card-title" style={{ marginTop: 3 }}>{item.title}</h3>
+              <Link to={target} className="pb-card-title" onClick={interceptSelect} style={{ display: 'block', marginTop: 3 }}>
+                {item.title}
+              </Link>
               <p className="pb-muted" style={{ fontSize: '0.78rem', marginTop: 3 }}>
                 {item.author} · {item.occasion}
               </p>
@@ -104,9 +106,9 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
             {item.tags.slice(0, featured ? 6 : 3).map((tag) => (
-              <span key={tag} className="pb-chip" style={{ fontSize: '0.68rem' }}>
+              <Link key={tag} to={`/tag/${slugifySegment(tag)}`} className="pb-chip" style={{ fontSize: '0.68rem' }}>
                 {tag}
-              </span>
+              </Link>
             ))}
           </div>
 
@@ -121,15 +123,12 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
               <FileText size={12} style={{ display: 'inline', verticalAlign: '-2px' }} />{' '}
               {formatCount(item.words)}
             </span>
-            {item.views !== null && (
-              <span title="Views">Read {formatCount(item.views)}×</span>
-            )}
+            {item.views !== null && <span title="Views">Read {formatCount(item.views)}×</span>}
             {item.progress > 0.02 && item.progress < 0.98 && (
               <span style={{ color: 'var(--c-accent)' }}>{Math.round(item.progress * 100)}% read</span>
             )}
           </div>
-        </div>
-      </button>
+      </div>
 
       <div className="pb-card-author-corner">
         <AuthorCorner
@@ -154,8 +153,6 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
           borderTop: '1px solid var(--c-line-soft)',
           flexWrap: 'wrap',
         }}
-        onClick={(event) => event.stopPropagation()}
-        role="presentation"
       >
         <ReactionBar item={item} />
         <div style={{ flex: 1 }} />
@@ -175,14 +172,6 @@ export function SpeechCard({ item, index = 0, featured, onSelect, selected }: Sp
           title="Rehearse with the teleprompter"
         >
           <Mic2 size={14} /> Rehearse
-        </button>
-        <button
-          type="button"
-          className="pb-btn pb-btn-sm pb-btn-ghost"
-          onClick={() => navigate(`/write/${encodeURIComponent(item.id)}`)}
-          title="Copy into your drafts and make it yours"
-        >
-          <PenLine size={14} /> Remix
         </button>
       </div>
     </article>

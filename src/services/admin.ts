@@ -20,11 +20,19 @@ import { loadBackend } from './backend';
 import { clearAdCache } from './ads';
 import { validateUsername } from '../lib/identity';
 import { slugifySegment } from '../lib/paths';
+import { clerkSessionToken } from './clerk';
 
 async function fs() {
   const bundle = await loadBackend();
   if (!bundle) throw new Error('Cloud is not configured on this installation.');
   return bundle;
+}
+
+function adminText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value instanceof Date) return value.toISOString();
+  return '';
 }
 
 /* ------------------------------------------------------------------ */
@@ -261,6 +269,15 @@ export async function assignHandle(
 ): Promise<void> {
   if (!person.uid) throw new Error('Pick a person first.');
   const { fs: f, db } = await fs();
+  // `handles.uid` has a real FK to `profiles.uid`. Upsert the profile first;
+  // otherwise a new Clerk identity can lose a race and fail with handles_uid_fkey.
+  await f.setDoc(f.doc(db, 'users', person.uid), {
+    uid: person.uid,
+    email: person.email ?? '',
+    displayName: person.displayName ?? '',
+    providerId: 'clerk',
+    updatedAt: f.serverTimestamp(),
+  }, { merge: true });
   await f.setDoc(
     f.doc(db, 'handles', username),
     {
@@ -286,4 +303,241 @@ export async function assignHandle(
 export async function releaseHandle(username: string): Promise<void> {
   const { fs: f, db } = await fs();
   await f.deleteDoc(f.doc(db, 'handles', username));
+}
+
+export interface AdminProfileDetails {
+  displayName: string;
+  bio: string;
+  location: string;
+  website: string;
+  signature: string;
+}
+
+export async function updateProfileAsAdmin(uid: string, details: AdminProfileDetails): Promise<AdminProfileDetails> {
+  if (!uid) throw new Error('Choose a profile first.');
+  const clean: AdminProfileDetails = {
+    displayName: details.displayName.trim().slice(0, 80),
+    bio: details.bio.trim().slice(0, 500),
+    location: details.location.trim().slice(0, 100),
+    website: details.website.trim().slice(0, 200),
+    signature: details.signature.trim().slice(0, 120),
+  };
+  if (clean.website) {
+    let parsed: URL;
+    try { parsed = new URL(clean.website); }
+    catch { throw new Error('Website must be a full URL beginning with https:// or http://.'); }
+    if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error('Website must use https:// or http://.');
+  }
+  const { fs: f, db } = await fs();
+  await f.setDoc(f.doc(db, 'users', uid), { uid, ...clean, updatedAt: f.serverTimestamp() }, { merge: true });
+  return clean;
+}
+
+export type AdminBadge = 'quintal' | 'sole' | 'grey';
+export type BadgePrincipal = 'person' | 'official';
+
+export interface BadgeAssignment {
+  principalType: BadgePrincipal;
+  principalId: string;
+  badge: AdminBadge;
+  reason: string;
+  grantedAt: string;
+}
+
+export interface BadgeAuditRecord extends BadgeAssignment {
+  action: 'grant' | 'revoke';
+  actorUid: string;
+  createdAt: string;
+}
+
+export interface OfficialAccount {
+  slug: string;
+  identityUid: string;
+  displayName: string;
+  logoURL: string;
+  bio: string;
+  canonicalURL: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface OfficialAccountDraft extends Omit<OfficialAccount, 'active' | 'createdAt' | 'identityUid'> {
+  email: string;
+  handle: string;
+}
+
+export interface ModerationItem {
+  id: string;
+  username: string;
+  slug: string;
+  folder: string;
+  title: string;
+  preview: string;
+  category: string;
+  author: string;
+  status: 'published' | 'held';
+  note: string;
+  updatedAt: string;
+}
+
+export interface ArrivalReviewItem {
+  id: string;
+  sourceId: string;
+  title: string;
+  author: string;
+  preview: string;
+  content: string;
+  sourceUrl: string;
+  license: string;
+  fetchedAt: string;
+  tags: string;
+  status: 'candidate' | 'approved' | 'rejected' | 'published';
+  officialSlug: string;
+  note: string;
+  publishedSpeechId: string;
+  updatedAt: string;
+}
+
+async function adminApi<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = await clerkSessionToken();
+  if (!token) throw new Error('Sign in again to use the admin workspace.');
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...init.headers,
+    },
+    cache: 'no-store',
+  });
+  const payload = await response.json().catch(() => ({})) as T & { message?: string; error?: string };
+  if (!response.ok) throw new Error(payload.message ?? payload.error ?? `Admin request failed (${response.status}).`);
+  return payload;
+}
+
+export async function listBadgeAssignments(): Promise<BadgeAssignment[]> {
+  const { fs: f, db } = await fs();
+  const snap = await f.getDocs(f.query(
+    f.collection(db, 'badgeAssignments'),
+    f.where('active', '==', true),
+    f.limit(500),
+  ));
+  return snap.docs.map(({ data }) => {
+    const row = data();
+    return {
+      principalType: adminText(row.principalType) === 'official' ? 'official' as const : 'person' as const,
+      principalId: adminText(row.principalId),
+      badge: adminText(row.badge) as AdminBadge,
+      reason: adminText(row.reason),
+      grantedAt: adminText(row.grantedAt),
+    };
+  }).filter((row) => row.principalId && ['quintal', 'sole', 'grey'].includes(row.badge));
+}
+
+export async function listBadgeAudit(limit = 80): Promise<BadgeAuditRecord[]> {
+  const { fs: f, db } = await fs();
+  const snap = await f.getDocs(f.query(
+    f.collection(db, 'badgeAudit'),
+    f.orderBy('createdAt', 'desc'),
+    f.limit(Math.min(Math.max(limit, 1), 200)),
+  ));
+  return snap.docs.map(({ data }) => {
+    const row = data();
+    return {
+      principalType: adminText(row.principalType) === 'official' ? 'official' as const : 'person' as const,
+      principalId: adminText(row.principalId),
+      badge: adminText(row.badge) as AdminBadge,
+      action: adminText(row.action) === 'revoke' ? 'revoke' as const : 'grant' as const,
+      reason: adminText(row.reason),
+      grantedAt: adminText(row.grantedAt),
+      actorUid: adminText(row.actorUid),
+      createdAt: adminText(row.createdAt),
+    };
+  });
+}
+
+export async function setBadge(
+  principalType: BadgePrincipal,
+  principalId: string,
+  badge: AdminBadge,
+  action: 'grant' | 'revoke',
+  reason: string,
+): Promise<void> {
+  if (badge === 'grey' && principalType !== 'official') throw new Error('Grey is reserved for official source accounts.');
+  if (badge !== 'grey' && principalType !== 'person') throw new Error('Quintal and Sole belong to people.');
+  const { rpc } = await fs();
+  await rpc('admin_set_badge', {
+    p_principal_type: principalType,
+    p_principal_id: principalId.trim(),
+    p_badge: badge,
+    p_action: action,
+    p_reason: reason.trim().slice(0, 500),
+  });
+}
+
+export async function listOfficialAccounts(): Promise<OfficialAccount[]> {
+  const { fs: f, db } = await fs();
+  const snap = await f.getDocs(f.query(f.collection(db, 'officialAccounts'), f.limit(300)));
+  return snap.docs.map(({ data }) => {
+    const row = data();
+    return {
+      slug: adminText(row.slug),
+      identityUid: adminText(row.identityUid),
+      displayName: adminText(row.displayName),
+      logoURL: adminText(row.logoURL),
+      bio: adminText(row.bio),
+      canonicalURL: adminText(row.canonicalURL),
+      active: row.active === true,
+      createdAt: adminText(row.createdAt),
+    };
+  }).sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+export async function createOfficialAccount(draft: OfficialAccountDraft): Promise<{ uid: string; handle: string; slug: string }> {
+  return adminApi('/api/admin/accounts', { method: 'POST', body: JSON.stringify(draft) });
+}
+
+export async function setOfficialAccountActive(slug: string, active: boolean, reason = ''): Promise<void> {
+  const { rpc } = await fs();
+  await rpc('admin_set_official_active', {
+    p_slug: slug.trim(),
+    p_active: active,
+    p_reason: reason.trim().slice(0, 500),
+  });
+}
+
+export async function fetchModerationItems(): Promise<ModerationItem[]> {
+  const result = await adminApi<{ items?: ModerationItem[] }>('/api/admin/moderation');
+  return Array.isArray(result.items) ? result.items : [];
+}
+
+export async function setModeration(id: string, status: 'published' | 'held', note: string): Promise<void> {
+  await adminApi('/api/admin/moderation', {
+    method: 'POST',
+    body: JSON.stringify({ id, status, note: note.trim().slice(0, 500) }),
+  });
+}
+
+export async function fetchArrivalReview(): Promise<ArrivalReviewItem[]> {
+  const result = await adminApi<{ items?: ArrivalReviewItem[] }>('/api/admin/arrivals');
+  return Array.isArray(result.items) ? result.items : [];
+}
+
+export async function stageSourceCandidate(id: string): Promise<void> {
+  await adminApi('/api/admin/arrivals', { method: 'POST', body: JSON.stringify({ action: 'stage', id }) });
+}
+
+export async function reviewSourceCandidate(id: string, status: 'approved' | 'rejected', note: string): Promise<void> {
+  await adminApi('/api/admin/arrivals', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'review', id, status, note: note.trim().slice(0, 500) }),
+  });
+}
+
+export async function publishSourceCandidate(id: string, officialSlug: string): Promise<void> {
+  await adminApi('/api/admin/arrivals', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'publish', id, officialSlug: officialSlug.trim() }),
+  });
 }

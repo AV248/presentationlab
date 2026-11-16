@@ -5,10 +5,10 @@ import { Link } from '@/lib/router';
 
 export type BuddyBadge = 'quintal' | 'sole' | 'grey';
 
-const BADGE_INFO: Record<BuddyBadge, { label: string; title: string }> = {
-  quintal: { label: 'Quintal', title: '100 presentations written, 100 read, and 100 rehearsed.' },
-  sole: { label: 'Sole', title: 'Held the highest author-read count for a qualifying period.' },
-  grey: { label: 'Grey', title: 'An established source of public-domain or openly licensed presentations.' },
+const BADGE_INFO: Record<BuddyBadge, { label: string; title: string; image: string }> = {
+  quintal: { label: 'Quintal', title: '100 presentations written, 100 read, and 100 rehearsed.', image: '/badges/quintal.svg' },
+  sole: { label: 'Sole', title: 'Held the highest author-read count for a qualifying period.', image: '/badges/sole.svg' },
+  grey: { label: 'Grey', title: 'A vetted official or source account.', image: '/badges/grey.svg' },
 };
 
 export function AuthorBadges({ badges = [] }: { badges?: string[] }) {
@@ -20,10 +20,10 @@ export function AuthorBadges({ badges = [] }: { badges?: string[] }) {
   )];
   if (!valid.length) return null;
   return (
-    <span className="pb-author-badges" aria-label={`Author badges: ${valid.map((badge) => BADGE_INFO[badge].label).join(', ')}`}>
+    <span className="pb-author-badges" role="list" aria-label="Author badges">
       {valid.map((badge) => (
-        <span key={badge} className={`pb-author-badge pb-author-badge-${badge}`} title={BADGE_INFO[badge].title}>
-          {BADGE_INFO[badge].label}
+        <span key={badge} className={`pb-author-badge-item pb-author-badge-item-${badge}`} role="listitem" title={BADGE_INFO[badge].title}>
+          <img className="pb-author-badge-image" src={BADGE_INFO[badge].image} alt={`${BADGE_INFO[badge].label} badge. ${BADGE_INFO[badge].title}`} width={28} height={28} loading="lazy" decoding="async" />
         </span>
       ))}
     </span>

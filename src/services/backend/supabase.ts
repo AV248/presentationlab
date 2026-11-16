@@ -191,6 +191,33 @@ const COLLECTIONS: Record<string, CollectionSpec> = {
     // one and see nothing.
     fields: { key: f('key'), value: f('value', 'json'), updatedAt: f('updated_at', 'ts') },
   },
+  officialAccounts: {
+    table: 'official_accounts',
+    id: 'slug',
+    fields: {
+      slug: f('slug'), identityUid: f('identity_uid'), displayName: f('display_name'), logoURL: f('logo_url'),
+      bio: f('bio'), canonicalURL: f('canonical_url'), active: f('active', 'bool'),
+      createdBy: f('created_by'), createdAt: f('created_at', 'ts'), updatedAt: f('updated_at', 'ts'),
+    },
+  },
+  badgeAssignments: {
+    table: 'badge_assignments',
+    id: 'principal_id',
+    fields: {
+      principalType: f('principal_type'), principalId: f('principal_id'), badge: f('badge'),
+      active: f('active', 'bool'), reason: f('reason'), grantedBy: f('granted_by'),
+      grantedAt: f('granted_at', 'ts'), updatedAt: f('updated_at', 'ts'),
+    },
+  },
+  badgeAudit: {
+    table: 'badge_audit',
+    id: 'id',
+    fields: {
+      id: f('id'), principalType: f('principal_type'), principalId: f('principal_id'),
+      badge: f('badge'), action: f('action'), reason: f('reason'), actorUid: f('actor_uid'),
+      createdAt: f('created_at', 'ts'),
+    },
+  },
 };
 
 /** A text column written from an array field (`Tags`). */

@@ -1,70 +1,103 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { HandlePage } from '@/screens/ProfilePage';
-import { readHandleState, readProfile, readWriter } from '@/server/reading';
+import { JsonLd } from '@/components/JsonLd';
+import { readHandleState, readProfile, readWriter, type PublicProfile } from '@/server/reading';
 import { normalizeUsername, RESERVED_HANDLES } from '@/lib/identity';
+import { presentationPath } from '@/lib/paths';
+import { absoluteUrl } from '@/lib/seo';
+import type { CloudSpeech } from '@/lib/speech';
 
-/**
- * One writer's own site: /username, /username/<speech> and
- * /username/<folder>/<speech>.
- *
- * One optional catch-all route, not three routes, because Next.js will not
- * allow sibling dynamic segments to be named differently at the same depth
- * (`[slug]` next to `[folder]` is a build error) — and because the URL grammar
- * really is one rule: a handle, then zero or more path pieces. The screen
- * decides what the pieces mean; `profilePath` in `src/lib/identity.ts` is what
- * writes them.
- *
- * ── This page is rendered on the server, and that matters ───────────────────
- * A writer's page is the address they put on a slide, a résumé, a business
- * card. Rendering it here means:
- *
- *   • **the status code is true** — a handle nobody holds is a real `404`, not
- *     a page that says "not found" while answering `200`. Before this, every
- *     typo and every abandoned link looked like a working page to a crawler;
- *   • the name, the bio and the published work are in the HTML that arrives,
- *     so the page is readable and rankable before any JavaScript runs;
- *   • the interaction — following, reacting, the reader, the theme — is
- *     unchanged, because `HandlePage` is still the same client component and
- *     simply receives what the server already fetched.
- */
-
-/** The reserved list lives in one place; the server is where it is enforced. */
 function isReserved(username: string): boolean {
   return RESERVED_HANDLES.has(username);
+}
+
+function findWork(rest: string[] | undefined, username: string, works: CloudSpeech[]): CloudSpeech | null {
+  const pieces = Array.isArray(rest) ? rest : [];
+  if (pieces.length < 1 || pieces.length > 2) return null;
+  const slug = pieces[pieces.length - 1] ?? '';
+  const folder = pieces.length > 1 ? pieces[0] ?? '' : '';
+  const withUsername = (work: CloudSpeech) => ({ ...work, username: work.username || username });
+  const exact = works.find((work) => (work.folder ?? '') === folder && ((work.slug ?? '') === slug || work.id === slug));
+  const legacy = !folder ? works.find((work) => (work.slug ?? '') === slug || work.id === slug) : undefined;
+  const match = exact ?? legacy;
+  return match ? withUsername(match) : null;
+}
+
+function profileStructuredData(profile: PublicProfile, username: string): Record<string, unknown> {
+  const url = absoluteUrl(`/${encodeURIComponent(username)}`);
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'ProfilePage',
+    url,
+    name: `${profile.displayName} (@${username})`,
+    mainEntity: {
+      '@type': 'Person',
+      name: profile.displayName,
+      identifier: username,
+      url,
+      ...(profile.bio ? { description: profile.bio } : {}),
+      ...(profile.photoURL ? { image: profile.photoURL } : {}),
+      ...(profile.website ? { sameAs: [profile.website] } : {}),
+    },
+  };
+}
+
+function presentationStructuredData(work: CloudSpeech, username: string): Record<string, unknown> {
+  const canonical = presentationPath({ ...work, username: work.username || username });
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: work.title,
+    ...(work.preview ? { description: work.preview } : {}),
+    url: absoluteUrl(canonical),
+    mainEntityOfPage: absoluteUrl(canonical),
+    ...(work.createdAt ? { datePublished: work.createdAt } : {}),
+    ...(work.updatedAt ? { dateModified: work.updatedAt } : {}),
+    author: { '@type': 'Person', name: work.author || username, url: absoluteUrl(`/${encodeURIComponent(username)}`) },
+    ...(work.category ? { articleSection: work.category } : {}),
+    ...(work.tags?.length ? { keywords: work.tags.join(', ') } : {}),
+    isPartOf: { '@type': 'WebSite', name: 'Presentation Buddy', url: absoluteUrl('/') },
+  };
 }
 
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ username: string }>;
+  params: Promise<{ username: string; rest?: string[] }>;
 }): Promise<Metadata> {
-  const { username } = await params;
-  const handle = normalizeUsername(username ?? '');
-  if (!handle || isReserved(handle)) return { robots: { index: false, follow: false } };
+  const { username: raw, rest } = await params;
+  const username = normalizeUsername(raw ?? '');
+  if (!username || isReserved(username)) return { robots: { index: false, follow: false } };
 
-  const profile = await readProfile(handle);
-  if (!profile) {
-    // A free handle is a 404 (see the page below); either way there is nothing
-    // here worth indexing.
-    return { robots: { index: false, follow: false } };
+  const [profile, works] = await Promise.all([readProfile(username), rest?.length ? readWriter(username) : Promise.resolve([])]);
+  const work = findWork(rest, username, works);
+  if (rest?.length && !work) return { robots: { index: false, follow: false } };
+  if (work) {
+    const title = `${work.title} · ${username} · Presentation Buddy`;
+    const description = work.preview || `${work.title} by ${work.author || `@${username}`} on Presentation Buddy.`;
+    const canonical = presentationPath({ ...work, username: work.username || username });
+    return {
+      title: { absolute: title },
+      description,
+      alternates: { canonical },
+      openGraph: { type: 'article', title, description, url: canonical },
+      twitter: { card: 'summary', title, description },
+    };
   }
 
-  const title = `${profile.displayName} (@${handle})`;
-  const description = profile.bio || `Speeches and work by @${handle} on Presentation Buddy.`;
-
+  if (!profile) return { robots: { index: false, follow: false } };
+  const title = `${profile.displayName} (@${username})`;
+  const description = profile.bio || `Speeches and work by @${username} on Presentation Buddy.`;
   return {
-    title,
+    title: { absolute: title },
     description,
-    alternates: { canonical: `/${handle}` },
+    alternates: { canonical: `/${encodeURIComponent(username)}` },
     openGraph: {
-      type: 'profile',
-      title,
-      description,
-      url: `/${handle}`,
+      type: 'profile', title, description, url: `/${encodeURIComponent(username)}`,
       ...(profile.photoURL ? { images: [{ url: profile.photoURL }] } : {}),
     },
-    twitter: { card: 'summary_large_image', title, description },
+    twitter: { card: 'summary_large_image', title, description, ...(profile.photoURL ? { images: [profile.photoURL] } : {}) },
   };
 }
 
@@ -73,42 +106,28 @@ export default async function Page({
 }: {
   params: Promise<{ username: string; rest?: string[] }>;
 }) {
-  const { username } = await params;
-  const handle = normalizeUsername(username ?? '');
+  const { username: raw, rest } = await params;
+  const username = normalizeUsername(raw ?? '');
+  if (!username || isReserved(username)) notFound();
 
-  // A handle that could never exist: 404, once, here.
-  if (!handle || isReserved(handle)) notFound();
-
-  /**
-   * Two reads, both public, both cached for a minute.
-   *
-   * They are what turns this route from "render a spinner and hope" into a
-   * page: the profile row, the published work, and the state of the handle
-   * itself. `unknown` (the database refused or could not be reached) is *not*
-   * treated as free — the screen keeps its honest "we could not check"
-   * message for that case, because guessing there would be worse than saying
-   * nothing.
-   */
   const [state, profile, works] = await Promise.all([
-    readHandleState(handle),
-    readProfile(handle),
-    readWriter(handle),
+    readHandleState(username),
+    readProfile(username),
+    readWriter(username),
   ]);
-
-  /**
-   * Nobody holds this name, and the database is sure.
-   *
-   * `notFound()` rather than a rendered apology: the status code is the one
-   * thing a crawler, a link checker and a social card scraper all read before
-   * any HTML.
-   */
   if (state === 'free' && !profile) notFound();
 
+  const work = findWork(rest, username, works);
+  const structuredData = work
+    ? [presentationStructuredData(work, username)]
+    : profile ? [profileStructuredData(profile, username)] : [];
+
   return (
-    <HandlePage
-      // A speech or a folder deeper in the tree is resolved by the screen's own
-      // rules, from the same URL pieces it already reads.
-      initial={{ username: handle, profile, works, handleState: state }}
-    />
+    <>
+      {structuredData.length ? <JsonLd data={structuredData} /> : null}
+      <HandlePage initial={{ username, profile, works, handleState: state }} />
+    </>
   );
 }
+
+export const revalidate = 60;

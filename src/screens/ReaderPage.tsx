@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent as ReactClipboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useParams } from '@/lib/router';
 import {
   ArrowLeft,
@@ -8,17 +8,13 @@ import {
   BookMarked,
   CheckCircle2,
   CircleAlert,
-  Download,
   Focus,
   Gauge,
   Headphones,
   Minus,
   Plus,
-  Printer,
   Quote,
   Ruler,
-  Copy,
-  PenLine,
   Mic2,
   StickyNote,
   BookA,
@@ -36,10 +32,11 @@ import { registerView } from '../services/data';
 import { fetchWebSpeech as fetchWebText, SOURCES, type SourceId } from '../services/webSources';
 import { WordLensCard, useWordLens } from '../components/WordLens';
 import { analyse, formatCount, formatDate, readingMinutes } from '../lib/text';
-import { copyText, downloadFile, supportsSpeechSynthesis } from '../lib/platform';
+import { supportsSpeechSynthesis } from '../lib/platform';
 import { useGate } from '../components/SignIn';
 import { pageMetaFor } from '../data/routes';
 import { SITE_URL, absoluteUrl } from '../lib/seo';
+import { presentationPath } from '../lib/paths';
 import { usePageMeta } from '../lib/usePageMeta';
 import { presentationViewName } from '../lib/motion';
 import type { CloudSpeech } from '../lib/speech';
@@ -60,13 +57,15 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
   const fromCollection = useSpeech(id);
   const items = useSpeeches(initial ? [initial] : undefined);
   const item = fromCollection ?? items.find((entry) => entry.id === id);
+  const archiveItem = item?.source === 'web' || item?.sourceType === 'archive';
+  const archiveUrl = item?.sourceUrl ?? item?.sourceURL;
+  const archiveName = item?.sourceName ?? (item?.source === 'web' ? item.source : 'the archive');
   const toast = useUi((s) => s.toast);
   const gate = useGate();
 
   const pushHistory = useLibrary((s) => s.pushHistory);
   const setProgress = useLibrary((s) => s.setProgress);
   const toggleBookmark = useLibrary((s) => s.toggleBookmark);
-  const duplicateSpeech = useLibrary((s) => s.duplicateSpeech);
   const addMarginNote = useLibrary((s) => s.addMarginNote);
   const removeMarginNote = useLibrary((s) => s.removeMarginNote);
   const marginNotes = useLibrary((s) => s.marginNotes);
@@ -90,14 +89,13 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
   const lens = useWordLens();
 
   const stats = useMemo(() => analyse(item?.content ?? ''), [item?.content]);
-  const copyrightProtected = item?.allowCopy === false;
   const speechId = item?.id;
 
   // Every speech is its own addressable, shareable, indexable page.
   const registryMeta = pageMetaFor(`/read/${id ?? ''}`);
   usePageMeta(item ? item.title : 'Speech not found', {
     description: registryMeta?.description ?? item?.preview?.slice(0, 158),
-    canonical: absoluteUrl(`/read/${id ?? ''}`),
+    canonical: absoluteUrl(item ? presentationPath(item) : `/read/${id ?? ''}`),
     image: registryMeta?.card ? `${SITE_URL}/cards/${registryMeta.card}.png` : undefined,
     type: 'article',
     robots: item ? undefined : 'noindex, follow',
@@ -122,7 +120,7 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
     pushHistory(item.id);
     setLastSpeech(item.id);
     // A real view, counted once per open on the shared document.
-    if (item.source === 'cloud') void registerView(item.id);
+    if (item.source === 'cloud' && item.sourceType !== 'archive') void registerView(item.id);
     // Web speeches arrive with an intro; pull the full text when opened.
     if (item.source === 'web' && item.content.length < 1500) {
       // The id prefix tells us which archive the text came from.
@@ -218,16 +216,6 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
     speak();
   };
 
-  const exportFile = (type: 'md' | 'txt') => {
-    if (copyrightProtected) { toast('The writer has protected this speech — please enjoy it here, and share the link instead.', 'warn'); return; }
-    const body =
-      type === 'md'
-        ? `# ${item.title}\n\n_${item.author} · ${item.occasion}_\n\n${item.content}\n`
-        : `${item.title}\n${item.author} — ${item.occasion}\n\n${item.content}\n`;
-    downloadFile(`${item.title.replace(/[^\w\d]+/g, '-').toLowerCase()}.${type}`, body, 'text/plain');
-    toast(`Downloaded ${type.toUpperCase()}`, 'success');
-  };
-
   const keepLine = () => {
     const selection = window.getSelection()?.toString().trim();
     if (!selection) {
@@ -271,7 +259,7 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
           <button
             type="button"
             className="pb-btn pb-btn-sm pb-btn-ghost"
-            onClick={() => navigate(`/read/${encodeURIComponent(previous.id)}`)}
+            onClick={() => navigate(presentationPath(previous))}
           >
             <ArrowLeft size={14} /> {previous.title.slice(0, 20)}
           </button>
@@ -280,7 +268,7 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
           <button
             type="button"
             className="pb-btn pb-btn-sm pb-btn-ghost"
-            onClick={() => navigate(`/read/${encodeURIComponent(next.id)}`)}
+            onClick={() => navigate(presentationPath(next))}
           >
             {next.title.slice(0, 20)} <ArrowRight size={14} />
           </button>
@@ -321,9 +309,9 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
               <span>{stats.minutes} min read</span>
               <span>{formatCount(item.words)} words</span>
               {item.views !== null && <span>Read {formatCount(item.views)} times</span>}
-              {item.source === 'web' && item.sourceUrl && (
-                <a href={item.sourceUrl} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--c-accent)' }}>
-                  Original on {item.source} ↗
+              {archiveItem && archiveUrl && (
+                <a href={archiveUrl} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--c-accent)' }}>
+                  Original on {archiveName} ↗
                 </a>
               )}
             </div>
@@ -337,19 +325,6 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
                 onClick={() => navigate(`/rehearse/${encodeURIComponent(item.id)}`)}
               >
                 <Mic2 size={15} /> Rehearse
-              </button>
-              <button
-                type="button"
-                className="pb-btn pb-btn-sm"
-                onClick={() => {
-                  const newId = duplicateSpeech(item.id, item);
-                  if (newId) {
-                    toast('Copied into your drafts', 'success');
-                    navigate(`/write/${newId}`);
-                  }
-                }}
-              >
-                <PenLine size={15} /> Remix
               </button>
             </div>
 
@@ -389,26 +364,6 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
               >
                 <StickyNote size={16} color={showNotes ? 'var(--c-accent)' : undefined} />
               </button>
-              <button
-                type="button"
-                className="pb-icon-btn"
-                onClick={async () => {
-                  if (copyrightProtected) { toast('© The writer protected this speech — copying and downloads are off. The link is yours to share.', 'warn'); return; }
-                  const ok = await copyText(`${item.title}\n\n${item.content}`);
-                  toast(ok ? 'Speech copied' : 'Copy failed', ok ? 'success' : 'error');
-                }}
-                title={copyrightProtected ? 'Copying is off — the writer protected this work' : 'Copy text'}
-              >
-                <Copy size={16} />
-              </button>
-              {!copyrightProtected && (<>
-              <button type="button" className="pb-icon-btn" onClick={() => exportFile('md')} title="Download">
-                <Download size={16} />
-              </button>
-              <button type="button" className="pb-icon-btn" onClick={() => window.print()} title="Print / PDF">
-                <Printer size={16} />
-              </button>
-              </>)}
             </div>
 
             {speaking && (
@@ -597,9 +552,9 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
         }}
         data-reader-grid
       >
-        <article data-copyright={copyrightProtected ? 'protected' : undefined} onCopy={copyrightProtected ? (e: ReactClipboardEvent) => { e.preventDefault(); toast('© This work is protected by its writer.', 'warn'); } : undefined} onContextMenu={copyrightProtected ? (e: ReactMouseEvent) => e.preventDefault() : undefined}
+        <article
           ref={articleRef}
-          className={`pb-panel ${reader.readingRuler ? 'pb-ruler' : ''} ${copyrightProtected ? 'pb-protected' : ''}`}
+          className={`pb-panel ${reader.readingRuler ? 'pb-ruler' : ''}`}
           style={{ padding: 'clamp(20px, 4vw, 44px)' }}
         >
           <Markdown
@@ -616,11 +571,10 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
             }
           />
 
-          {item.source === 'web' && (
+          {archiveItem && archiveUrl && (
             <p className="pb-muted" style={{ fontSize: '0.78rem', marginTop: 24, lineHeight: 1.7 }}>
-              {item.licence}. Text served from {item.source} and reproduced here so you can rehearse
-              with it.{' '}
-              <a href={item.sourceUrl} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--c-accent)' }}>
+              {item.licence ?? item.license ?? 'Source licence applies'}. Text served from {archiveName} and reproduced here so you can rehearse with it.{' '}
+              <a href={archiveUrl} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--c-accent)' }}>
                 See the original page ↗
               </a>
             </p>
@@ -631,15 +585,6 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 22, flexWrap: 'wrap' }}>
-            {!copyrightProtected && (<>
-            <button type="button" className="pb-btn pb-btn-sm" onClick={() => exportFile('txt')}>
-              <Download size={14} /> .txt
-            </button>
-            <button type="button" className="pb-btn pb-btn-sm" onClick={() => exportFile('md')}>
-              <Download size={14} /> .md
-            </button>
-            </>)}
-            {copyrightProtected && <span className="pb-chip" title="The writer chose to protect this work">© Protected by the writer — read & rehearse here, share the link</span>}
             {item.credits && <span className="pb-muted" style={{ fontSize: '0.78rem' }}>Credits: {item.credits}</span>}
             {item.signature && <span style={{ fontFamily: 'var(--x-font-display)', fontStyle: 'italic' }}>— {item.signature}</span>}
             <button
@@ -711,7 +656,7 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
                         badges={speech.authorBadges}
                         compact
                       />
-                      <Link to={`/read/${encodeURIComponent(speech.id)}`} className="pb-reader-related-title" style={{ fontSize: '0.88rem', fontWeight: 600 }}>
+                      <Link to={presentationPath(speech)} className="pb-reader-related-title" style={{ fontSize: '0.88rem', fontWeight: 600 }}>
                         {speech.title}
                       </Link>
                       <span className="pb-muted" style={{ display: 'block', fontSize: '0.72rem', fontWeight: 400 }}>

@@ -13,8 +13,9 @@
 
 /** Words that would shadow a real page of the app. */
 const RESERVED = new Set([
-  'about', 'admin', 'api', 'arrivals', 'claim', 'community', 'control', 'desk',
-  'read', 'rehearse', 'sso-callback', 'themes', 'topics', 'write',
+  'about', 'admin', 'api', 'arrivals', 'category', 'claim', 'community', 'control', 'dbms', 'desk',
+  'download', 'feedback', 'policy', 'privacy', 'read', 'report', 'rehearse', 'settings',
+  'sso-callback', 'tag', 'templates', 'terms', 'themes', 'topics', 'write',
 ]);
 
 export interface SegmentResult {
@@ -47,10 +48,23 @@ export function validateSegment(input: string, what: 'link' | 'folder' = 'link')
   return { ok: true, value };
 }
 
-/** The path a speech answers to: `/user`, `/user/slug` or `/user/folder/slug`. */
+/** The path a speech answers to: `/user/slug` or `/user/folder/slug`. */
 export function workPath(username: string, slug: string, folder = ''): string {
-  const clean = [username, folder, slug].filter(Boolean).join('/');
+  const clean = [username.trim().toLowerCase(), folder.trim(), slug.trim()].filter(Boolean).join('/');
   return `/${clean}`;
+}
+
+/** Canonical public address shared by cards, the profile index, and the sitemap. */
+export function presentationPath(presentation: {
+  id: string;
+  username?: string;
+  slug?: string;
+  folder?: string;
+}): string {
+  const id = presentation.id.trim();
+  const username = presentation.username?.trim().toLowerCase();
+  if (username && id) return workPath(username, presentation.slug?.trim() || id, presentation.folder ?? '');
+  return `/read/${encodeURIComponent(id)}`;
 }
 
 /** Same, as the short share link the site prints. */

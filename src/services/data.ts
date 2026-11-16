@@ -321,7 +321,7 @@ export async function fetchPosts(): Promise<Post[]> {
   if (!bundle) return [];
   const { fs: f, db } = bundle;
   try {
-    const snap = await f.getDocs(f.query(f.collection(db, 'posts'), f.limit(100)));
+    const snap = await f.getDocs(f.query(f.collection(db, 'bloggerblogs'), f.limit(100)));
     return snap.docs
       .map((doc) => {
         const data = doc.data();
@@ -417,21 +417,45 @@ export async function fetchContributors(): Promise<Contributor[]> {
   }
 }
 
-export async function fetchUsers(): Promise<
-  { uid: string; displayName: string | null; email: string | null; providerId: string | null }[]
-> {
+export interface AdminUser {
+  uid: string;
+  displayName: string | null;
+  email: string | null;
+  providerId: string | null;
+  username: string | null;
+  photoURL: string | null;
+  bio: string;
+  location: string;
+  website: string;
+  signature: string;
+  role: 'owner' | 'admin' | null;
+}
+
+export async function fetchUsers(): Promise<AdminUser[]> {
   const bundle = await fs();
   if (!bundle) return [];
   const { fs: f, db } = bundle;
   try {
-    const snap = await f.getDocs(f.query(f.collection(db, 'users'), f.limit(200)));
+    const [snap, roleRows] = await Promise.all([
+      f.getDocs(f.query(f.collection(db, 'users'), f.limit(500))),
+      f.getDocs(f.query(f.collection(db, 'admins'), f.limit(500))).catch(() => ({ docs: [] })),
+    ]);
+    const roles = new Map(roleRows.docs.map((doc) => [doc.id, str(doc.data().role)]));
     return snap.docs.map((doc) => {
       const data = doc.data();
+      const role = roles.get(doc.id);
       return {
         uid: doc.id,
         displayName: typeof data.displayName === 'string' ? data.displayName : null,
         email: typeof data.email === 'string' ? data.email : null,
         providerId: typeof data.providerId === 'string' ? data.providerId : null,
+        username: typeof data.username === 'string' ? data.username : null,
+        photoURL: typeof data.photoURL === 'string' ? data.photoURL : null,
+        bio: typeof data.bio === 'string' ? data.bio : '',
+        location: typeof data.location === 'string' ? data.location : '',
+        website: typeof data.website === 'string' ? data.website : '',
+        signature: typeof data.signature === 'string' ? data.signature : '',
+        role: role === 'owner' || role === 'admin' ? role : null,
       };
     });
   } catch {

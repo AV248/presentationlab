@@ -1,5 +1,5 @@
 import { slugify } from './text';
-export const RESERVED_HANDLES = new Set(['read','rehearse','write','arrivals','community','desk','control','themes','about','admin','topics','practice','studio','web','index.html','claim','support','feedback','api','login','signup','404','sitemap.xml','robots.txt']);
+export const RESERVED_HANDLES = new Set(['read','rehearse','write','arrivals','community','desk','control','settings','themes','about','admin','dbms','topics','category','tag','templates','privacy','policy','terms','report','download','practice','studio','web','index.html','claim','support','feedback','api','login','signup','404','sitemap.xml','robots.txt']);
 export function normalizeUsername(raw: string): string { return raw.trim().toLowerCase().replace(/^@/, ''); }
 export function validateUsername(raw: string): { ok: boolean; username: string; error?: string } {
   const username = normalizeUsername(raw);

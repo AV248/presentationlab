@@ -86,13 +86,22 @@ export function ControlPage() {
     );
   }, [items, filter]);
 
-  const exportAll = () => {
+  const exportOwnWork = () => {
+    // Data portability should preserve a person's own work, not turn the
+    // public library, community writing, or archive texts into a bulk download.
+    const ownWork = items.filter(
+      (item) => item.source === 'user' || (Boolean(user?.uid) && item.uid === user?.uid),
+    );
+    if (!ownWork.length) {
+      toast('There is no writing of yours on this device to export yet.', 'info');
+      return;
+    }
     const payload = JSON.stringify(
       {
         app: 'Presentation Buddy',
         version: 2,
         exportedAt: new Date().toISOString(),
-        speeches: items.map((item) => ({
+        speeches: ownWork.map((item) => ({
           title: item.title,
           author: item.author,
           category: item.category,
@@ -110,12 +119,12 @@ export function ControlPage() {
     const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'presentation-buddy-library.json';
+    link.download = 'presentation-buddy-my-writing.json';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     setTimeout(() => URL.revokeObjectURL(url), 1500);
-    toast(`Exported ${items.length} speeches`, 'success');
+    toast(`Exported ${ownWork.length} of your presentations`, 'success');
   };
 
   const importFile = async (file: File) => {
@@ -303,8 +312,8 @@ export function ControlPage() {
             <Database size={17} /> Data portability
           </h2>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button type="button" className="pb-btn" onClick={exportAll}>
-              <FileDown size={16} /> Export everything (JSON)
+            <button type="button" className="pb-btn" onClick={exportOwnWork}>
+              <FileDown size={16} /> Export your writing (JSON)
             </button>
             <button type="button" className="pb-btn" onClick={() => fileRef.current?.click()}>
               <FileUp size={16} /> Import JSON
@@ -334,6 +343,7 @@ export function ControlPage() {
             </button>
           </div>
           <p className="pb-muted" style={{ fontSize: '0.78rem', marginTop: 10, lineHeight: 1.65 }}>
+            The export contains work you wrote, not public-library, community, or archive presentations.
             The starter library ships with the app, so it comes straight back after a reset. This only
             clears what you added.
           </p>

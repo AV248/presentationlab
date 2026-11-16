@@ -99,7 +99,7 @@ function stableSeed(value: string): number {
 }
 
 /** Every network call is time-boxed: an archive that hangs must not hang us. */
-const SOURCE_USER_AGENT = 'PresentationBuddy/3.1 (https://presentationbuddy.aavrit.dedyn.io/)';
+const SOURCE_USER_AGENT = 'PresentationBuddy/3.1 (https://dedyn.io/; mailto:amaavrit@yahoo.com)';
 
 /**
  * Public archive traffic is made from the server route, never a reader's
@@ -383,6 +383,45 @@ export async function fetchWebSpeech(speech: WebSpeech): Promise<WebSpeech> {
   } catch {
     return speech;
   }
+}
+
+/** Resolve a stable public archive id directly, so saved arrival links work on a fresh device. */
+export async function readWebSpeechById(id: string): Promise<WebSpeech | null> {
+  const match = /^(ws|wq|pg)-(\d{1,12})$/.exec(id);
+  if (!match) return null;
+  const [, prefix, numericId] = match;
+
+  if (prefix === 'pg') {
+    const book = await fetchJson<GutenBook>(`${GUTENDEX}/${numericId}`);
+    if (!book?.id) return null;
+    const seed = gutenbergSpeech(book, '');
+    const full = await fetchWebSpeechDirect(seed);
+    return full.content.length > 80 ? full : null;
+  }
+
+  const sourceId: SourceId = prefix === 'wq' ? 'wikiquote' : 'wikisource';
+  const api = sourceId === 'wikiquote' ? WQ_API : WS_API;
+  const payload = await fetchJson<{ query?: { pages?: Record<string, MwPage> } }>(
+    `${api}?action=query&format=json&prop=extracts&explaintext=1&exchars=30000&pageids=${numericId}`,
+  );
+  const page = Object.values(payload?.query?.pages ?? {}).find((candidate) => candidate.pageid === Number(numericId) && !candidate.missing);
+  if (!page?.title || !page.extract) return null;
+  const meta = SOURCES[sourceId];
+  const sourceUrl = `${meta.home}/wiki/${encodeURIComponent(page.title.replace(/ /g, '_'))}`;
+  const content = tidy(page.extract, 30000);
+  if (!content) return null;
+  return {
+    id,
+    title: page.title,
+    author: sourceId === 'wikiquote' ? 'Sourced quotations · Wikiquote' : 'Public domain · Wikisource',
+    preview: tidy(content, 220),
+    content,
+    sourceUrl,
+    source: meta.name,
+    sourceId,
+    licence: meta.licence,
+    fetchedAt: new Date().toISOString(),
+  };
 }
 
 /* ------------------------------------------------------------------ */

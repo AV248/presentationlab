@@ -238,10 +238,11 @@ create table if not exists public.site_settings (
 --  Author identity, badges and verified source accounts
 -- ============================================================================
 
--- A source is an editorial identity, not a synthetic Clerk person. Logos may
--- be a compact data URL uploaded by an administrator or an HTTPS image URL.
+-- A source is an editorial identity backed by its own Clerk user and profile.
+-- Logos remain an HTTPS image URL or a first-party bundled asset.
 create table if not exists public.official_accounts (
   slug          text primary key,
+  identity_uid  text not null default '',
   display_name  text not null,
   logo_url      text not null default '',
   bio           text not null default '',
@@ -252,6 +253,9 @@ create table if not exists public.official_accounts (
   updated_at    timestamptz not null default now(),
   constraint official_accounts_slug_shape check (slug ~ '^[a-z0-9-]{2,60}$')
 );
+alter table public.official_accounts add column if not exists identity_uid text not null default '';
+create unique index if not exists official_accounts_identity_uid_idx
+  on public.official_accounts (identity_uid) where identity_uid <> '';
 
 -- Current badge ownership is separate from the append-only audit. The three
 -- allowed codes are the entire public badge vocabulary.
@@ -449,6 +453,115 @@ begin
     (p_principal_type, trim(p_principal_id), p_badge, p_action, v_reason, v_actor);
 end;
 $$;
+
+-- Deactivation and the official Grey badge move together in one transaction.
+create or replace function public.admin_set_official_active(
+  p_slug text,
+  p_active boolean,
+  p_reason text default ''
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor text := public.current_uid();
+  v_current boolean;
+  v_reason text := left(trim(coalesce(p_reason, '')), 500);
+begin
+  if not public.is_admin() or v_actor is null then
+    raise exception 'administrator access required';
+  end if;
+  select active into v_current from public.official_accounts where slug = lower(trim(coalesce(p_slug, '')));
+  if not found then raise exception 'official account not found'; end if;
+  if v_current = coalesce(p_active, false) then return; end if;
+  update public.official_accounts
+     set active = coalesce(p_active, false), updated_at = now()
+   where slug = lower(trim(p_slug));
+  perform public.admin_set_badge(
+    'official', lower(trim(p_slug)), 'grey',
+    case when p_active then 'grant' else 'revoke' end,
+    coalesce(nullif(v_reason, ''), case when p_active then 'Official source account activated' else 'Official source account deactivated' end)
+  );
+end;
+$$;
+revoke all on function public.admin_set_official_active(text, boolean, text) from public, anon;
+grant execute on function public.admin_set_official_active(text, boolean, text) to authenticated;
+
+-- Create one official/source identity's account-side records in one database
+-- transaction. The Clerk user is created by the server first; this routine
+-- inserts the profile before the handle because handles.uid has a real FK.
+create or replace function public.admin_create_official_account(
+  p_uid text,
+  p_handle text,
+  p_email text,
+  p_display_name text,
+  p_slug text,
+  p_logo_url text default '',
+  p_bio text default '',
+  p_canonical_url text default ''
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor text := public.current_uid();
+  v_handle text := lower(trim(coalesce(p_handle, '')));
+  v_slug text := lower(trim(coalesce(p_slug, '')));
+  v_email text := lower(trim(coalesce(p_email, '')));
+  v_name text := left(trim(coalesce(p_display_name, '')), 80);
+  v_logo text := trim(coalesce(p_logo_url, ''));
+  v_canonical text := trim(coalesce(p_canonical_url, ''));
+  v_bio text := left(trim(coalesce(p_bio, '')), 500);
+begin
+  if not public.is_admin() or v_actor is null then
+    raise exception 'administrator access required';
+  end if;
+  if p_uid is null or length(trim(p_uid)) < 3 then
+    raise exception 'a Clerk identity is required';
+  end if;
+  if v_handle !~ '^[a-z0-9_]{3,24}$' or v_handle ~ '^_|_$|__' then
+    raise exception 'handle must be 3–24 lowercase letters, numbers or single underscores';
+  end if;
+  if v_slug !~ '^[a-z0-9-]{2,60}$' then
+    raise exception 'official slug must be 2–60 lowercase letters, numbers or hyphens';
+  end if;
+  if v_email = '' or position('@' in v_email) < 2 then
+    raise exception 'a valid contact email is required';
+  end if;
+  if v_name = '' then raise exception 'display name is required'; end if;
+  if (v_logo <> '' and v_logo !~ '^https://') or (v_canonical <> '' and v_canonical !~ '^https://') then
+    raise exception 'official account URLs must use https://';
+  end if;
+  if exists (select 1 from public.profiles where uid = p_uid)
+    or exists (select 1 from public.handles where username = v_handle)
+    or exists (select 1 from public.official_accounts where slug = v_slug) then
+    raise exception 'identity, handle or source slug already exists';
+  end if;
+
+  insert into public.profiles (uid, username, display_name, email, photo_url, provider, bio, updated_at)
+  values (trim(p_uid), v_handle, v_name, v_email, v_logo, 'clerk', v_bio, now());
+
+  insert into public.handles (username, uid, reserved, assigned_to, assigned_email, note, created_at, updated_at)
+  values (v_handle, trim(p_uid), false, trim(p_uid), v_email, 'Official source account', now(), now());
+
+  insert into public.official_accounts (slug, identity_uid, display_name, logo_url, bio, canonical_url, active, created_by, created_at, updated_at)
+  values (v_slug, trim(p_uid), v_name, v_logo, v_bio, v_canonical, true, v_actor, now(), now());
+
+  insert into public.badge_assignments
+    (principal_type, principal_id, badge, active, reason, granted_by, granted_at, updated_at)
+  values ('official', v_slug, 'grey', true, 'Official source account created by an administrator', v_actor, now(), now());
+
+  insert into public.badge_audit
+    (principal_type, principal_id, badge, action, reason, actor_uid)
+  values ('official', v_slug, 'grey', 'grant', 'Official source account created by an administrator', v_actor);
+end;
+$$;
+revoke all on function public.admin_create_official_account(text, text, text, text, text, text, text, text) from public, anon;
+grant execute on function public.admin_create_official_account(text, text, text, text, text, text, text, text) to authenticated;
 
 
 -- ============================================================================

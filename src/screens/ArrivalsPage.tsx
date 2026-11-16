@@ -125,7 +125,6 @@ export function ArrivalsPage() {
             sourceType="archive"
             sourceName={source.name}
             sourceURL={speech.sourceUrl}
-            badges={['grey']}
             compact
           />
         </div>

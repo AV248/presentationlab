@@ -119,7 +119,7 @@ export function AdSlot({ seed, variant = 'inline' }: AdSlotProps) {
             <Link className="pb-ad-body" to={ad.url}>
               <AdContent ad={ad} imageFailed={imageFailed} onImageError={() => setImageFailed(true)} />
             </Link>
-          ) : (
+          ) : ad.url ? (
             <a
               className="pb-ad-body"
               href={ad.url}
@@ -128,6 +128,10 @@ export function AdSlot({ seed, variant = 'inline' }: AdSlotProps) {
             >
               <AdContent ad={ad} imageFailed={imageFailed} onImageError={() => setImageFailed(true)} />
             </a>
+          ) : (
+            <div className="pb-ad-body">
+              <AdContent ad={ad} imageFailed={imageFailed} onImageError={() => setImageFailed(true)} />
+            </div>
           )}
         </>
       )}
@@ -166,9 +170,9 @@ function AdContent({
 
       <span className="pb-ad-title">{ad.title}</span>
       {ad.body && <span className="pb-ad-copy">{ad.body}</span>}
-      <span className="pb-ad-cta">
+      {ad.url && <span className="pb-ad-cta">
         {ad.cta} <ArrowUpRight size={13} aria-hidden="true" />
-      </span>
+      </span>}
     </>
   );
 }

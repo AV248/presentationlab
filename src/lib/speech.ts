@@ -39,6 +39,7 @@ export interface CloudSpeech {
   sourceName?: string;
   sourceURL?: string;
   license?: string;
+  officialSlug?: string;
   slug?: string;
   folder?: string;
   credits?: string;
@@ -126,6 +127,7 @@ export function mapSpeechRow(id: string, data: SpeechRow): CloudSpeech {
     sourceName: str(data.sourceName ?? data.source_name) || undefined,
     sourceURL: str(data.sourceURL ?? data.source_url) || undefined,
     license: str(data.license ?? data.licence) || undefined,
+    officialSlug: str(data.officialSlug ?? data.official_slug) || undefined,
     slug: str(data.slug) || undefined,
     folder: str(data.folder) || undefined,
     credits: str(data.Credits ?? data.credits) || undefined,
@@ -203,6 +205,7 @@ export function speechRowFromLibrary(row: SpeechRow): SpeechRow {
     sourceName: row.source_name,
     sourceURL: row.source_url,
     license: row.license,
+    officialSlug: row.official_slug,
     Tags: row.tags,
     Credits: row.credits,
     Signature: row.signature,

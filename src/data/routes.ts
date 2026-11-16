@@ -6,6 +6,7 @@ import {
   SITE_URL,
   absoluteUrl,
 } from '../lib/seo';
+import { slugifySegment } from '../lib/paths';
 
 /**
  * The public route registry: every indexable URL the site serves, with the
@@ -26,6 +27,8 @@ export interface PageMeta {
   /** Sitemap hinting. */
   priority: number;
   changefreq: 'daily' | 'weekly' | 'monthly';
+  /** Only set when the source has a real content date; never use build time as a guess. */
+  lastModified?: string;
   /** Slug of the generated share card (dist/cards/<card>.png), if any. */
   card: string | null;
   jsonLd: Record<string, unknown>[];
@@ -145,6 +148,8 @@ const SECTIONS: {
   description: string;
   priority?: number;
   changefreq?: 'daily' | 'weekly' | 'monthly';
+  /** Null means the page is intentionally not assigned a generated share card. */
+  card?: string | null;
 }[] = [
   {
     path: '/rehearse',
@@ -210,6 +215,78 @@ const SECTIONS: {
     priority: 0.6,
     changefreq: 'monthly',
   },
+  {
+    path: '/templates',
+    title: 'Speech Templates & Frameworks',
+    description: 'A practical library of speech skeletons for stories, pitches, introductions, data talks, difficult conversations and Q&A.',
+    priority: 0.8,
+    changefreq: 'weekly',
+    card: null,
+  },
+  {
+    path: '/category',
+    title: 'Speech Categories',
+    description: 'Browse public presentations by category, from personal stories and leadership to education, community and celebration.',
+    priority: 0.7,
+    changefreq: 'weekly',
+    card: null,
+  },
+  {
+    path: '/tag',
+    title: 'Speech Tags',
+    description: 'Explore public presentations through their topic tags and follow a thread into related speeches.',
+    priority: 0.65,
+    changefreq: 'weekly',
+    card: null,
+  },
+  {
+    path: '/privacy',
+    title: 'Privacy',
+    description: 'How Presentation Buddy handles account details, local drafts, public presentations, analytics and data requests.',
+    priority: 0.3,
+    changefreq: 'monthly',
+    card: null,
+  },
+  {
+    path: '/policy',
+    title: 'Content & Community Policy',
+    description: 'The standards for shared presentations, sourced archive material, moderation and respectful participation.',
+    priority: 0.3,
+    changefreq: 'monthly',
+    card: null,
+  },
+  {
+    path: '/terms',
+    title: 'Terms of Use',
+    description: 'Terms for using Presentation Buddy, publishing work and reading material from open archives.',
+    priority: 0.3,
+    changefreq: 'monthly',
+    card: null,
+  },
+  {
+    path: '/feedback',
+    title: 'Feedback',
+    description: 'Send a note about Presentation Buddy directly to its maintainer.',
+    priority: 0.3,
+    changefreq: 'monthly',
+    card: null,
+  },
+  {
+    path: '/report',
+    title: 'Report a problem',
+    description: 'Report a content, safety, accessibility or technical problem to Presentation Buddy.',
+    priority: 0.3,
+    changefreq: 'monthly',
+    card: null,
+  },
+  {
+    path: '/download',
+    title: 'Downloads',
+    description: 'Official Presentation Buddy desktop and Android downloads, when a signed release is available.',
+    priority: 0.4,
+    changefreq: 'monthly',
+    card: null,
+  },
 ];
 
 /** The 9 flagship reads that get their own social share card. */
@@ -270,7 +347,7 @@ export function buildPages(): PageMeta[] {
         operatingSystem: 'Any',
         description: SITE_TAGLINE,
         browserRequirements: 'Requires JavaScript.',
-        softwareVersion: '2.6.2',
+        softwareVersion: '3.1.0',
         featureList: [
           'Fullscreen rehearsal stage with teleprompter and pacing timer',
           'Speech editor with structure coaching and a built-in thesaurus',
@@ -325,7 +402,7 @@ export function buildPages(): PageMeta[] {
       type: 'website',
       priority: section.priority ?? 0.7,
       changefreq: section.changefreq ?? 'monthly',
-      card: section.path.slice(1),
+      card: section.card === undefined ? section.path.slice(1) : section.card,
       group: 'section',
       jsonLd: [
         {
@@ -427,6 +504,7 @@ export function buildPages(): PageMeta[] {
       type: 'article',
       priority: 0.8,
       changefreq: 'monthly',
+      lastModified: speech.createdAt,
       card: CARD_READS.includes(speech.id) ? `read-${speech.id}` : null,
       group: 'read',
       jsonLd: [
@@ -457,6 +535,64 @@ export function buildPages(): PageMeta[] {
           { name: speech.category, path: '/topics' },
           { name: speech.title, path: `/read/${speech.id}` },
         ]),
+      ],
+    });
+  }
+
+  /* Crawlable taxonomy hubs for every bundled category and tag. */
+  const categorySlugs = new Map<string, string>();
+  const tagSlugs = new Map<string, string>();
+  for (const speech of LIBRARY) {
+    const category = speech.category.trim();
+    const categorySlug = slugifySegment(category);
+    if (categorySlug && !categorySlugs.has(categorySlug)) categorySlugs.set(categorySlug, category);
+    for (const rawTag of speech.tags) {
+      const tag = rawTag.trim();
+      const tagSlug = slugifySegment(tag);
+      if (tagSlug && !tagSlugs.has(tagSlug)) tagSlugs.set(tagSlug, tag);
+    }
+  }
+
+  for (const [slug, label] of categorySlugs) {
+    const speeches = LIBRARY.filter((speech) => slugifySegment(speech.category) === slug);
+    const path = `/category/${slug}`;
+    pages.push({
+      path,
+      title: `${label} Speeches & Presentations · ${SITE_NAME}`,
+      description: `Read ${speeches.length} example ${label.toLowerCase()} speeches and presentations, then rehearse them in Presentation Buddy.`,
+      type: 'website', priority: 0.72, changefreq: 'weekly', card: null, group: 'category',
+      jsonLd: [
+        {
+          '@context': 'https://schema.org', '@type': 'CollectionPage',
+          name: `${label} Speeches & Presentations`, url: absoluteUrl(path),
+          description: `Example speeches and presentations in ${label}.`,
+          mainEntity: { '@type': 'ItemList', itemListElement: speeches.map((speech, index) => ({
+            '@type': 'ListItem', position: index + 1, name: speech.title, url: absoluteUrl(`/read/${speech.id}`),
+          })) },
+        },
+        breadcrumb([{ name: 'Home', path: '/' }, { name: label, path }]),
+      ],
+    });
+  }
+
+  for (const [slug, label] of tagSlugs) {
+    const speeches = LIBRARY.filter((speech) => speech.tags.some((tag) => slugifySegment(tag) === slug));
+    const path = `/tag/${slug}`;
+    pages.push({
+      path,
+      title: `Speeches tagged “${label}” · ${SITE_NAME}`,
+      description: `Read ${speeches.length} speeches and presentations tagged ${label} in the Presentation Buddy library.`,
+      type: 'website', priority: 0.62, changefreq: 'weekly', card: null, group: 'tag',
+      jsonLd: [
+        {
+          '@context': 'https://schema.org', '@type': 'CollectionPage',
+          name: `Speeches tagged ${label}`, url: absoluteUrl(path),
+          description: `Example speeches and presentations tagged ${label}.`,
+          mainEntity: { '@type': 'ItemList', itemListElement: speeches.map((speech, index) => ({
+            '@type': 'ListItem', position: index + 1, name: speech.title, url: absoluteUrl(`/read/${speech.id}`),
+          })) },
+        },
+        breadcrumb([{ name: 'Home', path: '/' }, { name: `#${label}`, path }]),
       ],
     });
   }
@@ -496,8 +632,9 @@ export function buildPages(): PageMeta[] {
 }
 
 /** Pages that receive a share card should equal 32 (checked by the build). */
-/** Groups that exist as pages but must never appear in the sitemap. */
+/** Groups and private workspaces that must never appear in the sitemap. */
 const HIDDEN_FROM_SITEMAP = new Set(['404', 'claim', 'auth']);
+const PRIVATE_SITEMAP_PATHS = new Set(['/desk', '/control', '/settings', '/admin', '/dbms']);
 
 export function buildCardPages(): { path: string; card: string; title: string; description: string; group: string }[] {
   return buildPages()
@@ -516,14 +653,15 @@ export function pageMetaFor(path: string): PageMeta | undefined {
   return buildPages().find((page) => page.path === path);
 }
 
-/** Sitemap excludes the 404 page only. */
-export function buildSitemapUrls(): { loc: string; priority: number; changefreq: string }[] {
+/** Static sitemap entries; the route adds live Turso speeches, taxonomies and posts. */
+export function buildSitemapUrls(): { loc: string; priority: number; changefreq: string; lastModified?: string }[] {
   return buildPages()
-    .filter((page) => !HIDDEN_FROM_SITEMAP.has(page.group))
+    .filter((page) => !HIDDEN_FROM_SITEMAP.has(page.group) && !PRIVATE_SITEMAP_PATHS.has(page.path))
     .map((page) => ({
       loc: absoluteUrl(page.path),
       priority: page.priority,
       changefreq: page.changefreq,
+      ...(page.lastModified ? { lastModified: page.lastModified } : {}),
     }));
 }
 

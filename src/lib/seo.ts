@@ -26,7 +26,7 @@ export const SITE_NAME = 'Presentation Buddy';
  * The fallback keeps local builds and the prerender scripts working without
  * any environment at all.
  */
-const DEFAULT_SITE_URL = 'https://presentationbuddy.aavrit.dedyn.io';
+const DEFAULT_SITE_URL = 'https://dedyn.io';
 
 function readSiteUrl(): string {
   // Read the property directly off `process.env` rather than caching
