@@ -96,11 +96,16 @@ export function AdminPage() {
   const [users, setUsers] = useState<Awaited<ReturnType<typeof fetchUsers>>>([]);
   const [ads, setAds] = useState<Ad[]>([]);
   const [adsError, setAdsError] = useState<string | null>(null);
-  const [unlocked, setUnlocked] = useState(isAdminUnlocked);
+  // Session storage is browser-only; initialize identically for SSR and hydration.
+  const [unlocked, setUnlocked] = useState(false);
   const [gate, setGate] = useState<{ configured: boolean } | null>(null);
   const [handles, setHandles] = useState<HandleRow[]>([]);
   const [userQuery, setUserQuery] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+
+  useEffect(() => {
+    setUnlocked(isAdminUnlocked());
+  }, []);
 
   const isAdmin = role === 'admin' || role === 'owner';
   const isOwner = role === 'owner';
@@ -875,7 +880,7 @@ function SourceReviewPanel() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><strong style={{ flex: 1, minWidth: 180 }}>{item.title}</strong><span className="pb-chip" data-status={item.status}>{item.status}</span><a href={item.sourceUrl} target="_blank" rel="noopener noreferrer" className="pb-btn pb-btn-sm pb-btn-ghost">Original source <ExternalLink size={12} /></a></div>
           <div className="pb-muted" style={{ fontSize: '.74rem', lineHeight: 1.5 }}>{item.author} · {item.sourceId} · {item.license} · fetched {item.fetchedAt}</div>
           <p className="pb-soft" style={{ fontSize: '.82rem', lineHeight: 1.6, margin: 0 }}>{item.preview}</p>
-          <details><summary className="pb-muted" style={{ cursor: 'pointer', fontSize: '.78rem' }}>Inspect text ({item.content.length.toLocaleString()} characters loaded)</summary><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 360, overflow: 'auto', fontFamily: 'var(--x-font-body)', fontSize: '.8rem', lineHeight: 1.65 }}>{item.content}</pre></details>
+          <details><summary className="pb-muted" style={{ cursor: 'pointer', fontSize: '.78rem' }}>Inspect text ({item.content.length.toLocaleString('en-US')} characters loaded)</summary><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 360, overflow: 'auto', fontFamily: 'var(--x-font-body)', fontSize: '.8rem', lineHeight: 1.65 }}>{item.content}</pre></details>
           <div><label className="pb-label" htmlFor={`source-note-${item.id}`}>Curator note</label><textarea id={`source-note-${item.id}`} className="pb-textarea" rows={2} maxLength={500} value={notes[item.id] ?? item.note} onChange={(event) => setNotes({ ...notes, [item.id]: event.target.value })} placeholder="Quality, context, attribution or reason for a hold" /></div>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
             {(item.status === 'candidate' || item.status === 'rejected') && <button type="button" className="pb-btn pb-btn-sm" disabled={busy} onClick={() => void review(item.id, 'approved')}><Check size={13} /> Approve</button>}

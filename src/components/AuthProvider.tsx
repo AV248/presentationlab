@@ -104,7 +104,8 @@ function readScheme(): 'light' | 'dark' {
 }
 
 function useColorScheme(): 'light' | 'dark' {
-  const [scheme, setScheme] = useState<'light' | 'dark'>(readScheme);
+  // Keep the server and first browser render identical; read the document only after hydration.
+  const [scheme, setScheme] = useState<'light' | 'dark'>('light');
 
   useEffect(() => {
     setScheme(readScheme());

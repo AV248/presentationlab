@@ -73,7 +73,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         <span className="pb-eyebrow">Open mic · {post.author}</span>
         <h1 className="pb-page-title" style={{ marginTop: 8 }}>{post.title}</h1>
         <p className="pb-muted" style={{ fontSize: '0.8rem', marginTop: 8 }}>
-          {post.createdAt ? new Date(post.createdAt).toLocaleDateString('en', { dateStyle: 'long', timeZone: 'UTC' }) : 'Community post'}
+          {post.createdAt ? new Date(post.createdAt).toLocaleDateString('en-US', { dateStyle: 'long', timeZone: 'UTC' }) : 'Community post'}
         </p>
         <div className="pb-prose pb-community-post-copy" style={{ marginTop: 24 }}>
           {post.body.split(/\n{2,}/).map((paragraph, index) => (

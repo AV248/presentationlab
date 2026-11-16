@@ -166,7 +166,10 @@ export function ClerkAuthButtons() {
     else void clerk.openSignUp();
   };
 
-  const origin = typeof window === 'undefined' ? '' : window.location.origin;
+  const [origin, setOrigin] = useState('');
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

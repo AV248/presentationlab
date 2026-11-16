@@ -676,6 +676,7 @@ export function ReaderPage({ initial }: { initial?: CloudSpeech } = {}) {
           word={lens.state.word}
           x={lens.state.x}
           y={lens.state.y}
+          viewport={lens.state.viewport}
           onClose={lens.close}
         />
       )}

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import {
   Accessibility,
   Laptop,
@@ -62,14 +63,18 @@ export function ThemesPage() {
     jsonLd: meta?.jsonLd,
   });
 
-  const platform = detectPlatform();
+  const [platform, setPlatform] = useState('unknown');
+
+  useEffect(() => {
+    setPlatform(detectPlatform());
+  }, []);
 
   return (
     <div className="pb-page anim-themes-arrival" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--l-rhythm)' }}>
       <section className="pb-panel pb-theme-dress anim-enter" style={{ padding: 'clamp(20px, 3vw, 32px)' }}>
         <span className="pb-eyebrow">Theme studio</span>
         <h1 style={{ fontSize: 'clamp(1.6rem, 3.4vw, 2.3rem)', margin: '10px 0 10px' }}>
-          {COMBINATIONS.toLocaleString()} ways to make it yours
+          {COMBINATIONS.toLocaleString('en-US')} ways to make it yours
         </h1>
         <p className="pb-soft" style={{ maxInlineSize: '58ch' }}>
           Five axes that mix freely — pick a palette, a motion personality, a layout, an interface
