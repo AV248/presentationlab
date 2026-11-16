@@ -292,7 +292,7 @@ export function CommunityPage({ initialPosts = [] }: { initialPosts?: Post[] }) 
                   style={{ display: 'flex', gap: 10, marginTop: 10, fontSize: '0.74rem', alignItems: 'center' }}
                 >
                   <span>{post.author}</span>
-                  <span>{post.createdAt ? new Date(post.createdAt).toLocaleDateString() : ''}</span>
+                  <span>{post.createdAt ? new Date(post.createdAt).toLocaleDateString('en-US', { timeZone: 'UTC' }) : ''}</span>
                   {(role === 'admin' || role === 'owner') && (
                     <button
                       type="button"

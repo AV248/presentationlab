@@ -42,8 +42,12 @@ const dismissedForSession = (key: string) => {
 
 export function AdSlot({ seed, variant = 'inline' }: AdSlotProps) {
   const [ad, setAd] = useState<Ad | null>(null);
-  const [dismissed, setDismissed] = useState(() => dismissedForSession(seed));
+  const [dismissed, setDismissed] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setDismissed(dismissedForSession(seed));
+  }, [seed]);
 
   useEffect(() => {
     let alive = true;

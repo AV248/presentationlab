@@ -520,7 +520,7 @@ export function ThemeStudio({ variant = 'sheet' }: { variant?: 'sheet' | 'page' 
 
         <p style={{ fontSize: '0.83rem', color: 'var(--c-ink-muted)', lineHeight: 1.6 }}>
           Five independent axes, all mixable — <strong style={{ color: 'var(--c-ink)' }}>
-            {COMBINATIONS.toLocaleString()}
+            {COMBINATIONS.toLocaleString('en-US')}
           </strong>{' '}
           possible combinations. Changes apply instantly and are saved to this device.
         </p>

@@ -629,7 +629,7 @@ function RehearseHero({
         </h1>
         <p className="pb-page-sub">
           {title
-            ? `${words?.toLocaleString()} words · about ${minutes} minute${minutes === 1 ? '' : 's'} at your pace. Go full screen and let it run.`
+            ? `${words?.toLocaleString('en-US')} words · about ${minutes} minute${minutes === 1 ? '' : 's'} at your pace. Go full screen and let it run.`
             : 'A full-screen stage, your words at your pace, and a clock that tells you the truth. The only part of speaking that actually builds the skill is the part where you say it.'}
         </p>
       </div>

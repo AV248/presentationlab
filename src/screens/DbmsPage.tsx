@@ -68,7 +68,7 @@ export function DbmsPage() {
             <RefreshCw size={13} /> {loading ? 'Checking…' : 'Run checks'}
           </button>
         </div>
-        {report?.at && <p className="pb-muted" style={{ fontSize: '0.72rem', marginTop: 10 }}>Checked {new Date(report.at).toLocaleString()}</p>}
+        {report?.at && <p className="pb-muted" style={{ fontSize: '0.72rem', marginTop: 10 }}>Checked {new Date(report.at).toLocaleString('en-US', { timeZone: 'UTC' })}</p>}
       </div>
       {error && <p className="pb-notice" role="alert">{error}</p>}
       <section aria-label="Service checks" style={{ display: 'grid', gap: 9 }}>

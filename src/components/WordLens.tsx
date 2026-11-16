@@ -20,6 +20,7 @@ interface LensState {
   word: string;
   x: number;
   y: number;
+  viewport: number;
 }
 
 export function useWordLens() {
@@ -31,6 +32,7 @@ export function useWordLens() {
       word,
       x: rect.left + rect.width / 2 + window.scrollX,
       y: rect.bottom + window.scrollY,
+      viewport: window.innerWidth,
     });
   }, []);
 
@@ -43,11 +45,13 @@ export function WordLensCard({
   word,
   x,
   y,
+  viewport,
   onClose,
 }: {
   word: string;
   x: number;
   y: number;
+  viewport: number;
   onClose: () => void;
 }) {
   const [entry, setEntry] = useState<Entry | null | undefined>(undefined);
@@ -90,7 +94,6 @@ export function WordLensCard({
   // Keep the card on screen on narrow phones.
   const width = 300;
   const half = width / 2;
-  const viewport = typeof window === 'undefined' ? 360 : window.innerWidth;
   const left = Math.max(12 + half, Math.min(x, viewport - 12 - half));
 
   return (

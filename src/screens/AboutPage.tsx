@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Link } from '@/lib/router';
 import {
   BookOpenText,
@@ -69,10 +70,20 @@ export function AboutPage() {
   const items = useSpeeches();
   const user = useAuth((s) => s.user);
   const role = useAuth((s) => s.role);
-  const platform = detectPlatform();
-  const install = installInstructions();
-  const standalone = isStandalone();
-  const mod = modifierLabel();
+  const [platform, setPlatform] = useState('unknown');
+  const [install, setInstall] = useState({
+    title: 'Install Presentation Buddy',
+    steps: 'Use your browser’s “Install app” / “Add to Home Screen” option to run it offline.',
+  });
+  const [standalone, setStandalone] = useState(false);
+  const [mod, setMod] = useState('Ctrl');
+
+  useEffect(() => {
+    setPlatform(detectPlatform());
+    setInstall(installInstructions());
+    setStandalone(isStandalone());
+    setMod(modifierLabel());
+  }, []);
 
   const yours = items.filter((item) => item.source === 'user').length;
   const shared = items.filter((item) => item.source === 'cloud').length;
@@ -105,7 +116,7 @@ export function AboutPage() {
           <Fact label="Shared by people" value={String(shared)} />
           <Fact label="From the web" value={String(web)} />
           <Fact label="Theme options" value={String(AXES.reduce((sum, axis) => sum + axis.options.length, 0))} />
-          <Fact label="Combinations" value={COMBINATIONS.toLocaleString()} />
+          <Fact label="Combinations" value={COMBINATIONS.toLocaleString('en-US')} />
         </div>
       </section>
 

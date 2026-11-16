@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from '@/lib/router';
 import { Keyboard, Sparkles, X } from 'lucide-react';
 import { ThemeStudio } from './ThemeStudio';
@@ -43,7 +43,11 @@ export function HelpDialog() {
   const open = useUi((s) => s.helpOpen);
   const setOpen = useUi((s) => s.setHelp);
   const navigate = useNavigate();
-  const mod = modifierLabel();
+  const [mod, setMod] = useState('Ctrl');
+
+  useEffect(() => {
+    setMod(modifierLabel());
+  }, []);
 
   useEffect(() => {
     if (!open) return undefined;

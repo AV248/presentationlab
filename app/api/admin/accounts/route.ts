@@ -133,6 +133,7 @@ export async function POST(request: Request) {
 
   const clerk = createClerkClient({ secretKey: CLERK_SECRET_KEY });
   let createdUid = '';
+  let provisioningStep: 'clerk.createUser' | 'supabase.admin_create_official_account' = 'clerk.createUser';
   try {
     const created = await clerk.users.createUser({
       emailAddress: [email],
@@ -143,6 +144,7 @@ export async function POST(request: Request) {
       publicMetadata: { presentationBuddy: { kind: 'official', slug } },
     });
     createdUid = created.id;
+    provisioningStep = 'supabase.admin_create_official_account';
     await createSupabaseAccount(identity.token, {
       uid: createdUid,
       handle,
@@ -158,7 +160,7 @@ export async function POST(request: Request) {
     const detail = error instanceof Error ? error.message : String(error);
 
     // Keep the specific failure in server logs; the browser gets a generic message.
-    console.error('[admin/accounts] provisioning failed:', detail.slice(0, 400));
+    console.error(`[admin/accounts] ${provisioningStep} failed:`, detail.slice(0, 400));
 
     if (createdUid) {
       try {

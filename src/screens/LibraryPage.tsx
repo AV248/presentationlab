@@ -82,6 +82,11 @@ export function LibraryPage({ initial }: { initial?: CloudSpeech[] } = {}) {
   const [showFilters, setShowFilters] = useState(false);
   const [seed, setSeed] = useState(0);
   const [webLoading, setWebLoading] = useState(false);
+  const [greeting, setGreeting] = useState('Welcome');
+
+  useEffect(() => {
+    setGreeting(greetingFor(new Date()));
+  }, []);
 
   const layout = layoutById(layoutId);
 
@@ -365,7 +370,7 @@ export function LibraryPage({ initial }: { initial?: CloudSpeech[] } = {}) {
 
       {/* Hero */}
       <section className="pb-panel anim-enter" style={{ padding: 'clamp(20px, 3vw, 34px)' }}>
-        <span className="pb-eyebrow">{greetingFor(new Date())}</span>
+        <span className="pb-eyebrow">{greeting}</span>
         <h1 style={{ fontSize: 'clamp(1.8rem, 4vw, 2.6rem)', margin: '10px 0 12px' }}>
           A room full of people is waiting to hear{' '}
           <em style={{ fontStyle: 'italic', color: 'var(--c-accent)' }}>one true thing</em>.
@@ -401,7 +406,7 @@ export function LibraryPage({ initial }: { initial?: CloudSpeech[] } = {}) {
           <Stat label="Minutes to read" value={String(totalMinutes)} icon={Clock} />
         </div>
         <p className="pb-muted" style={{ fontSize: '0.76rem', marginTop: 12 }}>
-          {totalWords.toLocaleString()} words in total. Counts come from real documents — nothing here
+          {totalWords.toLocaleString('en-US')} words in total. Counts come from real documents — nothing here
           is padded to look busier than it is.
         </p>
       </section>
