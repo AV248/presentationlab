@@ -10,7 +10,7 @@ import { useUi } from '../store/ui';
 import { useGate } from '../components/SignIn';
 import { validateUsername, normalizeUsername, RESERVED_HANDLES } from '../lib/identity';
 import { claimUsername, fetchHandleState, fetchProfile, isUsernameAvailable, type PublicProfile } from '../services/profiles';
-import { workPath } from '../lib/paths';
+import { workPath, slugifySegment, presentationPath } from '../lib/paths';
 import { fetchSpeechesByUsername, type CloudSpeech } from '../services/data';
 import { shortUrl } from '../lib/share';
 import { copyText } from '../lib/platform';
@@ -106,6 +106,17 @@ export function HandlePage({ initial }: { initial?: HandleSeed } = {}) {
   }
 
   const display = profile ?? (isMine ? { username, uid: user?.uid ?? '', displayName: me.displayName || username, bio: me.bio, location: me.location, website: me.website, signature: me.signature, createdAt: '', photoURL: user?.photoURL ?? '' } : null);
+  if (!display && loaded) {
+    return (
+      <div className="pb-panel" style={{ padding: 28, textAlign: 'center' }} role="status">
+        <h2 style={{ marginBottom: 8 }}>This profile could not be opened</h2>
+        <p className="pb-muted" style={{ lineHeight: 1.65, marginBottom: 14 }}>
+          @{username} is held, but its profile details are not available right now. Try again shortly.
+        </p>
+        <button type="button" className="pb-btn" onClick={() => window.location.reload()}>Try again</button>
+      </div>
+    );
+  }
   if (!display) return <p className="pb-muted" style={{ padding: 24 }}>Opening @{username}…</p>;
   return (
     <div className="pb-page anim-author-arrival" style={{ display:'flex', flexDirection:'column', gap:'var(--l-rhythm)' }}>
@@ -117,7 +128,7 @@ export function HandlePage({ initial }: { initial?: HandleSeed } = {}) {
         <h1 style={{ fontSize:'clamp(1.7rem,4vw,2.5rem)', margin:'8px 0' }}>{display?.displayName ?? `@${username}`}</h1>
         {display.bio
           ? <p className="pb-soft" style={{ maxInlineSize: '62ch', lineHeight: 1.65 }}>{display.bio}</p>
-          : <p className="pb-muted">{isMine ? 'No introduction yet — add a bio from Control and it appears here.' : 'No introduction yet.'}</p>}
+          : <p className="pb-muted">{isMine ? 'No introduction yet — add a bio in Profile settings and it appears here.' : 'No introduction yet.'}</p>}
         <div style={{ display:'flex', gap:14, flexWrap:'wrap', marginTop:12 }} className="pb-muted">
           {display?.location && <span><MapPin size={13} style={{display:'inline',verticalAlign:'-2px'}} /> {display.location}</span>}
           {display?.website && <a href={display.website.startsWith('http') ? display.website : `https://${display.website}`} target="_blank" rel="noopener noreferrer"><Link2 size={13} style={{display:'inline',verticalAlign:'-2px'}} /> {display.website}</a>}
@@ -126,7 +137,7 @@ export function HandlePage({ initial }: { initial?: HandleSeed } = {}) {
         {display?.signature && <p style={{ fontFamily:'var(--x-font-display)', fontStyle:'italic', marginTop:14 }}>— {display.signature}</p>}
         <div style={{ display:'flex', gap:8, marginTop:16, flexWrap:'wrap' }}>
           <button type="button" className="pb-btn" onClick={() => void copyText(shortUrl(`/${username}`))}>Copy {shortUrl(`/${username}`)}</button>
-          {isMine && <Link to="/control" className="pb-btn pb-btn-ghost">Edit your profile</Link>}
+          {isMine && <Link to="/settings" className="pb-btn pb-btn-ghost">Edit your profile</Link>}
         </div>
       </section>
       <section>
@@ -141,8 +152,8 @@ export function HandlePage({ initial }: { initial?: HandleSeed } = {}) {
               <Link to={workPath(username, w.slug || w.id, w.folder ?? '')} style={{ fontWeight:700, fontSize:'1.05rem' }}>{w.title}</Link>
               <p className="pb-soft" style={{ marginTop:6, lineHeight:1.6 }}>{w.preview}</p>
               <div style={{ display:'flex', gap:8, marginTop:10 }}>
-                <Link className="pb-btn pb-btn-sm" to={`/read/${w.id}`}>Read</Link>
-                <Link className="pb-btn pb-btn-sm pb-btn-ghost" to={`/rehearse/${w.id}`}><Mic2 size={13}/> Rehearse</Link>
+                <Link className="pb-btn pb-btn-sm" to={presentationPath(w)}>Read</Link>
+                <Link className="pb-btn pb-btn-sm pb-btn-ghost" to={`/rehearse/${encodeURIComponent(w.id)}`}><Mic2 size={13}/> Rehearse</Link>
               </div>
             </article>
           ))}
@@ -161,17 +172,12 @@ export function HandlePage({ initial }: { initial?: HandleSeed } = {}) {
   );
 }
 function HandleWork({ username, work }: { username: string; work: { id: string; title: string; preview: string; content: string; category: string; credits?: string; signature?: string; allowCopy?: boolean; author?: string; authorPhotoURL?: string; authorBadges?: string[]; sourceType?: 'person' | 'archive' | 'admin'; sourceName?: string; sourceURL?: string } }) {
-  const toast = useUi((s) => s.toast);
-  const url = shortUrl(`/${username}/${(work as { slug?: string }).slug ?? work.id}`);
-  const protectedWork = work.allowCopy === false;
   return (
-    <article className={`pb-panel anim-enter${protectedWork ? ' pb-protected' : ''}`} style={{ padding:'clamp(20px,4vw,40px)' }}
-      onCopy={protectedWork ? (e) => { e.preventDefault(); toast('© This work is protected by its writer.', 'warn'); } : undefined}
-      onContextMenu={protectedWork ? (e) => e.preventDefault() : undefined}>
+    <article className="pb-panel anim-enter" style={{ padding:'clamp(20px,4vw,40px)' }}>
       <div className="pb-reader-author-row">
         <AuthorCorner author={work.author ?? username} username={username} photoURL={work.authorPhotoURL} badges={work.authorBadges} arrival />
       </div>
-      <span className="pb-eyebrow">@{username} · {work.category}</span>
+      <span className="pb-eyebrow">@{username} · <Link to={`/category/${slugifySegment(work.category)}`}>{work.category}</Link></span>
       <h1
         style={{
           fontSize: 'clamp(1.6rem,4vw,2.4rem)',
@@ -183,14 +189,12 @@ function HandleWork({ username, work }: { username: string; work: { id: string; 
       </h1>
       {work.preview && <p className="pb-soft" style={{ lineHeight:1.65, maxInlineSize:'62ch' }}>{work.preview}</p>}
       <div style={{ display:'flex', gap:8, flexWrap:'wrap', margin:'16px 0' }}>
-        <button type="button" className="pb-btn" onClick={async () => { const ok = await copyText(url); toast(ok ? url : 'Copy failed', ok ? 'success' : 'error'); }}>Copy {url}</button>
-        <Link className="pb-btn pb-btn-ghost" to={`/rehearse/${work.id}`}><Mic2 size={14} /> Rehearse it</Link>
+        <Link className="pb-btn pb-btn-ghost" to={`/rehearse/${encodeURIComponent(work.id)}`}><Mic2 size={14} /> Rehearse it</Link>
         <Link className="pb-btn pb-btn-ghost" to={`/${username}`}>More by @{username}</Link>
       </div>
       <Markdown text={work.content} className="pb-prose" />
       {work.credits && <p className="pb-muted" style={{ fontSize:'0.8rem', marginTop:20 }}>Credits: {work.credits}</p>}
       {work.signature && <p style={{ fontFamily:'var(--x-font-display)', fontStyle:'italic', marginTop:10 }}>— {work.signature}</p>}
-      {protectedWork && <p className="pb-chip" style={{ marginTop:14 }}>© Protected by the writer — read & rehearse here, share the link</p>}
     </article>
   );
 }
@@ -236,7 +240,7 @@ function HandleFolder({ username, folder, works }: { username: string; folder: s
             </Link>
             <p className="pb-soft" style={{ marginTop: 6, lineHeight: 1.6 }}>{w.preview}</p>
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <Link className="pb-btn pb-btn-sm" to={`/read/${w.id}`}>Read</Link>
+              <Link className="pb-btn pb-btn-sm" to={presentationPath({ ...w, username })}>Read</Link>
             </div>
           </article>
         ))}

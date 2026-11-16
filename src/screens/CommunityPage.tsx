@@ -6,7 +6,8 @@ import { Feather, Medal, PenLine, RefreshCw, Trophy } from 'lucide-react';
 import { useCommunity } from '../hooks/useCommunity';
 import { useAuth } from '../store/auth';
 import { useUi } from '../store/ui';
-import { publishPost, deletePost } from '../services/data';
+import { publishPost, deletePost, type Post } from '../services/data';
+import { communityPostPath } from '../lib/community';
 import { BACKEND_ENABLED } from '../services/backend';
 import { formatCount } from '../lib/text';
 import { useGate } from '../components/SignIn';
@@ -19,14 +20,14 @@ import { usePageMeta } from '../lib/usePageMeta';
  * Community: the leaderboard (real accounts, real points) and the open mic,
  * which is where the old site's "creative creator" posts now live.
  */
-export function CommunityPage() {
+export function CommunityPage({ initialPosts = [] }: { initialPosts?: Post[] }) {
   const meta = pageMetaFor('/community');
   usePageMeta('Community — speeches shared by real people', {
     description: meta?.description,
     image: meta?.card ? `${SITE_URL}/cards/${meta.card}.png` : undefined,
     jsonLd: meta?.jsonLd,
   });
-  const { contributors, posts, loading, error, refresh } = useCommunity();
+  const { contributors, posts, loading, error, refresh } = useCommunity(initialPosts);
   const user = useAuth((s) => s.user);
   const role = useAuth((s) => s.role);
   const toast = useUi((s) => s.toast);
@@ -77,7 +78,7 @@ export function CommunityPage() {
             flexWrap: 'wrap',
           }}
         >
-          <Link to="/studio" className="pb-btn pb-btn-primary">
+          <Link to="/write" className="pb-btn pb-btn-primary">
             <PenLine size={16} /> Publish a speech
           </Link>
           <button type="button" className="pb-btn" onClick={refresh} disabled={loading}>
@@ -280,7 +281,9 @@ export function CommunityPage() {
                 className="pb-panel-flat"
                 style={{ padding: '14px 16px', position: 'relative' }}
               >
-                <h3 style={{ fontSize: '1rem', marginBottom: 6 }}>{post.title}</h3>
+                <h3 style={{ fontSize: '1rem', marginBottom: 6 }}>
+                  <Link className="pb-reader-related-title" to={communityPostPath(post)}>{post.title}</Link>
+                </h3>
                 <p className="pb-soft" style={{ fontSize: '0.9rem', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
                   {post.body}
                 </p>

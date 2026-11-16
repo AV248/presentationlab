@@ -27,7 +27,8 @@ import { useSettings } from '../store/settings';
 import { festivalById } from '../data/festivals';
 import { useProfile } from '../store/profile';
 import { normalizeUsername } from '../lib/identity';
-import { fetchSiteFestival, SUPPORT_EMAIL, SUPPORT_URL } from '../services/profiles';
+import { fetchSiteFestival, SUPPORT_EMAIL } from '../services/profiles';
+import { fetchSiteNotice, type PublicSiteNotice } from '../services/siteNotice';
 import { useCloud } from '../store/cloud';
 import { useAuth } from '../store/auth';
 import { modifierLabel, isApple } from '../lib/platform';
@@ -207,7 +208,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <AccountChip />
         <HandleLink />
-        <a className="pb-navlink" href={SUPPORT_URL} target="_blank" rel="noopener noreferrer" title={`Support — ${SUPPORT_EMAIL}`}><span className="pb-navlink-label">Contact support</span></a>
+        <a className="pb-navlink" href={`mailto:${SUPPORT_EMAIL}`} title={`Email ${SUPPORT_EMAIL}`}><span className="pb-navlink-label">Contact support</span></a>
         <CloudBadge />
       </aside>
 
@@ -217,6 +218,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* ---- the column ---- */}
       <div className="pb-column">
+        <PublicNoticeRibbon />
         <FestivalRibbon />
         <header className="pb-topbar">
           <button
@@ -349,6 +351,23 @@ function CloudBadge() {
       {label}
     </div>
   );
+}
+
+function PublicNoticeRibbon() {
+  const [notice, setNotice] = useState<PublicSiteNotice | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => { void fetchSiteNotice().then((value) => { if (alive) setNotice(value); }); };
+    const updated = (event: Event) => {
+      const detail = (event as CustomEvent<PublicSiteNotice | null>).detail;
+      setNotice(detail ?? null);
+    };
+    refresh();
+    window.addEventListener('pb:site-notice-updated', updated);
+    return () => { alive = false; window.removeEventListener('pb:site-notice-updated', updated); };
+  }, []);
+  if (!notice?.active) return null;
+  return <div className={`pb-site-notice pb-site-notice-${notice.tone}`} role={notice.tone === 'warning' ? 'alert' : 'status'}>{notice.message}</div>;
 }
 
 function FestivalRibbon() {

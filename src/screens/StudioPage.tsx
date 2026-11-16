@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from '@/lib/router';
 import { Feather, FilePlus2, Layers, Mic2, Save, Trash2 } from 'lucide-react';
 import { LIBRARY, type Speech } from '../data/speeches';
@@ -17,7 +17,6 @@ import { shortUrl } from '../lib/share';
 import { useGate } from '../components/SignIn';
 import { analyse, formatDate } from '../lib/text';
 import { copyText } from '../lib/platform';
-import { useSpeeches } from '../hooks/useCollection';
 import { pageMetaFor } from '../data/routes';
 import { SITE_URL } from '../lib/seo';
 import { usePageMeta } from '../lib/usePageMeta';
@@ -33,41 +32,17 @@ export function StudioPage() {
   });
 
   const { id } = useParams<{ id: string }>();
-  const items = useSpeeches();
   const mine = useLibrary((s) => s.mine);
 
   if (id) {
     const owned = mine.find((item) => item.id === id);
     if (owned) return <Editor key={id} initial={owned} />;
-    const source = items.find((item) => item.id === id);
-    if (source) return <Remix key={id} source={source} />;
+    // Published examples belong in the reading room; a /write address may
+    // open only a locally owned draft, never make a copy for remixing.
     return <NotFoundNotice id={id} />;
   }
 
   return <StudioHome />;
-}
-
-/**
- * Opening a library speech in the studio copies it into your drafts first,
- * so the original is never edited in place.
- */
-function Remix({ source }: { source: Speech }) {
-  const navigate = useNavigate();
-  const createSpeech = useLibrary((s) => s.createSpeech);
-  const started = useRef(false);
-
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    const newId = createSpeech({ ...source, title: `${source.title} (remix)` });
-    navigate(`/write/${newId}`, { replace: true });
-  }, [createSpeech, navigate, source]);
-
-  return (
-    <div className="pb-panel" style={{ padding: 40, textAlign: 'center' }}>
-      <p className="pb-muted">Copying “{source.title}” into your drafts…</p>
-    </div>
-  );
 }
 
 function NotFoundNotice({ id }: { id: string }) {
@@ -75,7 +50,7 @@ function NotFoundNotice({ id }: { id: string }) {
     <div className="pb-panel" style={{ padding: 40, textAlign: 'center' }}>
       <h2 style={{ marginBottom: 8 }}>That draft is gone</h2>
       <p className="pb-muted" style={{ marginBottom: 18 }}>
-        No local speech matches <span className="pb-mono">{id}</span>.
+        No draft saved on this device matches <span className="pb-mono">{id}</span>. Published speeches stay in the reading room and cannot be copied into a new draft here.
       </p>
       <Link to="/studio" className="pb-btn pb-btn-primary">
         Back to the studio

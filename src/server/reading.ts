@@ -29,6 +29,8 @@ export const POSTGRES_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 export type LibraryQuery =
   | { kind: 'one'; id: string }
   | { kind: 'writer'; username: string; max: number }
+  | { kind: 'category'; label: string; max: number }
+  | { kind: 'tag'; label: string; max: number }
   | { kind: 'search'; term: string; max: number }
   | { kind: 'list'; max: number; offset: number };
 
@@ -47,6 +49,16 @@ async function tursoRead(query: LibraryQuery): Promise<CloudSpeech[] | null> {
       case 'writer':
         sql = "select * from library where lower(username) = ? and moderation_status = 'published' order by published_at desc limit ?";
         args = [query.username, query.max];
+        break;
+      case 'category':
+        sql = "select * from library where lower(trim(category)) = ? and moderation_status = 'published' order by published_at desc limit ?";
+        args = [query.label.trim().toLowerCase(), query.max];
+        break;
+      case 'tag':
+        sql = `select * from library where moderation_status = 'published'
+               and instr(',' || lower(replace(replace(replace(replace(tags, ' ', ''), '[', ''), ']', ''), '"', '')) || ',', ',' || ? || ',') > 0
+               order by published_at desc limit ?`;
+        args = [query.label.trim().toLowerCase().replace(/\s+/g, ''), query.max];
         break;
       case 'search': {
         const match = toMatchQuery(query.term);
@@ -79,10 +91,11 @@ async function tursoRead(query: LibraryQuery): Promise<CloudSpeech[] | null> {
  */
 async function enrichAuthors(items: CloudSpeech[], db?: Awaited<ReturnType<typeof turso>>): Promise<CloudSpeech[]> {
   const uids = [...new Set(items.map((item) => item.uid).filter(Boolean))];
-  if (!uids.length) return items;
+  const officialSlugs = [...new Set(items.map((item) => item.officialSlug).filter((value): value is string => Boolean(value)))];
+  if (!uids.length && !officialSlugs.length) return items;
   const directory = new Map<string, { displayName?: string; username?: string; photoURL?: string; badges?: string[] }>();
 
-  if (POSTGRES_CONFIGURED) {
+  if (POSTGRES_CONFIGURED && uids.length) {
     try {
       const url = new URL('/rest/v1/profiles', SUPABASE_URL);
       url.searchParams.set('select', 'uid,display_name,username,photo_url');
@@ -109,9 +122,44 @@ async function enrichAuthors(items: CloudSpeech[], db?: Awaited<ReturnType<typeo
     }
   }
 
-  // Sole is awarded and retained with the Turso view record, so it remains
-  // available even when Supabase is having a quiet moment.
-  if (db) {
+  // Active badge assignments live beside profiles in Supabase. Ordinary
+  // authors key by Clerk uid; vetted sources key by their official slug.
+  if (POSTGRES_CONFIGURED) {
+    try {
+      const principals = [...new Set([...uids, ...officialSlugs])];
+      if (principals.length) {
+        const url = new URL('/rest/v1/badge_assignments', SUPABASE_URL);
+        url.searchParams.set('select', 'principal_type,principal_id,badge');
+        url.searchParams.set('active', 'eq.true');
+        url.searchParams.set('principal_id', `in.(${principals.map((id) => `"${id.replace(/[^a-z0-9_-]/gi, '')}"`).join(',')})`);
+        const response = await fetch(url, {
+          headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, Accept: 'application/json' },
+          signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+          next: { revalidate: REVALIDATE_SECONDS },
+        });
+        if (response.ok) {
+          const rows = await response.json() as SpeechRow[];
+          for (const row of rows) {
+            const principalId = String(row.principal_id ?? '');
+            const badge = String(row.badge ?? '');
+            if (!['quintal', 'sole', 'grey'].includes(badge)) continue;
+            const owners = row.principal_type === 'official'
+              ? items.filter((item) => item.officialSlug === principalId).map((item) => item.uid)
+              : [principalId];
+            for (const uid of owners.filter(Boolean)) {
+              const current = directory.get(uid) ?? {};
+              directory.set(uid, { ...current, badges: [...new Set([...(current.badges ?? []), badge])] });
+            }
+          }
+        }
+      }
+    } catch {
+      // A published row may carry a last-known badge image code.
+    }
+  }
+
+  // Sole is retained with the legacy Turso view record for old awards.
+  if (db && uids.length) {
     try {
       const result = await db.execute({
         sql: `select uid, badge from author_badges where uid in (${uids.map(() => '?').join(',')})`,
@@ -157,6 +205,104 @@ export async function readLibrary(options: { max?: number; offset?: number } = {
   const max = Math.min(Math.max(options.max ?? 24, 1), 200);
   const offset = Math.max(options.offset ?? 0, 0);
   return read({ kind: 'list', max, offset });
+}
+
+/** Public presentations in one human-readable category. */
+export async function readCategory(label: string, max = 200): Promise<LibraryPage> {
+  const normalized = label.trim();
+  if (!normalized) return { items: [], source: TURSO_CONFIGURED ? 'turso' : 'none' };
+  return read({ kind: 'category', label: normalized, max: Math.min(Math.max(max, 1), 500) });
+}
+
+/** Public presentations carrying one exact tag. */
+export async function readTag(label: string, max = 200): Promise<LibraryPage> {
+  const normalized = label.trim();
+  if (!normalized) return { items: [], source: TURSO_CONFIGURED ? 'turso' : 'none' };
+  return read({ kind: 'tag', label: normalized, max: Math.min(Math.max(max, 1), 500) });
+}
+
+export interface SitemapPresentation {
+  id: string;
+  username: string;
+  slug: string;
+  folder: string;
+  category: string;
+  tags: string[];
+  publishedAt: string;
+  lastModified: string;
+}
+
+function sitemapTagList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String).map((tag) => tag.trim()).filter(Boolean);
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return [];
+  if (raw.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(String).map((tag) => tag.trim()).filter(Boolean);
+    } catch { /* older rows use comma-separated tags */ }
+  }
+  return raw.split(',').map((tag) => tag.trim().replace(/^['\"]|['\"]$/g, '')).filter(Boolean);
+}
+
+/** Small, metadata-only query used to refresh sitemap URLs and last-modified dates. */
+export async function readSitemapPresentations(max = 5000): Promise<SitemapPresentation[]> {
+  if (!TURSO_CONFIGURED) return [];
+  const db = await turso();
+  if (!db) return [];
+  try {
+    const result = await db.execute({
+      sql: `select id, username, slug, folder, category, tags, published_at, updated_at from library
+            where moderation_status = 'published' order by published_at desc limit ?`,
+      args: [Math.min(Math.max(Math.floor(max), 1), 10_000)],
+    });
+    return result.rows.map((raw) => {
+      const row = raw as unknown as SpeechRow;
+      const publishedAt = String(row.published_at ?? '');
+      return {
+        id: String(row.id ?? ''),
+        username: String(row.username ?? '').trim().toLowerCase(),
+        slug: String(row.slug ?? '').trim(),
+        folder: String(row.folder ?? '').trim(),
+        category: String(row.category ?? '').trim(),
+        tags: sitemapTagList(row.tags),
+        publishedAt,
+        lastModified: String(row.updated_at ?? '') || publishedAt,
+      };
+    }).filter((row) => row.id.length > 0);
+  } catch {
+    return [];
+  } finally {
+    db.close();
+  }
+}
+
+export interface SitemapProfile {
+  username: string;
+  lastModified: string;
+}
+
+export async function readSitemapProfiles(max = 2000): Promise<SitemapProfile[]> {
+  if (!POSTGRES_CONFIGURED) return [];
+  try {
+    const url = new URL('/rest/v1/profiles', SUPABASE_URL);
+    url.searchParams.set('select', 'username,updated_at');
+    url.searchParams.set('username', 'not.is.null');
+    url.searchParams.set('limit', String(Math.min(Math.max(Math.floor(max), 1), 5000)));
+    const response = await fetch(url, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+      next: { revalidate: REVALIDATE_SECONDS },
+    });
+    if (!response.ok) return [];
+    const rows = await response.json() as SpeechRow[];
+    return rows.map((row) => ({
+      username: String(row.username ?? '').trim().toLowerCase(),
+      lastModified: String(row.updated_at ?? ''),
+    })).filter((row) => /^[a-z0-9_]{3,24}$/.test(row.username));
+  } catch {
+    return [];
+  }
 }
 
 /** One presentation by stable id. */

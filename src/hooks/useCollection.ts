@@ -181,7 +181,6 @@ export function useSpeeches(seed?: CloudSpeech[]): CollectionItem[] {
           sourceName: item.source,
           sourceURL: item.sourceUrl,
           license: item.licence,
-          authorBadges: ['grey'],
           preview: item.preview,
           content: item.content,
           createdAt: item.fetchedAt.slice(0, 10),

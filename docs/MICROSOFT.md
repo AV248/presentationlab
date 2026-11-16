@@ -60,7 +60,7 @@ Invoke-MgGraphRequest -Method PATCH `
       privacyStatementUrl = 'https://aavrit.dedyn.io/privacypolicy.pdf'
       termsOfServiceUrl  = 'https://aavrit.dedyn.io/terms+conditions.pdf'
       marketingUrl       = 'https://presentationbuddy.aavrit.dedyn.io'
-      supportUrl         = 'https://contact.aavrit.dedyn.io'
+      supportUrl         = 'mailto:amaavrit@yahoo.com'
     }
   } | ConvertTo-Json -Depth 5)
 ```

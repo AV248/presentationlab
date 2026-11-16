@@ -55,7 +55,7 @@ export interface Ad {
   content: string;
   /** Validated https image, or null when absent or unsafe. */
   imageUrl: string | null;
-  /** Validated http(s) destination, or a same-origin path. */
+  /** Validated http(s) destination or same-origin path; empty when the ad is informational. */
   url: string;
   cta: string;
   weight: number;
@@ -178,10 +178,12 @@ function mapAd(id: string, data: Record<string, unknown>): Ad | null {
   // The collection is capitalised; the lowercase spellings are accepted so
   // that a document written by some other tool still renders.
   const title = str(data.Title ?? data.title);
-  const url = safeUrl(str(data.RedirectURL ?? data.redirectURL ?? data.redirectUrl ?? data.url));
+  const rawDestination = str(data.RedirectURL ?? data.redirectURL ?? data.redirectUrl ?? data.url);
+  const url = rawDestination ? safeUrl(rawDestination) : '';
 
-  // An ad with no headline or no safe destination is not an ad.
-  if (!title || !url) return null;
+  // A destination is optional for an informational ad. If one is supplied,
+  // it must be safe; unsafe destinations are never rendered as links.
+  if (!title || (rawDestination && !url)) return null;
 
   const content = str(data.Content ?? data.content);
   const preview = str(data.DescriptionPreview ?? data.descriptionPreview ?? data.description);
@@ -192,8 +194,8 @@ function mapAd(id: string, data: Record<string, unknown>): Ad | null {
     body: preview || content.slice(0, 180),
     content,
     imageUrl: safeImageUrl(str(data.ImageURL ?? data.imageURL ?? data.imageUrl)),
-    url,
-    cta: str(data.CTA ?? data.cta, 'Learn more'),
+    url: url ?? '',
+    cta: url ? str(data.CTA ?? data.cta, 'Learn more') : '',
     weight: Math.max(1, num(data.weight, 1)),
     house: false,
   };

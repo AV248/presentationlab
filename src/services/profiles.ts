@@ -64,6 +64,16 @@ export async function autoClaimUsername(
       return { ok: false, username: v.username, reason: 'taken' };
     }
 
+    // handles.uid references profiles.uid. Establish the profile row before
+    // claiming a handle so sign-in and admin assignment cannot race the FK.
+    await f.setDoc(f.doc(db, 'users', uid), {
+      uid,
+      ...(email ? { email: email.toLowerCase() } : {}),
+      ...(displayName ? { displayName } : {}),
+      providerId: 'clerk',
+      updatedAt: f.serverTimestamp(),
+    }, { merge: true });
+
     // Three cases: a free name (create), a name the admin reserved for this
     // person (claim it), or a name already ours (nothing to write — creating
     // is refused because the document exists, updating would be a no-op).
@@ -80,7 +90,7 @@ export async function autoClaimUsername(
     }
     await f.setDoc(
       f.doc(db, 'users', uid),
-      { uid, username: v.username, ...(displayName ? { displayName } : {}), updatedAt: f.serverTimestamp() },
+      { uid, username: v.username, updatedAt: f.serverTimestamp() },
       { merge: true },
     );
     return { ok: true, username: v.username };
@@ -105,6 +115,18 @@ export async function claimUsername(uid: string, raw: string, profile: Partial<P
   const existing = await f.getDoc(ref);
   const holder = existing.exists() ? str((existing.data() ?? {}).uid) : '';
   if (holder && holder !== uid) throw new Error('That username is already taken. Try another.');
+  // The handles.uid foreign key points at profiles.uid. Insert the profile
+  // first, then claim the unique handle; if the claim loses a race, the
+  // unlisted profile row is harmless and can be completed later.
+  await f.setDoc(f.doc(db, 'users', uid), {
+    uid,
+    displayName: profile.displayName ?? '',
+    bio: profile.bio ?? '',
+    location: profile.location ?? '',
+    website: profile.website ?? '',
+    signature: profile.signature ?? '',
+    updatedAt: f.serverTimestamp(),
+  }, { merge: true });
   // rules allow create-only for the claimant, so an existing document of our
   // own is left exactly as it is — rewriting it reads as an update and is
   // refused as "insufficient permissions", which is how a *retry* used to
@@ -112,7 +134,7 @@ export async function claimUsername(uid: string, raw: string, profile: Partial<P
   if (!holder) {
     await f.setDoc(ref, { uid, username: v.username, updatedAt: f.serverTimestamp() });
   }
-  await f.setDoc(f.doc(db, 'users', uid), { uid, username: v.username, displayName: profile.displayName ?? '', bio: profile.bio ?? '', location: profile.location ?? '', website: profile.website ?? '', signature: profile.signature ?? '', updatedAt: f.serverTimestamp() }, { merge: true });
+  await f.setDoc(f.doc(db, 'users', uid), { uid, username: v.username, updatedAt: f.serverTimestamp() }, { merge: true });
   return v.username;
 }
 export async function fetchProfile(username: string): Promise<PublicProfile | null> {
@@ -135,9 +157,45 @@ export async function fetchOwnProfile(uid: string): Promise<PublicProfile | null
     const u = await b.fs.getDoc(b.fs.doc(b.db, 'users', uid));
     if (!u.exists()) return null;
     const d = u.data() ?? {};
-    if (!str(d.username)) return null;
     return { username: str(d.username), uid, displayName: str(d.displayName), bio: str(d.bio), location: str(d.location), website: str(d.website), signature: str(d.signature), createdAt: str(d.createdAt), photoURL: str(d.photoURL) };
   } catch { return null; }
+}
+
+export interface EditableProfile {
+  displayName: string;
+  bio: string;
+  location: string;
+  website: string;
+  signature: string;
+}
+
+export async function updateOwnProfile(uid: string, details: EditableProfile): Promise<EditableProfile> {
+  if (!uid) throw new Error('Sign in before saving profile details.');
+  const clean: EditableProfile = {
+    displayName: details.displayName.trim().slice(0, 80),
+    bio: details.bio.trim().slice(0, 500),
+    location: details.location.trim().slice(0, 100),
+    website: details.website.trim().slice(0, 200),
+    signature: details.signature.trim().slice(0, 120),
+  };
+  if (clean.website) {
+    let parsed: URL;
+    try { parsed = new URL(clean.website); }
+    catch { throw new Error('Enter your website as a full URL, including https://.'); }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('The website must use http:// or https://.');
+  }
+  const b = await fs();
+  if (!b) throw new Error('Profile storage is not configured on this installation.');
+  await b.fs.setDoc(b.fs.doc(b.db, 'users', uid), {
+    uid,
+    displayName: clean.displayName,
+    bio: clean.bio,
+    location: clean.location,
+    website: clean.website,
+    signature: clean.signature,
+    updatedAt: b.fs.serverTimestamp(),
+  }, { merge: true });
+  return clean;
 }
 /** Is this name reserved (and, if so, is it reserved for me)? */
 export async function fetchReservation(
@@ -225,4 +283,3 @@ export async function setSiteFestival(festivalId: string): Promise<void> {
   );
 }
 export const SUPPORT_EMAIL = 'amaavrit@yahoo.com';
-export const SUPPORT_URL = 'https://contact.aavrit.dedyn.io';

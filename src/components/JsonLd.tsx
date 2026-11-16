@@ -1,18 +1,19 @@
 import type { ReactNode } from 'react';
 
 /**
- * Structured data, rendered on the server.
- *
- * 2.x wrote this into each prerendered page from the route registry at build
- * time. It is the same registry and the same objects — a server component can
- * simply render them, which is one whole build step fewer.
- *
- * `dangerouslySetInnerHTML` is the only way to emit a JSON-LD block, and it is
- * safe here for a specific reason: the value is `JSON.stringify`d from objects
- * authored in `src/data/routes.ts`, never from anything a visitor typed.
- * `JSON.stringify` escapes `<` inside strings, so a `</script>` written into a
- * speech title could not close this tag early.
+ * Structured data, rendered on the server. JSON-LD is data inside an HTML
+ * script element, so JSON encoding alone is not enough: a less-than sign in a
+ * visitor-authored title could otherwise begin a literal `</script>` tag.
  */
+function serializeJsonLd(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 export function JsonLd({ data }: { data: Record<string, unknown>[] }): ReactNode {
   return (
     <>
@@ -20,7 +21,7 @@ export function JsonLd({ data }: { data: Record<string, unknown>[] }): ReactNode
         <script
           key={index}
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(entry) }}
+          dangerouslySetInnerHTML={{ __html: serializeJsonLd(entry) }}
         />
       ))}
     </>

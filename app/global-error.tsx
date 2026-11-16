@@ -46,7 +46,7 @@ export default function GlobalError({ error, reset }: { error: Error; reset: () 
             Reload
           </button>
           <p style={{ marginTop: 24, fontSize: '0.8rem', opacity: 0.7 }}>
-            amaavrit@yahoo.com · contact.aavrit.dedyn.io
+            <a href="mailto:amaavrit@yahoo.com" style={{ color: 'inherit' }}>amaavrit@yahoo.com</a>
           </p>
         </main>
       </body>

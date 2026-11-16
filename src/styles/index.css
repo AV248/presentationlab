@@ -3551,6 +3551,7 @@ a:hover > .pb-underline::after,
 /* Entry splash — "The Rise" draws itself */
 .pb-splash{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--c-bg);transition:opacity .38s ease}
 .pb-splash-leave{opacity:0;pointer-events:none}
+html[data-pb-splash-seen='true'] .pb-splash{display:none!important}
 .pb-splash-stairs{stroke-dasharray:60;stroke-dashoffset:60;animation:pb-rise 1.05s cubic-bezier(.6,0,.2,1) .15s forwards}
 @keyframes pb-rise{to{stroke-dashoffset:0}}
 .pb-splash-dot{opacity:0;transform-origin:24.5px 5px;animation:pb-dot .9s ease 1.05s forwards}
@@ -3566,6 +3567,8 @@ a:hover > .pb-underline::after,
 .pb-stars button{all:unset;cursor:pointer;padding:4px;border-radius:8px}
 .pb-stars button:focus-visible{outline:2px solid var(--c-accent)}
 /* Festival ribbon */
+.pb-site-notice{padding:8px 16px;text-align:center;font-size:.84rem;line-height:1.5;border-bottom:1px solid var(--c-line);background:var(--c-surface-2);color:var(--c-ink)}
+.pb-site-notice-warning{background:color-mix(in srgb,var(--c-bad,#a13b32) 10%,var(--c-surface));border-color:color-mix(in srgb,var(--c-bad,#a13b32) 30%,var(--c-line))}
 .pb-festival{display:flex;gap:8px;align-items:center;justify-content:center;padding:7px 14px;font-size:.82rem;background:var(--c-accent-soft);color:var(--c-ink);border-bottom:1px solid var(--c-accent-line);text-align:center}
 /* Copyright-protected reading */
 .pb-protected{user-select:none;-webkit-user-select:none}
@@ -3781,12 +3784,11 @@ a:hover > .pb-underline::after,
 .pb-author-corner-compact .pb-author-avatar { width: 27px; height: 27px; font-size: .63rem; }
 .pb-author-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .pb-author-name { overflow: hidden; max-width: 180px; color: var(--c-ink-soft); font-size: .8rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.pb-author-badges { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-.pb-author-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid currentColor; border-radius: 999px; font-size: .58rem; font-weight: 700; letter-spacing: .025em; white-space: nowrap; }
-.pb-author-badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-.pb-author-badge-quintal { color: #755038; background: color-mix(in srgb, #9b6b45 12%, transparent); }
-.pb-author-badge-sole { color: #947022; background: color-mix(in srgb, #d5ad4d 14%, transparent); }
-.pb-author-badge-grey { color: #687078; background: color-mix(in srgb, #8b969f 14%, transparent); }
+.pb-author-badges { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; vertical-align: middle; }
+.pb-author-badge-item { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; flex: 0 0 auto; }
+.pb-author-badge-image { display: block; width: 100%; height: 100%; object-fit: contain; transition: transform 160ms ease-out; }
+.pb-author-badge-item:hover .pb-author-badge-image { transform: translateY(-1px); }
+@media (prefers-reduced-motion: reduce) { .pb-author-badge-image { transition: none; } }
 .pb-card-author-corner { display: flex; justify-content: flex-end; margin: -2px 0 7px; }
 .pb-reader-author-row { display: flex; justify-content: flex-end; margin-bottom: 14px; }
 .pb-profile-author-corner { display: flex; justify-content: flex-end; margin-bottom: 10px; }
@@ -3838,7 +3840,7 @@ a:hover > .pb-underline::after,
   .pb-writing-body { min-height: 42vh; }
   .pb-author-corner { gap: 6px; }
   .pb-author-name { max-width: 120px; font-size: .73rem; }
-  .pb-author-badge { font-size: .53rem; padding: 2px 5px; }
+  .pb-author-badge-item { width: 22px; height: 22px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pb-splash-stairs, .pb-splash-dot-motion, .pb-splash-word, .pb-splash-tag, .pb-splash-petal { animation: none !important; }
