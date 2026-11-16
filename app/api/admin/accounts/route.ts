@@ -176,6 +176,7 @@ export async function POST(request: Request) {
     const conflict = /already exists|duplicate|unique|taken/i.test(detail);
     return json(conflict ? 409 : 502, {
       error: conflict ? 'account_conflict' : 'account_creation_failed',
+      failedStep: provisioningStep,
       message: conflict
         ? 'That email, Clerk handle or source slug already exists.'
         : 'The official identity could not be provisioned. Check the workspace setup and try again.',

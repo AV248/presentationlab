@@ -291,6 +291,8 @@ export const useLibrary = create<LibraryState>()(
     {
       name: 'pb.library.v2',
       version: 2,
+      // Defer local drafts until the mounted client, avoiding SSR text drift.
+      skipHydration: true,
       partialize: (state) => ({
         mine: state.mine,
         hidden: state.hidden,

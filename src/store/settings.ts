@@ -109,6 +109,8 @@ export const useSettings = create<SettingsState>()(
     {
       name: 'pb.settings.v1',
       version: 1,
+      // Hydrate after the first client render so SSR and hydration start alike.
+      skipHydration: true,
       partialize: (state) => ({
         theme: state.theme,
         presetId: state.presetId,

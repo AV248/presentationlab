@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { AppShell } from '@/components/AppShell';
 import { Ambient } from '@/components/Ambient';
@@ -15,6 +15,11 @@ import { AuthProvider } from '@/components/AuthProvider';
 import { useThemeEngine } from '@/hooks/useThemeEngine';
 import { useCloud } from '@/store/cloud';
 import { useAuth } from '@/store/auth';
+import { useSettings } from '@/store/settings';
+import { useProfile } from '@/store/profile';
+import { useLibrary } from '@/store/library';
+
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 /**
  * Everything that has to exist exactly once, around every page.
@@ -53,6 +58,22 @@ function useServiceWorker() {
 export function Providers({ children }: { children: React.ReactNode }) {
   useThemeEngine();
   useServiceWorker();
+
+  // Persisted Zustand stores must not read localStorage during the first
+  // browser render: that would differ from the server HTML and can trigger
+  // React hydration errors. Rehydrate after the matching render, before paint.
+  useIsomorphicLayoutEffect(() => {
+    const rehydrate = (store: { persist: { rehydrate: () => Promise<void> } }) => {
+      try {
+        void store.persist.rehydrate().catch(() => {});
+      } catch {
+        // Storage is optional; in-memory defaults remain usable.
+      }
+    };
+    rehydrate(useSettings);
+    rehydrate(useProfile);
+    rehydrate(useLibrary);
+  }, []);
 
   useEffect(() => {
     // Listen for Google / Microsoft sign-in state.

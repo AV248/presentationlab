@@ -5,4 +5,4 @@ interface ProfileState extends MyProfile { set: (p: Partial<MyProfile>) => void 
 export const useProfile = create<ProfileState>()(persist((set) => ({
   username: '', displayName: '', bio: '', location: '', website: '', signature: '',
   set: (p) => set(p),
-}), { name: 'pb.profile.v1' }));
+}), { name: 'pb.profile.v1', skipHydration: true }));
