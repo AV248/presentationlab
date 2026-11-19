@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -29,6 +30,7 @@ export const POSTGRES_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 export type LibraryQuery =
   | { kind: 'one'; id: string }
   | { kind: 'writer'; username: string; max: number }
+  | { kind: 'writerWork'; username: string; key: string; folder?: string }
   | { kind: 'category'; label: string; max: number }
   | { kind: 'tag'; label: string; max: number }
   | { kind: 'search'; term: string; max: number }
@@ -47,8 +49,30 @@ async function tursoRead(query: LibraryQuery): Promise<CloudSpeech[] | null> {
         args = [query.id];
         break;
       case 'writer':
-        sql = "select * from library where lower(username) = ? and moderation_status = 'published' order by published_at desc limit ?";
+        // Profile cards need only metadata and previews. Do not ship dozens of
+        // full presentation bodies into a profile page; the address route below
+        // fetches the one body a reader actually opened.
+        sql = `select id, uid, username, folder, slug, title, author, author_photo_url,
+                      author_badges, preview, category, occasion, tags, credits,
+                      signature, allow_copy, source_type, source_name, source_url,
+                      source_title, source_fetched_at, official_slug, source_item_id,
+                      license, moderation_status, moderation_note, featured, views,
+                      likes, dislikes, shares, published_at, updated_at
+               from library where lower(username) = ? and moderation_status = 'published'
+               order by published_at desc, id desc limit ?`;
         args = [query.username, query.max];
+        break;
+      case 'writerWork':
+        sql = query.folder === undefined
+          ? `select * from library where lower(username) = ? and moderation_status = 'published'
+             and (slug = ? or id = ?)
+             order by case when folder = '' then 0 else 1 end, published_at desc limit 1`
+          : `select * from library where lower(username) = ? and folder = ?
+             and moderation_status = 'published' and (slug = ? or id = ?)
+             order by published_at desc limit 1`;
+        args = query.folder === undefined
+          ? [query.username, query.key, query.key]
+          : [query.username, query.folder, query.key, query.key];
         break;
       case 'category':
         sql = "select * from library where lower(trim(category)) = ? and moderation_status = 'published' order by published_at desc limit ?";
@@ -76,7 +100,10 @@ async function tursoRead(query: LibraryQuery): Promise<CloudSpeech[] | null> {
     }
     const result = await db.execute({ sql, args });
     const rows = result.rows as unknown as SpeechRow[];
-    const items = rows.map((row) => mapSpeechRow(String(row.id ?? ''), speechRowFromLibrary(row)));
+    const mapped = rows.map((row) => mapSpeechRow(String(row.id ?? ''), speechRowFromLibrary(row)));
+    const items = query.kind === 'writer'
+      ? mapped.map((item) => ({ ...item, content: '' }))
+      : mapped;
     return await enrichAuthors(items, db);
   } catch {
     return null;
@@ -95,6 +122,7 @@ async function enrichAuthors(items: CloudSpeech[], db?: Awaited<ReturnType<typeo
   if (!uids.length && !officialSlugs.length) return items;
   const directory = new Map<string, { displayName?: string; username?: string; photoURL?: string; badges?: string[] }>();
 
+  const profileEnrichment = (async () => {
   if (POSTGRES_CONFIGURED && uids.length) {
     try {
       const url = new URL('/rest/v1/profiles', SUPABASE_URL);
@@ -121,6 +149,7 @@ async function enrichAuthors(items: CloudSpeech[], db?: Awaited<ReturnType<typeo
       // The published row carries a last-known public author corner.
     }
   }
+  })();
 
   // Active badge assignments live beside profiles in Supabase. Ordinary
   // authors key by Clerk uid; vetted sources key by their official slug.
@@ -157,6 +186,8 @@ async function enrichAuthors(items: CloudSpeech[], db?: Awaited<ReturnType<typeo
       // A published row may carry a last-known badge image code.
     }
   }
+  // These reads are independent; start both before waiting for either result.
+  await profileEnrichment;
 
   // Sole is retained with the legacy Turso view record for old awards.
   if (db && uids.length) {
@@ -192,6 +223,16 @@ async function read(query: LibraryQuery): Promise<{ items: CloudSpeech[]; source
   const items = await tursoRead(query);
   return items === null ? { items: [], source: 'none' } : { items, source: 'turso' };
 }
+
+// Next shares these request-scoped reads between generateMetadata and the page
+// render. A content URL therefore resolves its work once, not once for its
+// title and again for its body.
+const cachedWriterRead = cache((username: string, max: number) =>
+  read({ kind: 'writer', username, max }),
+);
+const cachedWriterWorkRead = cache((username: string, key: string, folder: string | null) =>
+  read({ kind: 'writerWork', username, key, ...(folder === null ? {} : { folder }) }),
+);
 
 export type LibrarySource = 'turso' | 'none';
 
@@ -316,18 +357,45 @@ export async function readSpeechResult(id: string): Promise<{ speech: CloudSpeec
   return { speech: items[0] ?? null, source };
 }
 
-/** One writer's published work. */
-export async function readWriter(username: string, max = 60): Promise<CloudSpeech[]> {
+/** One writer's published work, with metadata-only rows for profile cards. */
+export async function readWriterResult(username: string, max = 60): Promise<LibraryPage> {
   const handle = username.trim().toLowerCase();
-  if (!handle) return [];
-  return (await read({ kind: 'writer', username: handle, max })).items;
+  if (!handle) return { items: [], source: TURSO_CONFIGURED ? 'turso' : 'none' };
+  const bounded = Math.min(Math.max(Math.floor(max), 1), 200);
+  return cachedWriterRead(handle, bounded);
+}
+
+export async function readWriter(username: string, max = 60): Promise<CloudSpeech[]> {
+  return (await readWriterResult(username, max)).items;
+}
+
+/** Resolve one writer address without loading the rest of the profile. */
+export async function readWriterWorkResult(
+  username: string,
+  key: string,
+  folder?: string,
+): Promise<{ speech: CloudSpeech | null; source: LibrarySource }> {
+  const handle = username.trim().toLowerCase();
+  const address = key.trim();
+  if (!handle || !address) return { speech: null, source: TURSO_CONFIGURED ? 'turso' : 'none' };
+  const normalizedFolder = folder === undefined ? null : folder.trim();
+  const result = await cachedWriterWorkRead(handle, address, normalizedFolder);
+  return { speech: result.items[0] ?? null, source: result.source };
+}
+
+export async function readWriterWork(username: string, key: string, folder?: string): Promise<CloudSpeech | null> {
+  return (await readWriterWorkResult(username, key, folder)).speech;
 }
 
 /** Full-text search over Turso's FTS5 index. */
-export async function searchLibrary(term: string, max = 50): Promise<CloudSpeech[]> {
+export async function searchLibraryResult(term: string, max = 50): Promise<LibraryPage> {
   const trimmed = term.trim();
-  if (!trimmed) return [];
-  return (await read({ kind: 'search', term: trimmed, max })).items;
+  if (!trimmed) return { items: [], source: TURSO_CONFIGURED ? 'turso' : 'none' };
+  return read({ kind: 'search', term: trimmed, max: Math.min(Math.max(Math.floor(max), 1), 200) });
+}
+
+export async function searchLibrary(term: string, max = 50): Promise<CloudSpeech[]> {
+  return (await searchLibraryResult(term, max)).items;
 }
 
 /* ------------------------------------------------------------------ */
@@ -367,76 +435,127 @@ export interface PublicProfile {
  * the page that says so looks identical to the page for a handle that really
  * is unclaimed.
  */
-export async function readHandleState(username: string): Promise<HandleState> {
-  const handle = username.trim().toLowerCase();
-  if (!handle) return 'unknown';
-  if (!POSTGRES_CONFIGURED) return 'unknown';
+export interface PublicHandleLookup {
+  handleState: HandleState;
+  profile: PublicProfile | null;
+}
 
+const PROFILE_COLUMNS = 'uid,username,display_name,bio,location,website,signature,created_at,photo_url,points,likes_received,dislikes_received';
+
+function mapPublicProfile(row: SpeechRow, handle: string): PublicProfile {
+  return {
+    username: handle,
+    uid: String(row.uid ?? ''),
+    displayName: String(row.display_name ?? handle),
+    bio: String(row.bio ?? ''),
+    location: String(row.location ?? ''),
+    website: String(row.website ?? ''),
+    signature: String(row.signature ?? ''),
+    createdAt: String(row.created_at ?? ''),
+    photoURL: String(row.photo_url ?? ''),
+    points: Number(row.points ?? 0),
+    likesReceived: Number(row.likes_received ?? 0),
+    dislikesReceived: Number(row.dislikes_received ?? 0),
+  };
+}
+
+async function readHandleStateRaw(handle: string): Promise<HandleState> {
   try {
     const url = new URL('/rest/v1/handles', SUPABASE_URL);
     url.searchParams.set('select', 'username');
     url.searchParams.set('username', `eq.${handle}`);
     url.searchParams.set('limit', '1');
-
     const response = await fetch(url, {
-      headers: {
-        apikey: SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-        Accept: 'application/json',
-      },
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, Accept: 'application/json' },
       signal: AbortSignal.timeout(READ_TIMEOUT_MS),
       next: { revalidate: 30 },
     });
     if (!response.ok) return 'unknown';
-    const rows = (await response.json()) as unknown[];
-    return rows.length ? 'held' : 'free';
+    return ((await response.json()) as unknown[]).length ? 'held' : 'free';
   } catch {
     return 'unknown';
   }
 }
 
-/** One public profile row — the bio, the name, the counters. */
-export async function readProfile(username: string): Promise<PublicProfile | null> {
-  const handle = username.trim().toLowerCase();
-  if (!handle || !POSTGRES_CONFIGURED) return null;
-
+async function readProfileRaw(handle: string): Promise<PublicProfile | null> {
   try {
     const url = new URL('/rest/v1/profiles', SUPABASE_URL);
-    url.searchParams.set('select', '*');
+    url.searchParams.set('select', PROFILE_COLUMNS);
     url.searchParams.set('username', `eq.${handle}`);
     url.searchParams.set('limit', '1');
-
     const response = await fetch(url, {
-      headers: {
-        apikey: SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-        Accept: 'application/json',
-      },
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, Accept: 'application/json' },
       signal: AbortSignal.timeout(READ_TIMEOUT_MS),
       next: { revalidate: REVALIDATE_SECONDS },
     });
     if (!response.ok) return null;
-    const rows = (await response.json()) as SpeechRow[];
-    const row = rows[0];
-    if (!row) return null;
-
-    return {
-      username: handle,
-      uid: String(row.uid ?? ''),
-      displayName: String(row.display_name ?? handle),
-      bio: String(row.bio ?? ''),
-      location: String(row.location ?? ''),
-      website: String(row.website ?? ''),
-      signature: String(row.signature ?? ''),
-      createdAt: String(row.created_at ?? ''),
-      photoURL: String(row.photo_url ?? ''),
-      points: Number(row.points ?? 0),
-      likesReceived: Number(row.likes_received ?? 0),
-      dislikesReceived: Number(row.dislikes_received ?? 0),
-    };
+    const [row] = await response.json() as SpeechRow[];
+    return row ? mapPublicProfile(row, handle) : null;
   } catch {
     return null;
   }
+}
+
+async function readPublicHandleRaw(handle: string): Promise<PublicHandleLookup> {
+  if (!handle || !POSTGRES_CONFIGURED) return { handleState: 'unknown', profile: null };
+  try {
+    // The handle lock points to profiles.uid. PostgREST can return both in one
+    // round trip, which replaces the old serial handles → profile lookups.
+    const url = new URL('/rest/v1/handles', SUPABASE_URL);
+    url.searchParams.set('select', `username,uid,profile:profiles!handles_uid_fkey(${PROFILE_COLUMNS})`);
+    url.searchParams.set('username', `eq.${handle}`);
+    url.searchParams.set('limit', '1');
+    const response = await fetch(url, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+      next: { revalidate: 30 },
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      if (response.status === 400 || response.status === 404 || /PGRST200|relationship/i.test(detail)) {
+        const [handleState, profile] = await Promise.all([
+          readHandleStateRaw(handle),
+          readProfileRaw(handle),
+        ]);
+        return { handleState, profile };
+      }
+      return { handleState: 'unknown', profile: null };
+    }
+    const rows = await response.json() as SpeechRow[];
+    const lock = rows[0];
+    if (lock) {
+      const embedded = Array.isArray(lock.profile) ? lock.profile[0] : lock.profile;
+      const profile = embedded && typeof embedded === 'object'
+        ? mapPublicProfile(embedded as SpeechRow, handle)
+        : await readProfileRaw(handle);
+      return { handleState: 'held', profile };
+    }
+    // Preserve the older behavior for an incomplete account migration: a
+    // public profile row can still render even if its handle lock is absent.
+    return { handleState: 'free', profile: await readProfileRaw(handle) };
+  } catch {
+    return { handleState: 'unknown', profile: null };
+  }
+}
+
+const cachedPublicHandle = cache((handle: string) => readPublicHandleRaw(handle));
+
+/** Handle lock and public profile, fetched together and shared within a render. */
+export function readPublicHandle(username: string): Promise<PublicHandleLookup> {
+  const handle = username.trim().toLowerCase();
+  if (!/^[a-z0-9_]{3,24}$/.test(handle)) {
+    return Promise.resolve({ handleState: 'unknown', profile: null });
+  }
+  return cachedPublicHandle(handle);
+}
+
+export async function readHandleState(username: string): Promise<HandleState> {
+  return (await readPublicHandle(username)).handleState;
+}
+
+/** One public profile row — the bio, the name, the counters. */
+export async function readProfile(username: string): Promise<PublicProfile | null> {
+  return (await readPublicHandle(username)).profile;
 }
 
 /* ------------------------------------------------------------------ */
@@ -457,7 +576,8 @@ let schemaPromise: Promise<{ ok: boolean; applied: number; note: string }> | nul
  * empty until they find one.
  *
  * It runs at most once per process, and only while handling a verified,
- * explicit share or edit. A public read never creates or mutates anything.
+ * explicit share, edit, reaction, or share-count write. A public read never
+ * creates or mutates anything.
  */
 export async function ensureLibrarySchema(): Promise<{ ok: boolean; applied: number; note: string }> {
   if (!TURSO_CONFIGURED) return { ok: false, applied: 0, note: 'turso_not_configured' };

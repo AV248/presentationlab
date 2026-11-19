@@ -421,6 +421,46 @@ async function adminApi<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload;
 }
 
+export type InboxStatus = 'new' | 'read' | 'resolved' | 'dismissed';
+export type InboxSource = 'inbox' | 'feedback';
+export type InboxKind = 'feedback' | 'report' | 'message';
+
+export interface AdminInboxItem {
+  id: string;
+  source: InboxSource;
+  kind: InboxKind;
+  category: string;
+  subject: string;
+  message: string;
+  pageUrl: string;
+  contactEmail: string;
+  uid: string;
+  status: InboxStatus;
+  adminNote: string;
+  rating: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchAdminInbox(): Promise<{ items: AdminInboxItem[]; warnings: string[] }> {
+  const result = await adminApi<{ items?: AdminInboxItem[]; warnings?: string[] }>('/api/admin/inbox');
+  return {
+    items: Array.isArray(result.items) ? result.items : [],
+    warnings: Array.isArray(result.warnings) ? result.warnings : [],
+  };
+}
+
+export async function updateAdminInboxItem(
+  item: Pick<AdminInboxItem, 'id' | 'source'>,
+  status: InboxStatus,
+  adminNote: string,
+): Promise<void> {
+  await adminApi('/api/admin/inbox', {
+    method: 'PATCH',
+    body: JSON.stringify({ id: item.id, source: item.source, status, adminNote: adminNote.trim().slice(0, 1000) }),
+  });
+}
+
 export async function listBadgeAssignments(): Promise<BadgeAssignment[]> {
   const { fs: f, db } = await fs();
   const snap = await f.getDocs(f.query(

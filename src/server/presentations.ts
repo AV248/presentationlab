@@ -500,6 +500,8 @@ export async function deletePresentation(identity: VerifiedIdentity, id: string)
     const tx = await db.transaction('write');
     try {
       await tx.execute({ sql: 'delete from presentation_views where speech_id = ?', args: [id] });
+      await tx.execute({ sql: 'delete from presentation_reactions where speech_id = ?', args: [id] });
+      await tx.execute({ sql: 'delete from presentation_shares where speech_id = ?', args: [id] });
       await tx.execute({ sql: 'delete from presentation_versions where presentation_id = ?', args: [id] });
       await tx.execute({ sql: 'delete from library where id = ?', args: [id] });
       await tx.commit();

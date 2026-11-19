@@ -223,8 +223,30 @@ create table if not exists public.feedback (
   rating     int not null check (rating between 1 and 5),
   text       text not null default '',
   path       text not null default '',
-  created_at timestamptz not null default now()
+  status     text not null default 'new' check (status in ('new', 'read', 'resolved', 'dismissed')),
+  admin_note text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
+
+-- Private contact submissions. The kind distinguishes product feedback,
+-- reports and direct messages; only the signed-in author may insert, and only
+-- role-holders may read or moderate these records.
+create table if not exists public.inbox_messages (
+  id            text primary key default gen_random_uuid()::text,
+  uid           text not null,
+  kind          text not null check (kind in ('feedback', 'report', 'message')),
+  category      text not null default '',
+  subject       text not null default '',
+  message       text not null check (char_length(message) between 1 and 5000),
+  page_url      text not null default '',
+  contact_email text not null default '',
+  status        text not null default 'new' check (status in ('new', 'read', 'resolved', 'dismissed')),
+  admin_note    text not null default '',
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+create index if not exists inbox_messages_recent_idx on public.inbox_messages (created_at desc);
 
 -- One row per setting: the festival theme, and anything else the owner sets.
 create table if not exists public.site_settings (
@@ -724,7 +746,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['profiles', 'handles', 'speeches', 'ads', 'admin_private', 'official_accounts', 'badge_assignments']
+  foreach t in array array['profiles', 'handles', 'speeches', 'ads', 'admin_private', 'official_accounts', 'badge_assignments', 'feedback', 'inbox_messages']
   loop
     execute format('drop trigger if exists touch_%1$s on public.%1$s', t);
     execute format(
@@ -745,6 +767,9 @@ end $$;
 alter table public.admins   add column if not exists note        text not null default '';
 alter table public.admins   add column if not exists granted_at  timestamptz not null default now();
 alter table public.posts    add column if not exists updated_at  timestamptz not null default now();
+alter table public.feedback add column if not exists status      text not null default 'new';
+alter table public.feedback add column if not exists admin_note  text not null default '';
+alter table public.feedback add column if not exists updated_at  timestamptz not null default now();
 alter table public.handles  add column if not exists reserved_at  timestamptz;
 alter table public.handles   add column if not exists assigned_to  text;
 alter table public.reactions add column if not exists updated_at   timestamptz not null default now();
@@ -770,6 +795,7 @@ alter table public.ads            enable row level security;
 alter table public.sponsors       enable row level security;
 alter table public.posts          enable row level security;
 alter table public.feedback       enable row level security;
+alter table public.inbox_messages enable row level security;
 alter table public.site_settings  enable row level security;
 alter table public.official_accounts enable row level security;
 alter table public.badge_assignments enable row level security;
@@ -904,12 +930,26 @@ create policy posts_write on public.posts for all
   using (uid = public.current_uid() or public.is_admin())
   with check (uid = public.current_uid() or public.is_admin());
 
--- Feedback is written by anybody signed in, read by the owner alone.
+-- Feedback is written by a signed-in person and read/moderated by admins.
 drop policy if exists feedback_insert on public.feedback;
 create policy feedback_insert on public.feedback for insert
-  with check (public.current_uid() is not null);
+  with check (public.current_uid() is not null and (uid is null or uid = public.current_uid()));
 drop policy if exists feedback_read on public.feedback;
 create policy feedback_read on public.feedback for select using (public.is_admin());
+drop policy if exists feedback_admin_update on public.feedback;
+create policy feedback_admin_update on public.feedback for update
+  using (public.is_admin()) with check (public.is_admin());
+
+-- A person can write only their own contact submission; only role-holders can
+-- see the inbox or change its status and private moderator note.
+drop policy if exists inbox_messages_insert_self on public.inbox_messages;
+create policy inbox_messages_insert_self on public.inbox_messages for insert
+  with check (public.current_uid() is not null and uid = public.current_uid());
+drop policy if exists inbox_messages_admin_read on public.inbox_messages;
+create policy inbox_messages_admin_read on public.inbox_messages for select using (public.is_admin());
+drop policy if exists inbox_messages_admin_update on public.inbox_messages;
+create policy inbox_messages_admin_update on public.inbox_messages for update
+  using (public.is_admin()) with check (public.is_admin());
 
 drop policy if exists settings_read on public.site_settings;
 create policy settings_read on public.site_settings for select using (true);

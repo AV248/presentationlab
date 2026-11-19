@@ -3548,18 +3548,6 @@ a:hover > .pb-underline::after,
 }
 
 /* ================= 2.6 ================= */
-/* Entry splash — "The Rise" draws itself */
-.pb-splash{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--c-bg);transition:opacity .38s ease}
-.pb-splash-leave{opacity:0;pointer-events:none}
-html[data-pb-splash-seen='true'] .pb-splash{display:none!important}
-.pb-splash-stairs{stroke-dasharray:60;stroke-dashoffset:60;animation:pb-rise 1.05s cubic-bezier(.6,0,.2,1) .15s forwards}
-@keyframes pb-rise{to{stroke-dashoffset:0}}
-.pb-splash-dot{opacity:0;transform-origin:24.5px 5px;animation:pb-dot .9s ease 1.05s forwards}
-@keyframes pb-dot{0%{opacity:0;transform:translateY(4px) scale(.4)}35%{opacity:1;transform:translateY(0) scale(1.25)}55%{transform:scale(.85)}75%{transform:scale(1.1)}100%{opacity:1;transform:scale(1)}}
-.pb-splash-word{font-family:var(--x-font-display);font-weight:700;font-size:clamp(1.5rem,5vw,2.2rem);letter-spacing:-.02em;opacity:0;animation:pb-fadeup .6s ease 1.25s forwards}
-.pb-splash-word span{color:var(--c-accent)}
-.pb-splash-tag{color:var(--c-ink-muted);font-size:.9rem;opacity:0;animation:pb-fadeup .6s ease 1.45s forwards;text-align:center;padding-inline:20px}
-@keyframes pb-fadeup{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 /* Feedback */
 .pb-feedback{position:relative;max-width:520px;width:min(520px,calc(100vw - 28px))}
 .pb-feedback-x{position:absolute;top:10px;right:10px}
@@ -3598,45 +3586,6 @@ html[data-pb-splash-seen='true'] .pb-splash{display:none!important}
   .pb-prompt{max-width:46ch;font-size:calc(1.65rem * var(--prompt-scale,1))}
   .pb-feedback{max-width:560px}
 }
-@media (prefers-reduced-motion:reduce){.pb-splash-stairs,.pb-splash-dot,.pb-splash-word,.pb-splash-tag{animation-duration:.01s!important;animation-delay:0s!important}}
-
-/* ---- Arrival: paper, petals, and the round mark climbing the Rise ---- */
-.pb-splash {
-  overflow: hidden;
-  color: #2d2a24;
-  background:
-    radial-gradient(ellipse at 50% 44%, rgba(228, 197, 137, .22), transparent 42%),
-    linear-gradient(145deg, #fbf7ef 0%, #fffdf8 54%, #f4f0e8 100%);
-}
-.pb-splash-mark { position: relative; z-index: 1; overflow: visible; }
-.pb-splash-stairs {
-  stroke-dasharray: 44;
-  stroke-dashoffset: 44;
-  animation: pb-stairs-draw .82s cubic-bezier(.35, 0, .2, 1) .1s forwards;
-}
-@keyframes pb-stairs-draw { to { stroke-dashoffset: 0; } }
-.pb-splash-dot-motion { opacity: 0; animation: pb-dot-awake .35s ease .44s forwards; }
-.pb-splash-dot-rest { display: none; }
-@keyframes pb-dot-awake { to { opacity: 1; } }
-.pb-splash-atmosphere { position: absolute; inset: 0; pointer-events: none; }
-.pb-splash-petal {
-  position: absolute;
-  z-index: 0;
-  font-family: Georgia, serif;
-  font-size: clamp(16px, 2.2vw, 27px);
-  opacity: 0;
-  animation: pb-petal-drift 3.2s ease-in-out infinite;
-}
-@keyframes pb-petal-drift {
-  0%, 100% { opacity: 0; transform: translate3d(0, 8px, 0) rotate(-10deg); }
-  28%, 72% { opacity: .58; }
-  50% { opacity: .74; transform: translate3d(0, -6px, 0) rotate(7deg); }
-}
-.pb-splash-word { position: relative; z-index: 1; color: #2d2a24; opacity: 0; animation: pb-fadeup .42s ease 1.05s forwards; }
-.pb-splash-word span { color: #a85e4f; }
-.pb-splash-tag { position: relative; z-index: 1; color: #706958; opacity: 0; animation: pb-fadeup .42s ease 1.28s forwards; }
-.pb-splash-skip { position: absolute; z-index: 2; top: max(18px, env(safe-area-inset-top)); right: max(18px, env(safe-area-inset-right)); padding: 7px 12px; border: 1px solid rgba(92, 78, 57, .22); border-radius: 999px; color: #625b50; background: rgba(255, 253, 248, .72); font-size: .78rem; cursor: pointer; }
-.pb-splash-skip:hover, .pb-splash-skip:focus-visible { border-color: #a85e4f; outline: 2px solid transparent; color: #2d2a24; }
 
 /* The writing desk: broad margins, paper warmth, and an honest pen line. */
 .pb-writing-space {
@@ -3843,31 +3792,16 @@ html[data-pb-splash-seen='true'] .pb-splash{display:none!important}
   .pb-author-badge-item { width: 22px; height: 22px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .pb-splash-stairs, .pb-splash-dot-motion, .pb-splash-word, .pb-splash-tag, .pb-splash-petal { animation: none !important; }
-  .pb-splash-stairs { stroke-dashoffset: 0 !important; }
-  .pb-splash-word, .pb-splash-tag { opacity: 1 !important; }
-  .pb-splash-petal { display: none !important; }
-  .pb-splash-dot-motion { display: none !important; }
-  .pb-splash-dot-rest { display: inline; }
   .anim-write-open { animation: none !important; }
   .anim-write-open .pb-writing-paper::before, .anim-write-open .pb-writing-paper::after { animation: none !important; display: none; }
   .anim-read-arrival::before, .anim-rehearse-arrival::before { display: none !important; }
   ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }
 }
-html[data-reduced-motion='true'] .pb-splash-stairs,
-html[data-reduced-motion='true'] .pb-splash-dot-motion,
-html[data-reduced-motion='true'] .pb-splash-word,
-html[data-reduced-motion='true'] .pb-splash-tag,
-html[data-reduced-motion='true'] .pb-splash-petal,
 html[data-reduced-motion='true'] .anim-write-open,
 html[data-reduced-motion='true'] .anim-read-arrival,
 html[data-reduced-motion='true'] .anim-rehearse-arrival::before,
 html[data-reduced-motion='true'] ::view-transition-old(root),
 html[data-reduced-motion='true'] ::view-transition-new(root) { animation: none !important; }
-html[data-reduced-motion='true'] .pb-splash-stairs { stroke-dashoffset: 0 !important; }
-html[data-reduced-motion='true'] .pb-splash-word,
-html[data-reduced-motion='true'] .pb-splash-tag { opacity: 1 !important; }
-html[data-reduced-motion='true'] .pb-splash-petal,
 html[data-reduced-motion='true'] .anim-write-open .pb-writing-paper::before,
 html[data-reduced-motion='true'] .anim-write-open .pb-writing-paper::after { display: none !important; }
 html[data-reduced-motion='true'] .anim-read-arrival,

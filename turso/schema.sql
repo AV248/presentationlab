@@ -148,6 +148,34 @@ create table if not exists presentation_views (
 );
 create index if not exists presentation_views_recent_idx on presentation_views (created_at desc);
 
+-- Reactions belong beside the canonical presentation, not beside the retired
+-- Supabase `speeches` compatibility table. The write API checks publication,
+-- toggles this row, and applies its counter delta in one Turso transaction.
+create table if not exists presentation_reactions (
+  uid        text not null,
+  speech_id  text not null,
+  kind       text not null check (kind in ('like', 'dislike')),
+  created_at text not null,
+  updated_at text not null,
+  primary key (uid, speech_id)
+);
+create index if not exists presentation_reactions_speech_idx
+  on presentation_reactions (speech_id, kind);
+create index if not exists presentation_reactions_reader_idx
+  on presentation_reactions (uid, updated_at desc);
+
+-- New share increments are deduplicated per signed-in person and presentation.
+-- Existing `library.shares` totals remain the historical baseline; subsequent
+-- counts are recorded here and in the same transaction.
+create table if not exists presentation_shares (
+  uid        text not null,
+  speech_id  text not null,
+  created_at text not null,
+  primary key (uid, speech_id)
+);
+create index if not exists presentation_shares_speech_idx
+  on presentation_shares (speech_id);
+
 -- Legacy compatibility table from the prior rebuild. New badge ownership is
 -- in Supabase (`badge_assignments`) and this table is no longer read or written.
 -- It remains in place so an old database is upgraded without deleting evidence.

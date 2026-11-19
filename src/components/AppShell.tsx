@@ -27,7 +27,7 @@ import { useSettings } from '../store/settings';
 import { festivalById } from '../data/festivals';
 import { useProfile } from '../store/profile';
 import { normalizeUsername } from '../lib/identity';
-import { fetchSiteFestival, SUPPORT_EMAIL } from '../services/profiles';
+import { fetchSiteFestival } from '../services/profiles';
 import { fetchSiteNotice, type PublicSiteNotice } from '../services/siteNotice';
 import { useCloud } from '../store/cloud';
 import { useAuth } from '../store/auth';
@@ -208,7 +208,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <AccountChip />
         <HandleLink />
-        <a className="pb-navlink" href={`mailto:${SUPPORT_EMAIL}`} title={`Email ${SUPPORT_EMAIL}`}><span className="pb-navlink-label">Contact support</span></a>
+        <NavLink className="pb-navlink" to="/contact" title="Send a private message"><span className="pb-navlink-label">Contact support</span></NavLink>
         <CloudBadge />
       </aside>
 

@@ -22,7 +22,7 @@
  */
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { ROOT } from './lib/env.mjs';
@@ -176,6 +176,26 @@ try {
 
   const libraryPost = await fetch(`${BASE}/api/library`, { method: 'POST' });
   expect('the reading-room endpoint refuses POST with an explanation', libraryPost.status === 405, `status ${libraryPost.status}`);
+
+  const contactPage = await get('/contact');
+  expect('the private contact form route answers', contactPage.status === 200 && contactPage.body.includes('Send a message'), `status ${contactPage.status}`);
+  expect('the contact form is excluded from search indexing', /noindex/i.test(contactPage.body));
+  const contactClient = readFileSync(resolve(ROOT, 'src/screens/ContactPage.tsx'), 'utf8');
+  expect(
+    'the signed-in contact form forwards its Clerk bearer token',
+    contactClient.includes('clerkSessionToken()') && contactClient.includes('Authorization: `Bearer ${token}`'),
+  );
+  const privateReportPage = await get('/admin/report');
+  expect('the admin report page is not indexed', privateReportPage.status === 200 && /noindex/i.test(privateReportPage.body));
+  expect('the report body is not embedded in the unauthenticated page HTML', !privateReportPage.body.includes('The review found a high-impact mismatch'));
+
+  const reportApi = await get('/api/admin/report');
+  expect('the report API fails closed without an administrator session', reportApi.status !== 200 && !reportApi.body.includes('findings'), `status ${reportApi.status}`);
+  expect('the protected report API is private and not cached', (reportApi.headers.get('cache-control') ?? '').includes('no-store') && (reportApi.headers.get('x-robots-tag') ?? '').includes('noindex'));
+  const inboxApi = await get('/api/admin/inbox');
+  expect('the admin inbox API fails closed without an administrator session', inboxApi.status !== 200 && !inboxApi.body.includes('contact_email'), `status ${inboxApi.status}`);
+  const anonymousContact = await fetch(`${BASE}/api/contact`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'report', message: 'This must not be saved anonymously.' }) });
+  expect('contact submissions require a verified session', anonymousContact.status !== 201, `status ${anonymousContact.status}`);
 
   const syncGet = await get('/api/sync-library');
   expect('the rebuild endpoint refuses GET with an explanation', syncGet.status === 405 && syncGet.body.includes('method_not_allowed'), `status ${syncGet.status}`);

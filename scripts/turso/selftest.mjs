@@ -404,7 +404,7 @@ try {
   const library = await bundle('app/api/library/route.ts', 'library.mjs');
   const listed = await call(library, '/api/library?max=3');
   expect('GET /api/library lists the newest Turso work', listed.status === 200 && listed.json.items.length === 3, `status ${listed.status}`);
-  expect('public library listings have short cache headers', String(listed.headers['cache-control']).includes('s-maxage=60'), listed.headers['cache-control']);
+  expect('public library listings use a brief cache window after counter updates', String(listed.headers['cache-control']).includes('s-maxage=10'), listed.headers['cache-control']);
   expect('author profile photo metadata survives the public read', listed.json.items.every((item) => item.authorPhotoURL === 'https://example.test/aavrit.jpg'));
 
   const one = await call(library, '/api/library?id=s3');

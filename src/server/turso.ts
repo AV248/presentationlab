@@ -115,6 +115,8 @@ export async function ensureLibraryColumns(db: Client): Promise<number> {
   // library table has been upgraded, never midway through the schema paste.
   await db.execute('create index if not exists library_public_recent_idx on library (moderation_status, published_at desc)');
   await db.execute('create index if not exists library_official_idx on library (official_slug, published_at desc)');
+  await db.execute('create index if not exists library_writer_recent_idx on library (lower(username), moderation_status, published_at desc, id desc)');
+  await db.execute('create index if not exists library_writer_address_idx on library (lower(username), folder, slug, moderation_status, published_at desc)');
 
   // A legacy table may already have rows but no FTS index yet. Rebuild once
   // before safety backfill updates touch the table-wide FTS update trigger.

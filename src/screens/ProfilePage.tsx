@@ -11,7 +11,7 @@ import { useGate } from '../components/SignIn';
 import { validateUsername, normalizeUsername, RESERVED_HANDLES } from '../lib/identity';
 import { claimUsername, fetchHandleState, fetchProfile, isUsernameAvailable, type PublicProfile } from '../services/profiles';
 import { workPath, slugifySegment, presentationPath } from '../lib/paths';
-import { fetchSpeechesByUsername, type CloudSpeech } from '../services/data';
+import { fetchSpeechesByUsernameResult, type CloudSpeech } from '../services/data';
 import { shortUrl } from '../lib/share';
 import { copyText } from '../lib/platform';
 import { usePageMeta } from '../lib/usePageMeta';
@@ -26,6 +26,7 @@ export interface HandleSeed {
   profile: PublicProfile | null;
   works: CloudSpeech[];
   handleState: 'held' | 'free' | 'unknown';
+  worksStatus?: 'available' | 'unavailable';
 }
 
 /** /:username — everything about a person and their work.
@@ -47,6 +48,7 @@ export function HandlePage({ initial }: { initial?: HandleSeed } = {}) {
     initial?.handleState ?? null,
   );
   const [loaded, setLoaded] = useState(Boolean(initial));
+  const [worksStatus, setWorksStatus] = useState<'available' | 'unavailable'>(initial?.worksStatus ?? 'available');
   const me = useProfile(); const user = useAuth((s) => s.user);
   const mine = useLibrary((s) => s.mine);
   const isMine = Boolean(username) && me.username === username;
@@ -57,10 +59,19 @@ export function HandlePage({ initial }: { initial?: HandleSeed } = {}) {
     if (initial) return;
     let alive = true;
     void (async () => {
-      const state = await fetchHandleState(username);
-      const p = await fetchProfile(username);
-      const w = await fetchSpeechesByUsername(username);
-      if (!alive) return; setHandleState(state); setProfile(p); setWorks(w); setLoaded(true);
+      // Client-side route transitions receive the same parallel read pattern as
+      // the server-rendered route rather than waiting on three serial requests.
+      const [state, p, result] = await Promise.all([
+        fetchHandleState(username),
+        fetchProfile(username),
+        fetchSpeechesByUsernameResult(username),
+      ]);
+      if (!alive) return;
+      setHandleState(state);
+      setProfile(p);
+      setWorks(result.items);
+      setWorksStatus(result.status === 'error' ? 'unavailable' : 'available');
+      setLoaded(true);
     })();
     return () => { alive = false; };
   }, [username, initial]);
@@ -82,6 +93,17 @@ export function HandlePage({ initial }: { initial?: HandleSeed } = {}) {
     if (!folder) {
       const inFolder = [...works, ...localWorks].filter((w) => (w.folder ?? '') === slug);
       if (inFolder.length) return <HandleFolder username={username} folder={slug} works={inFolder} />;
+    }
+    if (loaded && worksStatus === 'unavailable') {
+      return (
+        <div className="pb-panel" style={{ padding: 28, textAlign: 'center' }} role="status">
+          <h2 style={{ marginBottom: 8 }}>This work could not be checked</h2>
+          <p className="pb-muted" style={{ lineHeight: 1.65, marginBottom: 14 }}>
+            The reading room did not answer, so we will not mistake a connection problem for a missing presentation.
+          </p>
+          <button type="button" className="pb-btn" onClick={() => window.location.reload()}>Try again</button>
+        </div>
+      );
     }
     if (loaded || isMine) return <NotFoundHandle username={username} what="speech" />;
     return <p className="pb-muted" style={{ padding: 24 }}>Opening @{username}/{slug}…</p>;
@@ -132,7 +154,7 @@ export function HandlePage({ initial }: { initial?: HandleSeed } = {}) {
         <div style={{ display:'flex', gap:14, flexWrap:'wrap', marginTop:12 }} className="pb-muted">
           {display?.location && <span><MapPin size={13} style={{display:'inline',verticalAlign:'-2px'}} /> {display.location}</span>}
           {display?.website && <a href={display.website.startsWith('http') ? display.website : `https://${display.website}`} target="_blank" rel="noopener noreferrer"><Link2 size={13} style={{display:'inline',verticalAlign:'-2px'}} /> {display.website}</a>}
-          <span>{works.length + localWorks.length} published</span>
+          <span>{works.length >= 60 ? '60+' : works.length + localWorks.length} published</span>
         </div>
         {display?.signature && <p style={{ fontFamily:'var(--x-font-display)', fontStyle:'italic', marginTop:14 }}>— {display.signature}</p>}
         <div style={{ display:'flex', gap:8, marginTop:16, flexWrap:'wrap' }}>
@@ -142,7 +164,7 @@ export function HandlePage({ initial }: { initial?: HandleSeed } = {}) {
       </section>
       <section>
         <h2 style={{ fontSize:'1.1rem', marginBottom:12 }}>Their work</h2>
-        {[...works, ...localWorks].length === 0 && <div className="pb-panel" style={{ padding:24 }}><p className="pb-muted">{loaded || !isMine ? 'Nothing published here yet.' : 'Publish from the Writing Desk and it will live at this address.'}</p></div>}
+        {[...works, ...localWorks].length === 0 && <div className="pb-panel" style={{ padding:24 }}><p className="pb-muted">{worksStatus === 'unavailable' ? 'The reading room could not be reached, so this list may be incomplete. Reload to try again.' : loaded || !isMine ? 'Nothing published here yet.' : 'Publish from the Writing Desk and it will live at this address.'}</p></div>}
         <div style={{ display:'grid', gap:10 }}>
           {works.map((w) => (
             <article key={w.id} className="pb-panel" style={{ padding:'16px 18px' }}>

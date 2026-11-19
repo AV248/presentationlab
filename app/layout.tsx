@@ -96,12 +96,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script
-          // Read the session flag before the browser paints the server-rendered
-          // curtain. Repeated visits skip it without a frame of flash; first
-          // visits keep the page behind the full opening animation.
-          dangerouslySetInnerHTML={{ __html: "try { if (sessionStorage.getItem('pb.splash.seen')) document.documentElement.dataset.pbSplashSeen = 'true'; } catch {}" }}
-        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="preload" as="style" href={GFonts} />

@@ -148,6 +148,8 @@ try {
   // installations have been upgraded successfully.
   await db.execute('create index if not exists library_public_recent_idx on library (moderation_status, published_at desc)');
   await db.execute('create index if not exists library_official_idx on library (official_slug, published_at desc)');
+  await db.execute('create index if not exists library_writer_recent_idx on library (lower(username), moderation_status, published_at desc, id desc)');
+  await db.execute('create index if not exists library_writer_address_idx on library (lower(username), folder, slug, moderation_status, published_at desc)');
   if (needsSafetySampleUpgrade) {
     await db.execute("insert into library_fts (library_fts) values ('rebuild')");
   }
