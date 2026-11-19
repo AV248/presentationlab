@@ -9,7 +9,7 @@
     "build": "node scripts/cards/run.mjs && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "verify": "npm run typecheck && npm run audit:secrets && npm run check:env && npm run check:schema && npm run check:pg && npm run check:reading && npm run check:library && npm run check:convex",
+    "verify": "npm run typecheck && npm run audit:secrets && npm run check:env && npm run check:schema && npm run check:pg && npm run check:http && npm run check:community && npm run check:reading && npm run check:reactions && npm run check:library && npm run check:convex",
     "verify:all": "PB_REQUIRE_PG=1 npm run verify && npm run build && npm run check:routes",
     "cards": "node scripts/cards/run.mjs",
     "audit:secrets": "node scripts/check-secrets.mjs",
@@ -20,6 +20,9 @@
     "sync:turso": "node scripts/turso/sync.mjs",
     "check:library": "node scripts/turso/selftest.mjs",
     "check:reading": "node scripts/check-reading.mjs",
+    "check:http": "node scripts/check-http.mjs",
+    "check:community": "node scripts/check-community.mjs",
+    "check:reactions": "node scripts/check-reactions.mjs",
     "check:routes": "node scripts/check-routes.mjs",
     "check:pg": "node scripts/check-pg.mjs",
     "check:convex": "node scripts/check-convex-safety.mjs"

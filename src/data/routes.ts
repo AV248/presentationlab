@@ -266,7 +266,7 @@ const SECTIONS: {
   {
     path: '/feedback',
     title: 'Feedback',
-    description: 'Send a note about Presentation Buddy directly to its maintainer.',
+    description: 'Send private product feedback to the Presentation Buddy admin inbox.',
     priority: 0.3,
     changefreq: 'monthly',
     card: null,
@@ -274,7 +274,7 @@ const SECTIONS: {
   {
     path: '/report',
     title: 'Report a problem',
-    description: 'Report a content, safety, accessibility or technical problem to Presentation Buddy.',
+    description: 'Report a content, safety, accessibility or technical problem to the private Presentation Buddy admin inbox.',
     priority: 0.3,
     changefreq: 'monthly',
     card: null,

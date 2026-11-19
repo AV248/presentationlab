@@ -1,5 +1,5 @@
 import { serverEnvAny } from './env';
-import type { PublicCommunityPost } from '../lib/community';
+import { publicCommunityAuthor, type PublicCommunityPost } from '../lib/community';
 
 const SUPABASE_URL = serverEnvAny('VITE_SUPABASE_URL', 'SUPABASE_URL').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = serverEnvAny('VITE_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY');
@@ -17,7 +17,7 @@ function mapPost(row: Record<string, unknown>): PublicCommunityPost | null {
     id,
     title: text(row.title ?? row.Title).trim() || 'Untitled note',
     body: text(row.body ?? row.Content ?? row.content),
-    author: text(row.author ?? row.Author).trim() || 'Anonymous',
+    author: publicCommunityAuthor(row.author ?? row.Author),
     uid: text(row.uid),
     createdAt,
     updatedAt: text(row.updated_at ?? row.updatedAt) || createdAt,

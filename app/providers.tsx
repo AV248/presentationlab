@@ -8,7 +8,6 @@ import { Toasts } from '@/components/Toasts';
 import { CommandPalette } from '@/components/CommandPalette';
 import { HelpDialog, ThemeSheet } from '@/components/Overlays';
 import { SignInSheet } from '@/components/SignIn';
-import { Splash } from '@/components/Splash';
 import { FeedbackDialog } from '@/components/FeedbackDialog';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AuthProvider } from '@/components/AuthProvider';
@@ -93,7 +92,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthProvider>
-      <Splash />
       <Ambient />
       <ScrollToTop />
       <AppShell>

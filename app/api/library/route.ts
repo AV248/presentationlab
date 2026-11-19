@@ -1,9 +1,9 @@
-import { readLibrary, readSpeechResult, readWriter, searchLibrary } from '@/server/reading';
+import { readLibrary, readSpeechResult, readWriterResult, searchLibraryResult } from '@/server/reading';
 import { TURSO_CONFIGURED, libraryTableExists, turso } from '@/server/turso';
 
 export const runtime = 'nodejs';
 
-const EDGE_TTL_SECONDS = 60;
+const EDGE_TTL_SECONDS = 10;
 
 function json(status: number, body: unknown, cache = false) {
   return Response.json(body, {
@@ -29,25 +29,7 @@ export function OPTIONS() {
   return new Response(null, { status: 204, headers: { Allow: 'GET, HEAD, OPTIONS' } });
 }
 
-async function probeLibrary(): Promise<string | null> {
-  if (!TURSO_CONFIGURED) return 'TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are not configured.';
-  const db = await turso();
-  if (!db) return 'The Turso connection could not be opened.';
-  try {
-    if (!await libraryTableExists(db)) return 'The Turso schema is missing; run npm run db:turso.';
-    await db.execute('select count(*) as n from library');
-    return null;
-  } catch {
-    return 'Turso is configured but did not answer the library query.';
-  } finally {
-    db.close();
-  }
-}
-
 export async function GET(request: Request) {
-  const problem = await probeLibrary();
-  if (problem) return json(503, { error: 'library_unavailable', message: problem });
-
   const url = new URL(request.url);
   const id = (url.searchParams.get('id') ?? '').trim();
   const username = (url.searchParams.get('username') ?? '').trim().toLowerCase();
@@ -61,10 +43,15 @@ export async function GET(request: Request) {
       if (result.source === 'none') return json(503, { error: 'library_unavailable' });
       return json(200, { items: result.speech ? [result.speech] : [] });
     }
-    if (username) return json(200, { items: await readWriter(username, max) }, true);
+    if (username) {
+      const page = await readWriterResult(username, max);
+      if (page.source === 'none') return json(503, { error: 'library_unavailable' });
+      return json(200, { items: page.items, total: page.items.length }, true);
+    }
     if (term) {
-      const items = await searchLibrary(term, max);
-      return json(200, { items, total: items.length }, true);
+      const page = await searchLibraryResult(term, max);
+      if (page.source === 'none') return json(503, { error: 'library_unavailable' });
+      return json(200, { items: page.items, total: page.items.length }, true);
     }
     const page = await readLibrary({ max, offset });
     if (page.source === 'none') return json(503, { error: 'library_unavailable' });

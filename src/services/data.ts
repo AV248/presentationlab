@@ -8,8 +8,8 @@
  *
  *   users / profiles — the person's account and public profile.
  *   handles          — the username lock: one row per claimed name.
- *   reactions        — one row per (person, speech): like or dislike.
- *   shares           — one row per (person, speech) share.
+ *   reactions / shares — one row per signed-in person and Turso presentation.
+ *                        The server writes both beside canonical content.
  *   admins           — role rows: 'owner' | 'admin'.
  *   adminPrivate     — the second lock; readable only by a role-holder.
  *   ads / sponsors   — sponsored cards and optional sponsor slots.
@@ -18,15 +18,16 @@
  * The legacy `speeches` table is retained for additive import and compatibility;
  * new presentations are written directly to Turso, not mirrored here.
  *
- * Nothing here invents numbers. Counters only ever move by real increments
- * tied to a signed-in person, and the two that must be atomic — reacting and
- * sharing — are single database functions rather than a sequence of writes.
+ * Nothing here invents numbers. Engagement counters move only from verified
+ * signed-in actions; reaction/share rows and counters commit together in a
+ * server-side Turso transaction.
  */
 
-import { loadBackend } from './backend';
+import { loadBackend, BACKEND_ENABLED } from './backend';
 import { fetchLibrary, fetchOne } from './backend/library';
 import { clerkConvexToken, clerkSessionToken } from './clerk';
 import { mapSpeechRow, str, num, isoTimestamp, type CloudSpeech } from '../lib/speech';
+import { publicCommunityAuthor, type PublicCommunityPost } from '../lib/community';
 
 export type CloudStatus = 'off' | 'connecting' | 'online' | 'error';
 export type Role = 'owner' | 'admin' | null;
@@ -228,56 +229,43 @@ export interface ReactionState {
   dislikes: number;
 }
 
+async function signedPresentationRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = await clerkSessionToken();
+  if (!token) throw new Error('Sign in again to continue.');
+  const headers = new Headers(init.headers);
+  headers.set('Authorization', `Bearer ${token}`);
+  headers.set('Accept', 'application/json');
+  if (init.body) headers.set('Content-Type', 'application/json');
+  const response = await fetch(path, { ...init, headers, cache: 'no-store' });
+  const payload = await response.json().catch(() => ({})) as { message?: string; error?: string } & T;
+  if (!response.ok) throw new Error(payload.message ?? payload.error ?? `Request failed (${response.status}).`);
+  return payload;
+}
+
 /**
- * Sets or clears a reaction.
- *
- * The whole operation — the reaction row, the speech's counters and the
- * author's points — happens inside one Postgres function
- * (`public.react_to_speech`), so it is atomic on the server rather than
- * transactional in a browser tab. Clicking the same reaction twice takes it
- * back; points are +1 per like, −1 per 3 dislikes, exactly as on the original
- * site.
- *
- * `uid` is passed for the reader's own bookkeeping; the function takes the
- * identity from the verified token, so it cannot be spoofed from here.
+ * Toggle a reaction in Turso, where the canonical presentation and its
+ * counter live. The route verifies the Clerk token and commits the reaction
+ * row plus counter delta in one transaction.
  */
 export async function setReaction(
   speechId: string,
   uid: string,
   kind: ReactionKind,
 ): Promise<ReactionState> {
-  const bundle = await fs();
-  if (!bundle) throw new Error('Sign-in is required to react.');
-  const { rpc } = bundle;
-
-  const result = await rpc<{ kind: string | null; likes: number; dislikes: number }>(
-    'react_to_speech',
-    { p_speech_id: speechId, p_kind: kind },
-  );
-  void uid;
-  return {
-    kind: (result?.kind ?? null) as ReactionKind | null,
-    likes: Number(result?.likes ?? 0),
-    dislikes: Number(result?.dislikes ?? 0),
-  };
+  void uid; // identity is taken from the verified Clerk session, never the body
+  return signedPresentationRequest<ReactionState>('/api/presentations/reactions', {
+    method: 'POST',
+    body: JSON.stringify({ id: speechId, kind }),
+  });
 }
 
-
 export async function fetchMyReactions(uid: string): Promise<Record<string, ReactionKind>> {
-  const bundle = await fs();
-  if (!bundle || !uid) return {};
-  const { fs: f, db } = bundle;
+  if (!uid) return {};
   try {
-    const snap = await f.getDocs(
-      f.query(f.collection(db, 'reactions'), f.where('uid', '==', uid), f.limit(300)),
+    const result = await signedPresentationRequest<{ reactions: Record<string, ReactionKind> }>(
+      '/api/presentations/reactions',
     );
-    const out: Record<string, ReactionKind> = {};
-    for (const doc of snap.docs) {
-      const data = doc.data();
-      const key = str(data.speechId);
-      if (key) out[key] = str(data.kind) === 'dislike' ? 'dislike' : 'like';
-    }
-    return out;
+    return Object.fromEntries(Object.entries(result.reactions ?? {}).filter(([, kind]) => kind === 'like' || kind === 'dislike'));
   } catch {
     return {};
   }
@@ -287,19 +275,14 @@ export async function fetchMyReactions(uid: string): Promise<Record<string, Reac
 /* shares — signed in only                                            */
 /* ------------------------------------------------------------------ */
 
-/**
- * Count a share, once per person per speech.
- *
- * `public.record_share` inserts the row and moves the counter in one
- * statement, so two taps in another tab cannot double-count; a repeat share by
- * the same person is a no-op that returns the current number.
- */
+/** Count a share once per signed-in person in the canonical Turso store. */
 export async function recordShare(speechId: string, uid: string): Promise<number> {
-  const bundle = await fs();
-  if (!bundle) throw new Error('Sign-in is required to share.');
   void uid;
-  const total = await bundle.rpc<number>('record_share', { p_speech_id: speechId });
-  return num(total);
+  const result = await signedPresentationRequest<{ shares: number }>('/api/presentations/share', {
+    method: 'POST',
+    body: JSON.stringify({ id: speechId }),
+  });
+  return num(result.shares);
 }
 
 /* ------------------------------------------------------------------ */
@@ -317,26 +300,25 @@ export interface Post {
 }
 
 export async function fetchPosts(): Promise<Post[]> {
-  const bundle = await fs();
-  if (!bundle) return [];
-  const { fs: f, db } = bundle;
+  if (!BACKEND_ENABLED) return [];
   try {
-    const snap = await f.getDocs(f.query(f.collection(db, 'bloggerblogs'), f.limit(100)));
-    return snap.docs
-      .map((doc) => {
-        const data = doc.data();
-        const created = isoTimestamp(data.createdAt ?? data.Date);
-        return {
-          id: doc.id,
-          title: str(data.Title ?? data.title, 'Untitled note'),
-          body: str(data.Content ?? data.body ?? data.content),
-          author: str(data.Author ?? data.author, 'Anonymous'),
-          uid: str(data.uid),
-          createdAt: created,
-          createdMs: created ? new Date(created).getTime() : 0,
-        };
-      })
-      .sort((a, b) => b.createdMs - a.createdMs);
+    // Public community reads go through the server-side mapper so legacy rows
+    // whose Author field is an email are never delivered to a visitor's browser.
+    const response = await fetch('/api/community/posts', { cache: 'no-store' });
+    if (!response.ok) return [];
+    const payload = await response.json() as { items?: PublicCommunityPost[] };
+    return (payload.items ?? []).map((post) => {
+      const createdAt = isoTimestamp(post.createdAt);
+      return {
+        id: post.id,
+        title: post.title,
+        body: post.body,
+        author: publicCommunityAuthor(post.author),
+        uid: post.uid,
+        createdAt,
+        createdMs: createdAt ? new Date(createdAt).getTime() : 0,
+      };
+    });
   } catch {
     return [];
   }
@@ -349,7 +331,7 @@ export async function publishPost(title: string, body: string, uid: string, auth
   await f.addDoc(f.collection(db, 'bloggerblogs'), {
     Title: title,
     Content: body,
-    Author: author,
+    Author: publicCommunityAuthor(author),
     uid,
     createdAt: f.serverTimestamp(),
   });
@@ -386,32 +368,14 @@ export const pointsFor = (likes: number, dislikes: number) =>
   Math.max(0, likes - Math.floor(dislikes / 3));
 
 export async function fetchContributors(): Promise<Contributor[]> {
-  const bundle = await fs();
-  if (!bundle) return [];
-  const { fs: f, db } = bundle;
   try {
-    // One row per person. `likes_received`/`dislikes_received` are maintained
-    // by public.react_to_speech, so the points column is always explainable
-    // from the reactions themselves.
-    const snap = await f.getDocs(
-      f.query(f.collection(db, 'users'), f.orderBy('likesReceived', 'desc'), f.limit(200)),
-    );
-    const rows = snap.docs.map((doc) => {
-      const data = doc.data();
-      const likesReceived = num(data.likesReceived);
-      const dislikesReceived = num(data.dislikesReceived);
-      return {
-        uid: doc.id,
-        name: str(data.displayName, 'Anonymous'),
-        email: typeof data.email === 'string' ? data.email : null,
-        photoURL: typeof data.photoURL === 'string' ? data.photoURL : null,
-        posts: num(data.points),
-        likesReceived,
-        dislikesReceived,
-        points: pointsFor(likesReceived, dislikesReceived),
-      };
-    });
-    return rows.sort((a, b) => b.points - a.points || b.likesReceived - a.likesReceived);
+    // The server derives engagement from Turso's canonical presentations and
+    // exposes only public name/photo fields; profile email and stale Supabase
+    // counters never enter the public leaderboard response.
+    const response = await fetch('/api/community/contributors', { cache: 'no-store' });
+    if (!response.ok) return [];
+    const payload = await response.json() as { items?: Omit<Contributor, 'email'>[] };
+    return (payload.items ?? []).map((person) => ({ ...person, email: null }));
   } catch {
     return [];
   }
@@ -613,7 +577,18 @@ export async function moveSpeech(
   await updateSpeechDoc(id, { username, folder, slug });
 }
 
+export async function fetchSpeechesByUsernameResult(username: string): Promise<CloudResult> {
+  try {
+    const page = await fetchLibrary({ username, max: 200 });
+    if (page.source === 'none') {
+      return { items: [], status: 'error', error: page.error ?? 'The reading room could not be reached.' };
+    }
+    return { items: page.items.map((row) => mapSpeechRow(String(row.id ?? ''), row)), status: 'online' };
+  } catch (error) {
+    return { items: [], status: 'error', error: describeError(error) };
+  }
+}
+
 export async function fetchSpeechesByUsername(username: string): Promise<CloudSpeech[]> {
-  const page = await fetchLibrary({ username, max: 200 });
-  return page.items.map((row) => mapSpeechRow(String(row.id ?? ''), row));
+  return (await fetchSpeechesByUsernameResult(username)).items;
 }

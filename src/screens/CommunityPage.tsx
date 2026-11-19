@@ -7,7 +7,7 @@ import { useCommunity } from '../hooks/useCommunity';
 import { useAuth } from '../store/auth';
 import { useUi } from '../store/ui';
 import { publishPost, deletePost, type Post } from '../services/data';
-import { communityPostPath } from '../lib/community';
+import { communityPostPath, publicCommunityAuthor } from '../lib/community';
 import { BACKEND_ENABLED } from '../services/backend';
 import { formatCount } from '../lib/text';
 import { useGate } from '../components/SignIn';
@@ -37,6 +37,7 @@ export function CommunityPage({ initialPosts = [] }: { initialPosts?: Post[] }) 
   const [posting, setPosting] = useState(false);
 
   const podium = contributors.slice(0, 3);
+  const postAuthor = publicCommunityAuthor(user?.displayName);
 
   const submit = () => {
     gate(() => {
@@ -45,7 +46,7 @@ export function CommunityPage({ initialPosts = [] }: { initialPosts?: Post[] }) 
         return;
       }
       setPosting(true);
-      publishPost(title.trim(), body.trim(), user!.uid, user!.displayName ?? user!.email ?? 'Anonymous')
+      publishPost(title.trim(), body.trim(), user!.uid, postAuthor)
         .then(() => {
           setTitle('');
           setBody('');
@@ -202,7 +203,7 @@ export function CommunityPage({ initialPosts = [] }: { initialPosts?: Post[] }) 
                 <div style={{ flex: '1 1 170px', minWidth: 0 }}>
                   <div style={{ fontWeight: 600 }}>{person.name}</div>
                   <div className="pb-muted" style={{ fontSize: '0.74rem' }}>
-                    {person.posts} {person.posts === 1 ? 'post' : 'posts'} ·{' '}
+                    {person.posts} {person.posts === 1 ? 'speech' : 'speeches'} ·{' '}
                     {formatCount(person.likesReceived)} likes · {formatCount(person.dislikesReceived)}{' '}
                     dislikes
                   </div>
@@ -251,7 +252,7 @@ export function CommunityPage({ initialPosts = [] }: { initialPosts?: Post[] }) 
                 {posting ? <span className="pb-spinner" /> : <Feather size={15} />} Pin it to the wall
               </button>
               <span className="pb-muted" style={{ fontSize: '0.76rem' }}>
-                Posting as {user.displayName ?? user.email}
+                Posting as {postAuthor === 'Anonymous' ? 'you' : postAuthor}
               </span>
             </div>
           </div>
@@ -291,7 +292,7 @@ export function CommunityPage({ initialPosts = [] }: { initialPosts?: Post[] }) 
                   className="pb-muted"
                   style={{ display: 'flex', gap: 10, marginTop: 10, fontSize: '0.74rem', alignItems: 'center' }}
                 >
-                  <span>{post.author}</span>
+                  <span>{publicCommunityAuthor(post.author)}</span>
                   <span>{post.createdAt ? new Date(post.createdAt).toLocaleDateString('en-US', { timeZone: 'UTC' }) : ''}</span>
                   {(role === 'admin' || role === 'owner') && (
                     <button

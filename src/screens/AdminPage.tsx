@@ -64,6 +64,7 @@ import { BACKEND_ENABLED } from '../services/backend';
 import { EnvCheckPanel } from '../components/EnvCheckPanel';
 import { ADS_ENABLED } from '../services/ads';
 import { formatCount } from '../lib/text';
+import { AdminInboxPanel } from './AdminInboxPanel';
 
 /**
  * The workspace for role-holders. It is deliberately unremarkable from
@@ -72,7 +73,7 @@ import { formatCount } from '../lib/text';
  * already holds the 'admin' or 'owner' role in the admins collection.
  */
 
-type Tab = 'overview' | 'ads' | 'people' | 'badges' | 'sources' | 'moderation' | 'notice' | 'content' | 'site' | 'setup';
+type Tab = 'overview' | 'inbox' | 'ads' | 'people' | 'badges' | 'sources' | 'moderation' | 'notice' | 'content' | 'site' | 'setup';
 
 
 export function AdminPage() {
@@ -304,6 +305,7 @@ export function AdminPage() {
         {(
           [
             ['overview', 'Overview'],
+            ['inbox', 'Private inbox'],
             ['people', isOwner ? 'People & roles' : 'People'],
             ['badges', 'Badges'],
             ['sources', 'Source review'],
@@ -347,10 +349,15 @@ export function AdminPage() {
                 below are the same ones visitors see. Nothing on the public site reveals who
                 holds a role; this workspace is the only place it shows.
               </p>
-              <a className="pb-btn pb-btn-sm pb-btn-ghost" href="/dbms"><ExternalLink size={13} /> Open database health</a>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <a className="pb-btn pb-btn-sm pb-btn-ghost" href="/dbms"><ExternalLink size={13} /> Open database health</a>
+                <a className="pb-btn pb-btn-sm" href="/admin/report"><FileText size={13} /> Open deep review report</a>
+              </div>
           </div>
         </section>
       )}
+
+      {tab === 'inbox' && <AdminInboxPanel />}
 
       {tab === 'ads' && (
         <section>

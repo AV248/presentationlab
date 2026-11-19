@@ -2,7 +2,13 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { HandlePage } from '@/screens/ProfilePage';
 import { JsonLd } from '@/components/JsonLd';
-import { readHandleState, readProfile, readWriter, type PublicProfile } from '@/server/reading';
+import {
+  readPublicHandle,
+  readWriterResult,
+  readWriterWork,
+  readWriterWorkResult,
+  type PublicProfile,
+} from '@/server/reading';
 import { normalizeUsername, RESERVED_HANDLES } from '@/lib/identity';
 import { presentationPath } from '@/lib/paths';
 import { absoluteUrl } from '@/lib/seo';
@@ -12,16 +18,8 @@ function isReserved(username: string): boolean {
   return RESERVED_HANDLES.has(username);
 }
 
-function findWork(rest: string[] | undefined, username: string, works: CloudSpeech[]): CloudSpeech | null {
-  const pieces = Array.isArray(rest) ? rest : [];
-  if (pieces.length < 1 || pieces.length > 2) return null;
-  const slug = pieces[pieces.length - 1] ?? '';
-  const folder = pieces.length > 1 ? pieces[0] ?? '' : '';
-  const withUsername = (work: CloudSpeech) => ({ ...work, username: work.username || username });
-  const exact = works.find((work) => (work.folder ?? '') === folder && ((work.slug ?? '') === slug || work.id === slug));
-  const legacy = !folder ? works.find((work) => (work.slug ?? '') === slug || work.id === slug) : undefined;
-  const match = exact ?? legacy;
-  return match ? withUsername(match) : null;
+function isValidHandle(username: string): boolean {
+  return /^[a-z0-9_]{3,24}$/.test(username);
 }
 
 function profileStructuredData(profile: PublicProfile, username: string): Record<string, unknown> {
@@ -68,12 +66,17 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { username: raw, rest } = await params;
   const username = normalizeUsername(raw ?? '');
-  if (!username || isReserved(username)) return { robots: { index: false, follow: false } };
+  if (!isValidHandle(username) || isReserved(username)) return { robots: { index: false, follow: false } };
 
-  const [profile, works] = await Promise.all([readProfile(username), rest?.length ? readWriter(username) : Promise.resolve([])]);
-  const work = findWork(rest, username, works);
-  if (rest?.length && !work) return { robots: { index: false, follow: false } };
-  if (work) {
+  if (rest?.length) {
+    if (rest.length > 2) return { robots: { index: false, follow: false } };
+    // A public content URL resolves its exact Turso row. It never downloads a
+    // writer's full (and potentially very large) profile listing just to find
+    // one title for Open Graph.
+    const key = rest[rest.length - 1] ?? '';
+    const folder = rest.length > 1 ? rest[0] ?? '' : undefined;
+    const work = await readWriterWork(username, key, folder);
+    if (!work) return { robots: { index: false, follow: false } };
     const title = `${work.title} · ${username} · Presentation Buddy`;
     const description = work.preview || `${work.title} by ${work.author || `@${username}`} on Presentation Buddy.`;
     const canonical = presentationPath({ ...work, username: work.username || username });
@@ -86,6 +89,7 @@ export async function generateMetadata({
     };
   }
 
+  const { profile } = await readPublicHandle(username);
   if (!profile) return { robots: { index: false, follow: false } };
   const title = `${profile.displayName} (@${username})`;
   const description = profile.bio || `Speeches and work by @${username} on Presentation Buddy.`;
@@ -108,16 +112,47 @@ export default async function Page({
 }) {
   const { username: raw, rest } = await params;
   const username = normalizeUsername(raw ?? '');
-  if (!username || isReserved(username)) notFound();
+  if (!isValidHandle(username) || isReserved(username)) notFound();
+  if (rest && rest.length > 2) notFound();
 
-  const [state, profile, works] = await Promise.all([
-    readHandleState(username),
-    readProfile(username),
-    readWriter(username),
-  ]);
-  if (state === 'free' && !profile) notFound();
+  const handlePromise = readPublicHandle(username);
+  let worksPromise: Promise<CloudSpeech[]>;
+  let worksStatus: 'available' | 'unavailable';
 
-  const work = findWork(rest, username, works);
+  if (!rest?.length) {
+    const workResult = await readWriterResult(username);
+    worksPromise = Promise.resolve(workResult.items);
+    worksStatus = workResult.source === 'none' ? 'unavailable' : 'available';
+  } else {
+    const key = rest[rest.length - 1] ?? '';
+    const folder = rest.length > 1 ? rest[0] ?? '' : undefined;
+    const exact = await readWriterWorkResult(username, key, folder);
+    if (exact.speech) {
+      worksPromise = Promise.resolve([exact.speech]);
+      worksStatus = 'available';
+    } else if (exact.source === 'none') {
+      worksPromise = Promise.resolve([]);
+      worksStatus = 'unavailable';
+    } else if (rest.length === 1) {
+      // A one-segment URL may be a folder listing. Only fetch the lightweight
+      // writer index after the direct content lookup did not find a work.
+      const listing = await readWriterResult(username);
+      worksPromise = Promise.resolve(listing.items);
+      worksStatus = listing.source === 'none' ? 'unavailable' : 'available';
+    } else {
+      worksPromise = Promise.resolve([]);
+      worksStatus = 'available';
+    }
+  }
+
+  const [{ handleState, profile }, works] = await Promise.all([handlePromise, worksPromise]);
+  if (handleState === 'free' && !profile) notFound();
+
+  const work = rest?.length === 1
+    ? works.find((item) => item.slug === rest[0] || item.id === rest[0])
+    : rest?.length === 2
+      ? works.find((item) => (item.folder ?? '') === rest[0] && (item.slug === rest[1] || item.id === rest[1]))
+      : null;
   const structuredData = work
     ? [presentationStructuredData(work, username)]
     : profile ? [profileStructuredData(profile, username)] : [];
@@ -125,7 +160,7 @@ export default async function Page({
   return (
     <>
       {structuredData.length ? <JsonLd data={structuredData} /> : null}
-      <HandlePage initial={{ username, profile, works, handleState: state }} />
+      <HandlePage initial={{ username, profile, works, handleState, worksStatus }} />
     </>
   );
 }
